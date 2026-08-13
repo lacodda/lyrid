@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/lacodda/lyrid/main/assets/banner.svg" alt="lyrid — a music universe" width="720">
+</p>
+
 # lyrid
 
 > A music universe: a canonical sky of artists and genres you explore through real listening.

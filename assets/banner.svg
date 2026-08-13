@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="170" viewBox="0 0 720 170"><rect width="720" height="170" rx="14" fill="#1B2126"/><g transform="translate(36 25) scale(1.2)"><polygon points="50,5 89,27.5 89,72.5 50,95 11,72.5 11,27.5" fill="#232A30" stroke="#232A30" stroke-width="9" stroke-linejoin="round"/><polygon points="50,5 89,27.5 89,72.5 50,95 11,72.5 11,27.5" fill="none" stroke="#4A8FE8" stroke-opacity="0.75" stroke-width="3.5" stroke-linejoin="round"/><text x="50" y="52" text-anchor="middle" font-family='"Cascadia Code","JetBrains Mono",Consolas,ui-monospace,monospace' font-weight="700" font-size="30" fill="#4A8FE8">ly</text><g transform="translate(0 6)" stroke-linecap="round">
+      <path d="M42 55 L38 68 L52 74 L58 62 Z" fill="none" stroke="#4A8FE8" stroke-opacity="0.2475" stroke-width="1.6" stroke-linejoin="round"/>
+      <line x1="58" y1="62" x2="66" y2="54" stroke="#4A8FE8" stroke-opacity="0.2475" stroke-width="1.6"/>
+      <circle cx="66" cy="54" r="2.9" fill="#4A8FE8" fill-opacity="0.55"/>
+      <circle cx="42" cy="55" r="1.7" fill="#4A8FE8" fill-opacity="0.4125"/>
+      <circle cx="38" cy="68" r="1.7" fill="#4A8FE8" fill-opacity="0.4125"/>
+      <circle cx="52" cy="74" r="1.7" fill="#4A8FE8" fill-opacity="0.4125"/>
+      <circle cx="58" cy="62" r="1.7" fill="#4A8FE8" fill-opacity="0.4125"/></g></g><text x="205" y="84" font-family='"Cascadia Code","JetBrains Mono",Consolas,ui-monospace,monospace' font-weight="700" font-size="46" fill="#F4F5F0">lyrid</text><text x="207" y="116" font-family='"Cascadia Code","JetBrains Mono",Consolas,ui-monospace,monospace' font-size="15" fill="#9AA3A8">a music universe</text><rect x="205" y="132" width="180" height="4" rx="2" fill="#4A8FE8"/></svg>
