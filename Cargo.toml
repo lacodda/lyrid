@@ -1,0 +1,19 @@
+[package]
+name = "lyrid"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A music universe: a canonical sky of artists and genres you explore through real listening"
+license = "MIT"
+repository = "https://github.com/lacodda/lyrid"
+keywords = ["music", "discovery", "graph", "exploration"]
+categories = ["multimedia"]
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }

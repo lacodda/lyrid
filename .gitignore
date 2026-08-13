@@ -1,0 +1,23 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node (web frontend and docs site)
+node_modules/
+dist/
+.astro/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local data dumps (imported via pipelines, never committed)
+/data/
