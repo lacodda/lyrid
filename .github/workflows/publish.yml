@@ -3,9 +3,11 @@ name: Publish
 # Triggered by the tag push directly (not the release event): releases here
 # are created by release.yml with GITHUB_TOKEN, and such events do not start
 # other workflows.
+#
+# The tag trigger is held back until the crate exists on crates.io and trusted
+# publishing is configured for it (possible only after the first, manual
+# publish). Until then a tag would produce a guaranteed-red run.
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
