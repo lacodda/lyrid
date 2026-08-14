@@ -33,6 +33,10 @@ enum ImportCommand {
     /// export of MusicBrainz (mbdump.tar.bz2).
     #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
     Musicbrainz(import::musicbrainz::Args),
+    /// Import the artist similarity graph from the ListenBrainz relations
+    /// dataset. Requires the MusicBrainz import to have run first.
+    #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
+    Listenbrainz(import::listenbrainz::Args),
 }
 
 #[tokio::main]
@@ -58,6 +62,10 @@ async fn main() -> Result<()> {
         Some(Command::Import(ImportCommand::Musicbrainz(args))) => {
             let pool = connect(&config).await?;
             import::musicbrainz::run(&pool, &args).await
+        }
+        Some(Command::Import(ImportCommand::Listenbrainz(args))) => {
+            let pool = connect(&config).await?;
+            import::listenbrainz::run(&pool, &args).await
         }
     }
 }

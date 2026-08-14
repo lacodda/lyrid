@@ -302,13 +302,18 @@ async fn write(pool: &PgPool, tables: &Tables, version: &str) -> Result<()> {
 
     // Re-importing replaces the canon wholesale. TRUNCATE rather than DELETE:
     // this is millions of rows, and nothing references them from outside.
-    sqlx::query("TRUNCATE artist, release_group, artist_url RESTART IDENTITY CASCADE")
+    //
+    // CASCADE reaches the similarity tables too, which is correct: edges point
+    // at artist ids from a particular dump, and a new dump renumbers nothing
+    // but may drop artists. Similarity is re-imported after the canon.
+    sqlx::query("TRUNCATE artist, release_group, artist_url, artist_credit RESTART IDENTITY CASCADE")
         .execute(&mut *tx)
         .await
         .context("failed to clear the previous canon")?;
 
     let mut written: i64 = 0;
     written += write_artists(&mut tx, tables).await?;
+    written += write_artist_credits(&mut tx, tables).await?;
     written += write_release_groups(&mut tx, tables).await?;
     written += write_artist_urls(&mut tx, tables).await?;
 
@@ -322,6 +327,38 @@ async fn write(pool: &PgPool, tables: &Tables, version: &str) -> Result<()> {
     tx.commit().await.context("failed to commit the import")?;
     tracing::info!(version, rows = written, "import complete");
     Ok(())
+}
+
+/// Persists the credit-to-artist mapping, which datasets keyed on
+/// artist_credit -- ListenBrainz's similarity dump among them -- need long
+/// after this import has finished.
+async fn write_artist_credits(tx: &mut sqlx::PgTransaction<'_>, tables: &Tables) -> Result<i64> {
+    let known: std::collections::HashSet<i32> = tables.artists.iter().map(|a| a.id).collect();
+    let resolved: Vec<(i32, i32)> = tables
+        .credit_artists
+        .iter()
+        .filter(|(_, artist)| known.contains(artist))
+        .map(|(&credit, &artist)| (credit, artist))
+        .collect();
+
+    let mut written = 0i64;
+    for chunk in resolved.chunks(BATCH) {
+        let credits: Vec<i32> = chunk.iter().map(|(c, _)| *c).collect();
+        let artists: Vec<i32> = chunk.iter().map(|(_, a)| *a).collect();
+
+        sqlx::query(
+            "INSERT INTO artist_credit (id, artist_id)
+             SELECT * FROM UNNEST($1::int[], $2::int[])",
+        )
+        .bind(&credits)
+        .bind(&artists)
+        .execute(&mut **tx)
+        .await
+        .context("failed to write artist credits")?;
+        written += i64::try_from(chunk.len()).unwrap_or(i64::MAX);
+    }
+    tracing::info!(rows = written, "artist credits written");
+    Ok(written)
 }
 
 async fn write_artists(tx: &mut sqlx::PgTransaction<'_>, tables: &Tables) -> Result<i64> {
