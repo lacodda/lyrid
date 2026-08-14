@@ -1,0 +1,123 @@
+/* The product is a night sky: dark is the design, not a theme option. */
+:root {
+  --lyrid-void: #05060e;
+  --lyrid-azure: #4a8fe8;
+  --lyrid-azure-dim: #2d5fa0;
+  --lyrid-text: #e8ecf6;
+  --lyrid-muted: #8d96ad;
+  --lyrid-warn: #e8b04a;
+  --lyrid-glass: rgb(20 28 48 / 0.5);
+  --lyrid-edge: rgb(122 152 214 / 0.16);
+
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--lyrid-text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1100px 720px at 78% -10%, rgb(74 143 232 / 0.16), transparent 60%),
+    radial-gradient(820px 620px at 10% 110%, rgb(74 143 232 / 0.1), transparent 62%),
+    var(--lyrid-void);
+}
+
+.shell {
+  min-height: 100dvh;
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: clamp(2rem, 10vh, 6rem) 1.25rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2.25rem;
+}
+
+.shell__header {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.shell__mark {
+  width: 3rem;
+  height: 3rem;
+}
+
+.shell__title {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.shell__tagline {
+  margin: 0.15rem 0 0;
+  color: var(--lyrid-muted);
+  font-size: 0.95rem;
+}
+
+/* ----------------------------------------------------------------- panel -- */
+
+.panel {
+  border: 1px solid var(--lyrid-edge);
+  border-radius: 0.9rem;
+  background: var(--lyrid-glass);
+  backdrop-filter: blur(12px);
+  padding: 1.6rem 1.5rem;
+}
+
+.panel__title {
+  margin: 0 0 0.7rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.panel__body {
+  margin: 0;
+  color: var(--lyrid-muted);
+  line-height: 1.7;
+}
+
+/* ---------------------------------------------------------------- status -- */
+
+.status {
+  margin: 1.7rem 0 0;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--lyrid-edge);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
+  font-size: 0.85rem;
+}
+
+.status__row {
+  display: flex;
+  gap: 0.9rem;
+  align-items: baseline;
+}
+
+.status__key {
+  min-width: 5rem;
+  color: var(--lyrid-muted);
+}
+
+.status__value {
+  margin: 0;
+}
+
+.status__value--ok {
+  color: var(--lyrid-azure);
+}
+
+.status__value--warn {
+  color: var(--lyrid-warn);
+}
+
+.status__value--idle {
+  color: var(--lyrid-azure-dim);
+}
