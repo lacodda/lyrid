@@ -1,0 +1,23 @@
+# Dev database only. The server itself runs via `cargo run`;
+# a full deployment compose arrives with the deployment milestone.
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: lyrid
+      POSTGRES_PASSWORD: lyrid
+      POSTGRES_DB: lyrid
+    ports:
+      - "5432:5432"
+    volumes:
+      # postgres:18+ images keep data in a version-specific subdirectory;
+      # the mount must sit one level up or the entrypoint refuses to start.
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lyrid -d lyrid"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db-data:
