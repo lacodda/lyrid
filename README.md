@@ -21,8 +21,25 @@ The universe is assembled locally from open dumps and datasets — MusicBrainz, 
 
 ## Status
 
-Pre-alpha: the project has just been founded. The foundation release (CI, server skeleton, data pipelines) is next; the sky itself follows shortly after. Watch this repository.
+Pre-alpha. The foundation is in place: an axum server with a database-backed `/health`, a React SPA shell, a documentation site, and release rails. The universe itself comes next — the MusicBrainz import, similarity, and the sky layout. Watch this repository.
+
+## Development
+
+Requires Rust (see `rust-version` in `Cargo.toml`), Node LTS with pnpm, and Docker for the development database.
+
+```sh
+docker compose up -d db          # PostgreSQL on :5432
+cp .env.example .env             # DATABASE_URL points at it out of the box
+cargo run                        # the API on :8080; /health reports the database
+
+cd web && pnpm install && pnpm dev        # the SPA
+cd docs/site && pnpm install && pnpm dev  # the documentation site
+```
+
+## Documentation
+
+[lacodda.github.io/lyrid](https://lacodda.github.io/lyrid) — guides, reference, and the architecture decision records.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/lacodda/lyrid/blob/main/LICENSE)

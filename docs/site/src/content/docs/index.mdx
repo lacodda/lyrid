@@ -1,0 +1,68 @@
+---
+title: A music universe
+description: lyrid turns the music world into a night sky — every artist a star, every genre a nebula, one canonical map for everyone with a personal fog of war over it.
+template: splash
+# The hero carries the product name; repeating it as the page title renders as
+# "lyrid | lyrid" in the browser tab and in search results.
+head:
+  - tag: title
+    content: lyrid - a music universe
+hero:
+  tagline: Every artist a star, every genre a nebula. One canonical sky for everyone, with a personal fog of war over it — and the only way to light up your own is to actually listen.
+  image:
+    html: |
+      <div class="ly-sky">
+        <div class="ly-sky__bar">
+          <span class="ly-sky__dot"></span>
+          <span class="ly-sky__dot"></span>
+          <span class="ly-sky__dot"></span>
+          <span class="ly-sky__label">the sky</span>
+        </div>
+        <pre class="ly-sky__body"><span class="ly-sky__step"><span class="ly-sky__step-name">open dumps</span><span class="ly-sky__step-note">MusicBrainz, ListenBrainz, Discogs, Wikidata</span></span>
+      <span class="ly-sky__arrow">&#8595;</span>
+      <span class="ly-sky__step"><span class="ly-sky__step-name">similarity</span><span class="ly-sky__step-note">computed here, from co-listening</span></span>
+      <span class="ly-sky__arrow">&#8595;</span>
+      <span class="ly-sky__step"><span class="ly-sky__step-name">layout</span><span class="ly-sky__step-note">one canonical map, versioned</span></span>
+      <span class="ly-sky__arrow">&#8595;</span>
+      <span class="ly-sky__step"><span class="ly-sky__step-name">tiles</span><span class="ly-sky__step-note">static blobs, no database in the way</span></span>
+      <span class="ly-sky__arrow">&#8595;</span>
+      <span class="ly-sky__step"><span class="ly-sky__step-name">your fog</span><span class="ly-sky__step-note">what you have actually heard</span></span></pre>
+      </div>
+  actions:
+    - text: Get started
+      link: /lyrid/getting-started/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/lacodda/lyrid
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+<Aside type="caution" title="Foundation stage">
+This is the v0.1 foundation: the server, the SPA shell, and the release rails stand, and the architecture is recorded. The universe itself — the imports, the similarity graph, the sky layout — is what the next releases build. Nothing here is deployed yet.
+</Aside>
+
+## What lyrid is
+
+<CardGrid stagger>
+	<Card title="One sky, shared" icon="star">
+		The layout is canonical: the same star sits in the same place for everyone, so a coordinate is a place you can name, link, and return to. Only the fog over it is yours.
+	</Card>
+	<Card title="Listening is the fuel" icon="approve-check">
+		A preview is a scan, a full listen is a landing, and your ListenBrainz scrobbles are what light the map. Progress cannot be bought or clicked — only heard.
+	</Card>
+	<Card title="Two modes, chosen once" icon="setting">
+		Exploration adds fog, a ship, fuel and quests. Creative opens the whole sky from the first minute, as a daily instrument for studying music. Both stay supported forever.
+	</Card>
+	<Card title="Built from open data" icon="open-book">
+		No rate-limited API sits in the critical path. The universe is assembled locally from full dumps, so its growth is bounded by our own pipeline runs and nobody else's quota.
+	</Card>
+</CardGrid>
+
+## Where to go next
+
+- [Getting started](/lyrid/getting-started/) — run the server, the SPA, and this site locally.
+- [The sky](/lyrid/concepts/the-sky/) — what stars, nebulae and fog actually are.
+- [Data sources](/lyrid/reference/data-sources/) — every dump lyrid reads, and the licence it carries.
