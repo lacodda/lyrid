@@ -20,7 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Pinned here: the action reads packageManager from the repository root,
+      # which has no package.json — the Node projects live in subdirectories.
       - uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.0
       - uses: actions/setup-node@v7
         with:
           node-version: 22
