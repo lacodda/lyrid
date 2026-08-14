@@ -5,7 +5,6 @@ header = """
 # Changelog
 
 All notable changes to this project are documented in this file.
-
 """
 body = """
 {% if version %}\
@@ -18,9 +17,11 @@ body = """
 {% for commit in commits %}\
 - {{ commit.message | upper_first }}
 {% endfor %}\
-{% endfor %}\
+{% endfor %}
 """
-trim = true
+# `trim` would strip the trailing newline that separates one release from the
+# next, running the previous version's heading onto the last bullet.
+trim = false
 
 [git]
 conventional_commits = true
