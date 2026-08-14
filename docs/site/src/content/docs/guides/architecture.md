@@ -49,6 +49,7 @@ next to the code it constrains:
 - [0001 · Server stack and product form](https://github.com/lacodda/lyrid/blob/main/docs/adr/0001-server-stack.md)
 - [0002 · The universe comes from open dumps](https://github.com/lacodda/lyrid/blob/main/docs/adr/0002-universe-from-open-dumps.md)
 - [0003 · Sky map: tile pyramid and a custom WebGL2 renderer](https://github.com/lacodda/lyrid/blob/main/docs/adr/0003-sky-map-architecture.md)
+- [0004 · Similarity from a published dataset, brightness from the graph](https://github.com/lacodda/lyrid/blob/main/docs/adr/0004-similarity-from-a-published-dataset.md)
 
 ## Releases
 

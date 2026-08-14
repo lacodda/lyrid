@@ -65,6 +65,48 @@ This table is why playback needs no YouTube Data API: channel and video ids
 come from these relationships, so there is no API key and no quota in the
 product at all.
 
+## `artist_credit`
+
+MusicBrainz's credit ids, mapped to the artist credited first. Kept because
+other datasets key on credits rather than artists — ListenBrainz's similarity
+dump among them — and resolving them happens long after the MusicBrainz import
+has finished.
+
+## `similarity_metric`
+
+Similarity is not one fact but a family of them: co-listening from one corpus,
+co-listening from another, and later a deliberately different notion of
+closeness for the "prestige" lens. Each set of edges names its metric.
+
+| Column | Meaning |
+| --- | --- |
+| `key` | Stable identifier, e.g. `listenbrainz-2020` |
+| `description` | Corpus, method and vintage — what a reader needs to judge the numbers |
+
+Scores are comparable **within** a metric and never across metrics.
+
+## `artist_similarity`
+
+The edges themselves: `(metric_id, source_id, target_id, score)`.
+
+Each unordered pair is stored **once**, with `source_id < target_id` enforced
+by a check constraint. The relation is symmetric, and storing both directions
+would double a table of millions of rows while inviting the two copies to
+disagree. Both columns are indexed, so neighbours can be found from either end.
+
+## `artist_prominence`
+
+How brightly a star is drawn, per metric.
+
+| Column | Meaning |
+| --- | --- |
+| `degree` | How many edges the artist has |
+| `weight` | Sum of those edges' scores |
+
+Derived from the graph rather than from listen counts, because no per-artist
+listen counts are published as a dump. See
+[Importing similarity](/lyrid/guides/importing-similarity/).
+
 ## Replacing the canon
 
 An importer truncates the tables it owns and writes the new contents in one

@@ -47,13 +47,18 @@ If the database is unreachable the same endpoint answers `503` with `"status": "
 
 ## The universe
 
-An empty database is a sky with no stars. Filling it means importing a dump — see [Importing MusicBrainz](/lyrid/guides/importing-musicbrainz/):
+An empty database is a sky with no stars. Filling it takes two imports, in this order:
 
 ```sh
-cargo run -- import musicbrainz --dump ./mbdump.tar.bz2
+cargo run -- import musicbrainz  --dump ./mbdump.tar.bz2              # the stars
+cargo run -- import listenbrainz --dump ./artist-credit-relations.tar.bz2  # the routes between them
 ```
 
-Everything else runs fine without it; there is simply nothing to look at yet.
+See [Importing MusicBrainz](/lyrid/guides/importing-musicbrainz/) and [Importing similarity](/lyrid/guides/importing-similarity/). Everything else runs fine without them; there is simply nothing to look at yet.
+
+:::note[Adding a migration]
+Migrations are embedded into the binary at compile time, so a newly added `.sql` file needs a rebuild before it will apply — `cargo build` after adding one, or the server will happily run the old set.
+:::
 
 ## The SPA
 

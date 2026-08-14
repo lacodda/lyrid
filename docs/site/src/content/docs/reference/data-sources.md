@@ -8,7 +8,7 @@ The universe is assembled locally from full open dumps. No rate-limited API sits
 | Source | What it contributes | Form |
 | --- | --- | --- |
 | **MusicBrainz** | Artists, release groups, memberships, countries, years, URL relationships | PostgreSQL dump |
-| **ListenBrainz** | Similarity from co-listening, popularity, trends; scrobbles | Open datasets + user API |
+| **ListenBrainz** | Artist similarity from co-listening; scrobbles | Published relations dataset (CC0) + user API for scrobbling |
 | **Discogs** | Genres and styles over MusicBrainz's sparse tags; labels and scenes | Monthly XML dumps |
 | **Wikidata** | Influence links, cities, biographical facts | Dump / query service |
 | **Wikipedia** | Prose extracts for artist cards | Dump |
@@ -28,3 +28,14 @@ Every import pins the dump version it read, and re-running an import is idempote
 **Spotify.** Its similarity and audio-features endpoints have been closed to new applications since late 2024, so building on them is not an option regardless of their quality.
 
 **Any per-request public API in the hot path.** Unauthenticated limits are per IP, which means shared fate: anyone behind the same NAT can exhaust the quota for everyone. The universe must never be one stranger's traffic away from stalling.
+
+**MLHD+.** The one corpus that would give per-artist listen counts directly is licensed for non-commercial use only, and that restriction travels to anything computed from it. Brightness is derived from the similarity graph instead — see [Importing similarity](/lyrid/guides/importing-similarity/).
+
+## What is not available as a dump
+
+Worth knowing before planning against it, because the documentation reads as though it were:
+
+- **Current artist similarity** lives only behind ListenBrainz's live API. The published relations dataset (2020, CC0) is the newest bulk form of it.
+- **Per-artist listen counts** are served by an API capped at the top 1,000 artists sitewide, or by MLHD+ under its non-commercial licence. Neither can fill a three-million-star sky.
+
+Both gaps are closable by computing from the CC0 listen dumps, which is a stage of its own rather than an import.

@@ -21,7 +21,7 @@ The universe is assembled locally from open dumps and datasets — MusicBrainz, 
 
 ## Status
 
-Pre-alpha. The stars are in: a MusicBrainz full export imports into the canonical schema — ~3M artists with their countries, years, release groups and URL relationships — alongside the axum server, the SPA shell and the documentation site. Similarity, the sky layout and the renderer come next. Watch this repository.
+Pre-alpha. The stars are in and the routes between them: a MusicBrainz full export builds the canon (~3M artists with countries, years, release groups and URL relationships), and the ListenBrainz relations dataset adds ~7M similarity edges with the brightness derived from them. The sky layout and the renderer come next. Watch this repository.
 
 ## Development
 
@@ -34,6 +34,9 @@ cargo run -- serve               # the API on :8080; /health reports the databas
 
 # Fill the universe from a MusicBrainz full export (~7 GB, downloaded once):
 cargo run -- import musicbrainz --dump ./mbdump.tar.bz2
+
+# Add the similarity graph (~117 MB, CC0):
+cargo run -- import listenbrainz --dump ./artist-credit-relations.tar.bz2
 
 cd web && pnpm install && pnpm dev        # the SPA
 cd docs/site && pnpm install && pnpm dev  # the documentation site
