@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.0] - 2026-08-14
+
+### Documentation
+- Record what the dumps do and do not offer
+
+### Features
+- Build the similarity graph from the ListenBrainz dataset
+
 ## [0.2.0] - 2026-08-14
 
 ### Documentation
