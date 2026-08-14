@@ -28,8 +28,10 @@ cp .env.example .env
 ## The API
 
 ```sh
-cargo run
+cargo run -- serve
 ```
+
+`serve` is also what running the binary with no arguments does, which is what a container image or a service unit expects.
 
 The server binds `0.0.0.0:8080` (override with `LYRID_ADDR`), applies any pending migrations on start, and serves `/health`:
 
@@ -42,6 +44,16 @@ curl http://127.0.0.1:8080/health
 ```
 
 If the database is unreachable the same endpoint answers `503` with `"status": "degraded"` — the process is alive but cannot do its job, and the two cases are worth telling apart.
+
+## The universe
+
+An empty database is a sky with no stars. Filling it means importing a dump — see [Importing MusicBrainz](/lyrid/guides/importing-musicbrainz/):
+
+```sh
+cargo run -- import musicbrainz --dump ./mbdump.tar.bz2
+```
+
+Everything else runs fine without it; there is simply nothing to look at yet.
 
 ## The SPA
 

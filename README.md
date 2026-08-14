@@ -21,7 +21,7 @@ The universe is assembled locally from open dumps and datasets — MusicBrainz, 
 
 ## Status
 
-Pre-alpha. The foundation is in place: an axum server with a database-backed `/health`, a React SPA shell, a documentation site, and release rails. The universe itself comes next — the MusicBrainz import, similarity, and the sky layout. Watch this repository.
+Pre-alpha. The stars are in: a MusicBrainz full export imports into the canonical schema — ~3M artists with their countries, years, release groups and URL relationships — alongside the axum server, the SPA shell and the documentation site. Similarity, the sky layout and the renderer come next. Watch this repository.
 
 ## Development
 
@@ -30,7 +30,10 @@ Requires Rust (see `rust-version` in `Cargo.toml`), Node LTS with pnpm, and Dock
 ```sh
 docker compose up -d db          # PostgreSQL on :5432
 cp .env.example .env             # DATABASE_URL points at it out of the box
-cargo run                        # the API on :8080; /health reports the database
+cargo run -- serve               # the API on :8080; /health reports the database
+
+# Fill the universe from a MusicBrainz full export (~7 GB, downloaded once):
+cargo run -- import musicbrainz --dump ./mbdump.tar.bz2
 
 cd web && pnpm install && pnpm dev        # the SPA
 cd docs/site && pnpm install && pnpm dev  # the documentation site
