@@ -53,6 +53,12 @@ struct Tables {
     artist_types: HashMap<i32, String>,
     release_group_types: HashMap<i32, String>,
     areas: HashMap<i32, String>,
+    /// area.id -> ISO 3166-1 alpha-2, for the areas that are countries.
+    area_codes: HashMap<i32, String>,
+    /// release.id -> the release group it belongs to.
+    release_groups_of_releases: HashMap<i32, i32>,
+    /// release.id -> earliest release year seen for it.
+    release_years: HashMap<i32, i16>,
     /// link.id -> link_type.id
     links: HashMap<i32, i32>,
     /// link_type.id -> name, for artist->url link types only.
@@ -149,6 +155,12 @@ fn read_archive(file: File) -> Result<Tables> {
             "release_group" => read_release_groups(reader, &mut tables)?,
             "release_group_primary_type" => read_names(reader, &mut tables.release_group_types)?,
             "area" => read_areas(reader, &mut tables)?,
+            "iso_3166_1" => read_area_codes(reader, &mut tables)?,
+            "release" => read_releases(reader, &mut tables)?,
+            // A release's date lives in one of two tables depending on whether
+            // its country is known. Both are read: a release group whose only
+            // pressing has no country would otherwise come out undated.
+            "release_country" | "release_unknown_country" => read_release_dates(reader, name, &mut tables)?,
             "artist_credit_name" => read_credit_names(reader, &mut tables)?,
             "url" => read_urls(reader, &mut tables)?,
             "link" => read_links(reader, &mut tables)?,
@@ -211,6 +223,50 @@ fn read_areas<R: BufRead>(reader: R, tables: &mut Tables) -> Result<()> {
         if let (Some(id), Some(name)) = (row.parse::<i32>(0), row.get(2)) {
             tables.areas.insert(id, name.to_string());
         }
+    })
+}
+
+/// iso_3166_1: area, code -- the two-letter country code, where the area is a
+/// country at all. Areas that are cities or regions have none, which is why
+/// `artist.area_code` stays NULL for most artists rather than guessing.
+fn read_area_codes<R: BufRead>(reader: R, tables: &mut Tables) -> Result<()> {
+    each_row(reader, |row| {
+        if let (Some(area), Some(code)) = (row.parse::<i32>(0), row.get(1)) {
+            tables.area_codes.insert(area, code.to_string());
+        }
+    })
+}
+
+/// release: id, gid, name, artist_credit, release_group, ...
+///
+/// Read only to map a release back to its group: MusicBrainz keeps release
+/// dates on the release, while the sky shows the year of the album.
+fn read_releases<R: BufRead>(reader: R, tables: &mut Tables) -> Result<()> {
+    each_row(reader, |row| {
+        if let (Some(id), Some(group)) = (row.parse::<i32>(0), row.parse::<i32>(4)) {
+            tables.release_groups_of_releases.insert(id, group);
+        }
+    })
+}
+
+/// release_country: release, country, date_year, date_month, date_day
+/// release_unknown_country: release, date_year, date_month, date_day
+///
+/// The same fact in two tables, differing only by whether a country column
+/// sits before the date, which is why the column index depends on the file.
+fn read_release_dates<R: BufRead>(reader: R, table: &str, tables: &mut Tables) -> Result<()> {
+    let year_column = if table == "release_country" { 2 } else { 1 };
+    each_row(reader, |row| {
+        let (Some(release), Some(year)) = (row.parse::<i32>(0), row.parse::<i16>(year_column)) else {
+            return;
+        };
+        // A release can be issued in several countries on different dates; the
+        // earliest is the one that dates the record.
+        tables
+            .release_years
+            .entry(release)
+            .and_modify(|earliest| *earliest = (*earliest).min(year))
+            .or_insert(year);
     })
 }
 
@@ -373,14 +429,18 @@ async fn write_artists(tx: &mut sqlx::PgTransaction<'_>, tables: &Tables) -> Res
             .map(|a| a.type_id.and_then(|t| tables.artist_types.get(&t)).map(String::as_str))
             .collect();
         let areas: Vec<Option<&str>> = chunk.iter().map(|a| a.area_id.and_then(|t| tables.areas.get(&t)).map(String::as_str)).collect();
+        let area_codes: Vec<Option<&str>> = chunk
+            .iter()
+            .map(|a| a.area_id.and_then(|t| tables.area_codes.get(&t)).map(String::as_str))
+            .collect();
         let begins: Vec<Option<i16>> = chunk.iter().map(|a| a.begin_year).collect();
         let ends: Vec<Option<i16>> = chunk.iter().map(|a| a.end_year).collect();
         let ended: Vec<bool> = chunk.iter().map(|a| a.ended).collect();
         let comments: Vec<Option<&str>> = chunk.iter().map(|a| a.comment.as_deref()).collect();
 
         sqlx::query(
-            "INSERT INTO artist (id, mbid, name, sort_name, kind, area, begin_year, end_year, ended, comment)
-             SELECT * FROM UNNEST($1::int[], $2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[], $7::smallint[], $8::smallint[], $9::bool[], $10::text[])",
+            "INSERT INTO artist (id, mbid, name, sort_name, kind, area, area_code, begin_year, end_year, ended, comment)
+             SELECT * FROM UNNEST($1::int[], $2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::smallint[], $9::smallint[], $10::bool[], $11::text[])",
         )
         .bind(&ids)
         .bind(&mbids)
@@ -388,6 +448,7 @@ async fn write_artists(tx: &mut sqlx::PgTransaction<'_>, tables: &Tables) -> Res
         .bind(&sort_names)
         .bind(&kinds)
         .bind(&areas)
+        .bind(&area_codes)
         .bind(&begins)
         .bind(&ends)
         .bind(&ended)
@@ -399,6 +460,23 @@ async fn write_artists(tx: &mut sqlx::PgTransaction<'_>, tables: &Tables) -> Res
     }
     tracing::info!(rows = written, "artists written");
     Ok(written)
+}
+
+/// The year of each release group: the earliest year among its releases.
+///
+/// MusicBrainz publishes a precomputed `first_release_date_year` in
+/// `release_group_meta`, but that table is not in the core archive this
+/// importer reads. The number is the same either way — the earliest date of
+/// any pressing — and computing it here keeps the import to one archive.
+fn release_group_years(tables: &Tables) -> HashMap<i32, i16> {
+    let mut years: HashMap<i32, i16> = HashMap::with_capacity(tables.release_groups.len());
+    for (release, year) in &tables.release_years {
+        let Some(group) = tables.release_groups_of_releases.get(release) else {
+            continue;
+        };
+        years.entry(*group).and_modify(|earliest| *earliest = (*earliest).min(*year)).or_insert(*year);
+    }
+    years
 }
 
 async fn write_release_groups(tx: &mut sqlx::PgTransaction<'_>, tables: &Tables) -> Result<i64> {
@@ -415,6 +493,8 @@ async fn write_release_groups(tx: &mut sqlx::PgTransaction<'_>, tables: &Tables)
         })
         .collect();
 
+    let years = release_group_years(tables);
+
     let mut written = 0i64;
     for chunk in resolved.chunks(BATCH) {
         let ids: Vec<i32> = chunk.iter().map(|(rg, _)| rg.id).collect();
@@ -425,16 +505,18 @@ async fn write_release_groups(tx: &mut sqlx::PgTransaction<'_>, tables: &Tables)
             .map(|(rg, _)| rg.type_id.and_then(|t| tables.release_group_types.get(&t)).map(String::as_str))
             .collect();
         let artists: Vec<i32> = chunk.iter().map(|(_, artist)| *artist).collect();
+        let group_years: Vec<Option<i16>> = chunk.iter().map(|(rg, _)| years.get(&rg.id).copied()).collect();
 
         sqlx::query(
-            "INSERT INTO release_group (id, mbid, name, primary_type, artist_id)
-             SELECT * FROM UNNEST($1::int[], $2::uuid[], $3::text[], $4::text[], $5::int[])",
+            "INSERT INTO release_group (id, mbid, name, primary_type, artist_id, year)
+             SELECT * FROM UNNEST($1::int[], $2::uuid[], $3::text[], $4::text[], $5::int[], $6::smallint[])",
         )
         .bind(&ids)
         .bind(&mbids)
         .bind(&names)
         .bind(&types)
         .bind(&artists)
+        .bind(&group_years)
         .execute(&mut **tx)
         .await
         .context("failed to write release groups")?;
@@ -478,4 +560,77 @@ async fn write_artist_urls(tx: &mut sqlx::PgTransaction<'_>, tables: &Tables) ->
     }
     tracing::info!(rows = written, "artist URLs written");
     Ok(written)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Runs one table's reader over literal COPY TEXT, the way the archive
+    /// pass does.
+    fn read_table(table: &str, rows: &str) -> Tables {
+        let mut tables = Tables::default();
+        match table {
+            "iso_3166_1" => read_area_codes(rows.as_bytes(), &mut tables).unwrap(),
+            "release" => read_releases(rows.as_bytes(), &mut tables).unwrap(),
+            other => read_release_dates(rows.as_bytes(), other, &mut tables).unwrap(),
+        }
+        tables
+    }
+
+    #[test]
+    fn reads_country_codes_from_iso_3166_1() {
+        let tables = read_table("iso_3166_1", "222\tUS\n81\tDE\n");
+        assert_eq!(tables.area_codes.get(&222).map(String::as_str), Some("US"));
+        assert_eq!(tables.area_codes.get(&81).map(String::as_str), Some("DE"));
+    }
+
+    #[test]
+    fn takes_the_year_from_the_right_column_in_each_date_table() {
+        // release_country puts the country between the release and the date;
+        // release_unknown_country does not. Reading a fixed column index for
+        // both would silently take a country id as a year.
+        let with_country = read_table("release_country", "10\t222\t1991\t9\t24\n");
+        assert_eq!(with_country.release_years.get(&10), Some(&1991));
+
+        let without = read_table("release_unknown_country", "11\t1994\t4\t5\n");
+        assert_eq!(without.release_years.get(&11), Some(&1994));
+    }
+
+    #[test]
+    fn keeps_the_earliest_year_of_a_release_issued_in_several_countries() {
+        let tables = read_table("release_country", "10\t222\t1992\t1\t1\n10\t81\t1991\t9\t24\n");
+        assert_eq!(tables.release_years.get(&10), Some(&1991));
+    }
+
+    #[test]
+    fn dates_a_release_group_by_its_earliest_release() {
+        // Two pressings of one album: the reissue must not date the record.
+        let mut tables = Tables::default();
+        tables.release_groups_of_releases.insert(10, 500);
+        tables.release_groups_of_releases.insert(11, 500);
+        tables.release_years.insert(10, 2011);
+        tables.release_years.insert(11, 1991);
+
+        let years = release_group_years(&tables);
+        assert_eq!(years.get(&500), Some(&1991));
+    }
+
+    #[test]
+    fn leaves_a_release_group_undated_when_no_release_carries_a_year() {
+        let mut tables = Tables::default();
+        tables.release_groups_of_releases.insert(10, 500);
+
+        assert!(!release_group_years(&tables).contains_key(&500));
+    }
+
+    #[test]
+    fn ignores_a_date_on_a_release_belonging_to_no_group() {
+        // A dump can carry a release whose group is missing; dating a group
+        // that does not exist would be worse than dating nothing.
+        let mut tables = Tables::default();
+        tables.release_years.insert(10, 1991);
+
+        assert!(release_group_years(&tables).is_empty());
+    }
 }

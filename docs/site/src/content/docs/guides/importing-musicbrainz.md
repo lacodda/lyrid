@@ -25,7 +25,10 @@ curl -O "$base/$version/mbdump.tar.bz2"
 
 `mbdump.tar.bz2` is the core archive — roughly 7 GB compressed. The other
 archives (edit history, statistics, cover art) are not needed: lyrid reads
-twelve tables and skips the rest without decompressing them into memory.
+sixteen tables out of this one and skips the rest without decompressing them
+into memory. `mbdump-derived.tar.bz2` is deliberately never downloaded — it is
+licensed CC BY-NC-SA, and [ADR 0005](https://github.com/lacodda/lyrid/blob/main/docs/adr/0005-genres-from-discogs.md)
+explains why that keeps it out of the canon.
 
 :::caution[Be a good citizen]
 The dumps are served for free by a non-profit. Download the archive once and
@@ -85,10 +88,17 @@ tables, so there is no progress to lose.
 
 | Table | From | Notes |
 | --- | --- | --- |
-| `artist` | `artist`, `artist_type`, `area` | Type and country are flattened onto the row |
-| `release_group` | `release_group`, `artist_credit_name` | Credited to the first artist in the credit |
+| `artist` | `artist`, `artist_type`, `area`, `iso_3166_1` | Type and country are flattened onto the row. `area_code` stays `NULL` where the area is not a country, rather than being guessed |
+| `release_group` | `release_group`, `artist_credit_name`, `release`, `release_country`, `release_unknown_country` | Credited to the first artist in the credit. `year` is the earliest release year in the group, so a reissue never dates the album |
 | `artist_url` | `l_artist_url`, `url`, `link`, `link_type` | Only artist→URL relationships |
 
 The `artist_url` table is what makes YouTube playback possible without the
 YouTube Data API: video and channel ids come from MusicBrainz relationships,
-so no API key and no quota are involved anywhere in the product.
+so no API key and no quota are involved anywhere in the product. It is also how
+[genres](/lyrid/guides/importing-genres/) find their way in: the Discogs import
+joins on the `discogs` relationship stored here.
+
+Release years are computed rather than read. MusicBrainz publishes a
+precomputed `first_release_date_year` in `release_group_meta`, but that table is
+not in this archive; the earliest date among a group's releases is the same
+number, and computing it keeps the import to one download.

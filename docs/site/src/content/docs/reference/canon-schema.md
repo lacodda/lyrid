@@ -33,7 +33,8 @@ Artists are the stars.
 | `mbid` | `uuid` | The MBID: stable across merges, and the only id safe to expose or to trace back to musicbrainz.org |
 | `name`, `sort_name` | `text` | Display name and the name to sort by |
 | `kind` | `text` | `Person`, `Group`, `Orchestra`… flattened from `artist_type` |
-| `area`, `area_code` | `text` | Country or region, flattened from `area` |
+| `area` | `text` | Country or region, flattened from `area` |
+| `area_code` | `text` | ISO 3166-1 alpha-2, from `iso_3166_1`. `NULL` where the area is not a country — an artist from Glasgow has an area and no code, rather than a guessed one |
 | `begin_year`, `end_year` | `smallint` | Formed and disbanded; born and died |
 | `ended` | `boolean` | Whether the artist is over |
 | `comment` | `text` | MusicBrainz's disambiguation comment, shown wherever two artists share a name |
@@ -49,7 +50,7 @@ its pressings.
 | `name` | `text` | Album title |
 | `primary_type` | `text` | `Album`, `Single`, `EP`, `Compilation`… |
 | `artist_id` | `integer` | The first credited artist. A release group crediting several artists belongs to the system of the first |
-| `year` | `smallint` | Reserved for the first release date, which arrives with the release tables |
+| `year` | `smallint` | The year of the earliest release in the group, so a reissue never dates the album. `NULL` when no release carries a date |
 
 ## `artist_url`
 
@@ -106,6 +107,60 @@ How brightly a star is drawn, per metric.
 Derived from the graph rather than from listen counts, because no per-artist
 listen counts are published as a dump. See
 [Importing similarity](/lyrid/guides/importing-similarity/).
+
+## `genre`
+
+Discogs's vocabulary, at both of its depths.
+
+| Column | Meaning |
+| --- | --- |
+| `name` | `Electronic`, `Techno`, `Grunge`… |
+| `is_style` | `false` for a Discogs genre, `true` for a style |
+
+One table rather than two: a genre and a style are the same kind of fact at
+different depths, and separating them would double every query the map makes.
+`(name, is_style)` is unique, so "Rock" the genre and "Rock" the style are
+distinct rows.
+
+Genres come from Discogs and not from MusicBrainz because MusicBrainz's tag
+tables are licensed CC BY-NC-SA, which would travel to the layout, the tiles
+and everything drawn from them — see
+[ADR 0005](https://github.com/lacodda/lyrid/blob/main/docs/adr/0005-genres-from-discogs.md).
+
+## `artist_genre`
+
+What kind of music a star makes: `(artist_id, genre_id, releases)`.
+
+Discogs attaches genres to releases, never to artists, so this is an aggregate
+over the artist's discography. `releases` is **how many of their releases carry
+this genre** — the weight that makes the aggregate honest, since a discography's
+tail of remixes and interviews would otherwise count as much as its main body.
+Consumers should threshold on `releases` rather than treat presence as
+membership.
+
+## `artist_discogs`
+
+Which Discogs artist a canonical artist is: `(artist_id, discogs_id)`.
+
+Derived from MusicBrainz's `discogs` URL relationship and stored so later
+pipelines can follow the join without re-parsing URLs. Two canonical artists
+may point at one Discogs id, where MusicBrainz splits an act that Discogs keeps
+whole, so `discogs_id` is indexed rather than unique.
+
+## `label`
+
+The stations of the map: imprints, and which imprint owns which.
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Discogs's own label id |
+| `name` | Label name |
+| `profile` | Discogs's description, for the station page |
+| `parent_label_id` | The owning imprint, when Discogs records one |
+
+Contact information is deliberately not imported: those blocks carry postal
+addresses and personal e-mail of small-label owners, which this product has no
+use for.
 
 ## Replacing the canon
 
