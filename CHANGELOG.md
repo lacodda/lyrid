@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.0] - 2026-08-17
+
+### Bug Fixes
+- Fill the country code and release year the schema promised
+
+### Features
+- Add genres, styles and labels from the Discogs dumps
+
 ## [0.3.0] - 2026-08-14
 
 ### Documentation
