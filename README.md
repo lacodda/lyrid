@@ -38,6 +38,9 @@ cargo run -- import musicbrainz --dump ./mbdump.tar.bz2
 # Add the similarity graph (~117 MB, CC0):
 cargo run -- import listenbrainz --dump ./artist-credit-relations.tar.bz2
 
+# Add genres, styles and labels (~1.15 GB, CC0):
+cargo run -- import discogs --masters ./discogs_masters.xml.gz --labels ./discogs_labels.xml.gz
+
 cd web && pnpm install && pnpm dev        # the SPA
 cd docs/site && pnpm install && pnpm dev  # the documentation site
 ```

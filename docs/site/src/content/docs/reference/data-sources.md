@@ -9,7 +9,7 @@ The universe is assembled locally from full open dumps. No rate-limited API sits
 | --- | --- | --- |
 | **MusicBrainz** | Artists, release groups, memberships, countries, years, URL relationships | PostgreSQL dump |
 | **ListenBrainz** | Artist similarity from co-listening; scrobbles | Published relations dataset (CC0) + user API for scrobbling |
-| **Discogs** | Genres and styles over MusicBrainz's sparse tags; labels and scenes | Monthly XML dumps |
+| **Discogs** | Genres, styles and labels — the only genre source, see below | Monthly XML dumps (CC0) |
 | **Wikidata** | Influence links, cities, biographical facts | Dump / query service |
 | **Wikipedia** | Prose extracts for artist cards | Dump |
 | **AcousticBrainz** | Audio features — energy, tempo, mood ("spectra") | Frozen dump |
@@ -31,6 +31,10 @@ Every import pins the dump version it read, and re-running an import is idempote
 
 **MLHD+.** The one corpus that would give per-artist listen counts directly is licensed for non-commercial use only, and that restriction travels to anything computed from it. Brightness is derived from the similarity graph instead — see [Importing similarity](/lyrid/guides/importing-similarity/).
 
+**MusicBrainz's own genre tags.** The same restriction, found the same way. MusicBrainz splits its licensing: core data is CC0, but `mbdump-derived.tar.bz2` — whose own `COPYING` file reads Attribution-NonCommercial-ShareAlike 3.0 US — holds "user submitted annotations, tags (including genre associations) and ratings". Genres feed the sky layout, the tiles and everything drawn from them, so a non-commercial input there would make every layer above it non-commercial too, with ShareAlike requiring the derived work back under the same terms. Genres come from the CC0 Discogs dumps instead, which are also deeper: two vocabularies, genre and style. See [ADR 0005](https://github.com/lacodda/lyrid/blob/main/docs/adr/0005-genres-from-discogs.md).
+
+MusicBrainz has no genre-to-artist table at all, incidentally — genre there is a tag whose name matches a curated vocabulary entry — and no "influenced by" relationship of any kind. Influence links are a Wikidata fact (`P737`).
+
 ## What is not available as a dump
 
 Worth knowing before planning against it, because the documentation reads as though it were:
@@ -39,3 +43,7 @@ Worth knowing before planning against it, because the documentation reads as tho
 - **Per-artist listen counts** are served by an API capped at the top 1,000 artists sitewide, or by MLHD+ under its non-commercial licence. Neither can fill a three-million-star sky.
 
 Both gaps are closable by computing from the CC0 listen dumps, which is a stage of its own rather than an import.
+
+- **Ready-made Wikipedia lead extracts.** There is no longer any free dump of them. The Wikimedia Enterprise HTML dumps, which carried an `abstract` field per article, stopped being replicated to `dumps.wikimedia.org` on 24 March 2025, and `enwiki-latest-abstract.xml.gz` is absent from the current listings. The live REST summary endpoint is a rate-limited API, which ADR 0002 forbids. Extracts must therefore be parsed out of the article wikitext in the `pages-articles` dump — which the multistream index makes tractable, since it allows seeking to one article's stream instead of decompressing 27 GB.
+
+- **A music-only Wikidata dump.** The full JSON dump is the only complete form (102.7 GB compressed); the "truthy" variant is 43.3 GB and drops qualifiers. The query service is rate-limited and so ruled out. Filtering the full dump by the presence of a MusicBrainz id (`P434`) while streaming is the way in.

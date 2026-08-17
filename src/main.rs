@@ -37,6 +37,11 @@ enum ImportCommand {
     /// dataset. Requires the MusicBrainz import to have run first.
     #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
     Listenbrainz(import::listenbrainz::Args),
+    /// Import genres, styles and labels from the Discogs monthly XML dumps.
+    /// Requires the MusicBrainz import to have run first: artists are joined
+    /// through its `discogs` URL relationships.
+    #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
+    Discogs(import::discogs::Args),
 }
 
 #[tokio::main]
@@ -66,6 +71,10 @@ async fn main() -> Result<()> {
         Some(Command::Import(ImportCommand::Listenbrainz(args))) => {
             let pool = connect(&config).await?;
             import::listenbrainz::run(&pool, &args).await
+        }
+        Some(Command::Import(ImportCommand::Discogs(args))) => {
+            let pool = connect(&config).await?;
+            import::discogs::run(&pool, &args).await
         }
     }
 }
