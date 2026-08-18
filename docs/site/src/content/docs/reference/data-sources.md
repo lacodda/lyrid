@@ -10,7 +10,7 @@ The universe is assembled locally from full open dumps. No rate-limited API sits
 | **MusicBrainz** | Artists, release groups, memberships, countries, years, URL relationships | PostgreSQL dump |
 | **ListenBrainz** | Artist similarity from co-listening; scrobbles | Published relations dataset (CC0) + user API for scrobbling |
 | **Discogs** | Genres, styles and labels — the only genre source, see below | Monthly XML dumps (CC0) |
-| **Wikidata** | Influence links, cities, biographical facts | Dump / query service |
+| **Wikidata** | Influence links, cities, biographical facts, Wikipedia article titles | Full JSON dump (CC0), streamed |
 | **Wikipedia** | Prose extracts for artist cards | Dump |
 | **AcousticBrainz** | Audio features — energy, tempo, mood ("spectra") | Frozen dump |
 
@@ -46,4 +46,4 @@ Both gaps are closable by computing from the CC0 listen dumps, which is a stage 
 
 - **Ready-made Wikipedia lead extracts.** There is no longer any free dump of them. The Wikimedia Enterprise HTML dumps, which carried an `abstract` field per article, stopped being replicated to `dumps.wikimedia.org` on 24 March 2025, and `enwiki-latest-abstract.xml.gz` is absent from the current listings. The live REST summary endpoint is a rate-limited API, which ADR 0002 forbids. Extracts must therefore be parsed out of the article wikitext in the `pages-articles` dump — which the multistream index makes tractable, since it allows seeking to one article's stream instead of decompressing 27 GB.
 
-- **A music-only Wikidata dump.** The full JSON dump is the only complete form (102.7 GB compressed); the "truthy" variant is 43.3 GB and drops qualifiers. The query service is rate-limited and so ruled out. Filtering the full dump by the presence of a MusicBrainz id (`P434`) while streaming is the way in.
+- **A music-only Wikidata dump.** The full JSON dump is the only complete form (102.7 GB compressed). The "truthy" variant is 43.3 GB and does carry all the properties this product reads — but **no Wikipedia sitelinks**, checked directly, and those article titles are the only dump-only bridge to the prose. The query service is rate-limited and so ruled out. Filtering the full dump by the presence of a MusicBrainz id (`P434`) while streaming is the way in — and the 102.7 GB is read over the network without ever being stored, so its size is a matter of hours rather than of disk. See [Importing facts](/lyrid/guides/importing-facts/).

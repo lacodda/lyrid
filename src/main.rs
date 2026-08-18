@@ -42,6 +42,11 @@ enum ImportCommand {
     /// through its `discogs` URL relationships.
     #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
     Discogs(import::discogs::Args),
+    /// Import biographical facts and influence links from the Wikidata dump.
+    /// Requires the MusicBrainz import to have run first: entities are matched
+    /// to the canon by their MusicBrainz id.
+    #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
+    Wikidata(import::wikidata::Args),
 }
 
 #[tokio::main]
@@ -75,6 +80,10 @@ async fn main() -> Result<()> {
         Some(Command::Import(ImportCommand::Discogs(args))) => {
             let pool = connect(&config).await?;
             import::discogs::run(&pool, &args).await
+        }
+        Some(Command::Import(ImportCommand::Wikidata(args))) => {
+            let pool = connect(&config).await?;
+            import::wikidata::run(&pool, &args).await
         }
     }
 }

@@ -162,6 +162,57 @@ Contact information is deliberately not imported: those blocks carry postal
 addresses and personal e-mail of small-label owners, which this product has no
 use for.
 
+## `artist_wikidata`
+
+Which Wikidata item an artist is: `(artist_id, qid, enwiki_title)`.
+
+The link comes from MusicBrainz's `wikidata` URL relationship and is confirmed
+from the other side — the item's `P434` must hold that artist's MBID. Two
+independent statements agreeing is what makes this join safe enough to hang a
+biography on.
+
+`enwiki_title` is the English Wikipedia article title, kept verbatim
+("Nirvana (band)"). It is captured during the same pass because the prose
+import needs it and it exists nowhere else in the canon.
+
+## `artist_fact`
+
+One row per artist, holding the handful of biographical fields a card reads
+together.
+
+| Column | Meaning |
+| --- | --- |
+| `origin_qid` | Where the act comes from: location of formation for groups, place of birth for people |
+| `origin_is_birth` | **Which** question was answered. "Formed in Seattle" and "born in Seattle" are different claims |
+| `inception_year` | From Wikidata. May disagree with `artist.begin_year`; both are kept rather than one silently overwriting the other |
+| `country_qid` | Country of origin |
+
+## `wikidata_item`
+
+Names for the items facts point at: `(qid, label)`.
+
+A Wikidata fact is a reference, not a word — place of birth is `Q24826`, not
+"Liverpool". Resolving them afterwards would mean a second pass over 100 GB, so
+labels are captured during the same read. `label` can be `NULL` where the item
+has no English name, so queries joining this table should use `LEFT JOIN`.
+
+## `artist_influence`
+
+The currents of the map: `(artist_id, influence_id)`, meaning **artist_id was
+influenced by influence_id**.
+
+Directed, unlike similarity: the arrow is the whole point of the fact, so the
+reverse is not stored. Both ends must be artists in the canon — an influence
+pointing at a painter is true and undrawable. A check constraint rejects
+self-influence, which Wikidata does contain.
+
+## `artist_wikidata_genre`, `artist_wikidata_label`
+
+Genres and record labels as Wikidata claims them, kept apart from the Discogs
+vocabulary in `artist_genre`. Discogs terms carry a release count behind them;
+these are editorial claims with no weight. Mixing two vocabularies in one table
+is the mistake `similarity_metric` exists to prevent.
+
 ## Replacing the canon
 
 An importer truncates the tables it owns and writes the new contents in one
