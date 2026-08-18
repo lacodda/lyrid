@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.1] - 2026-08-18
+
+### Features
+- Add facts and influence from the Wikidata dump
+
 ## [0.4.0] - 2026-08-17
 
 ### Bug Fixes
