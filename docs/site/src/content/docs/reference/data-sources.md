@@ -11,14 +11,14 @@ The universe is assembled locally from full open dumps. No rate-limited API sits
 | **ListenBrainz** | Artist similarity from co-listening; scrobbles | Published relations dataset (CC0) + user API for scrobbling |
 | **Discogs** | Genres, styles and labels — the only genre source, see below | Monthly XML dumps (CC0) |
 | **Wikidata** | Influence links, cities, biographical facts, Wikipedia article titles | Full JSON dump (CC0), streamed |
-| **Wikipedia** | Prose extracts for artist cards | Dump |
+| **Wikipedia** | Prose extracts for artist cards | Multistream dump (CC BY-SA 4.0), reached by index |
 | **AcousticBrainz** | Audio features — energy, tempo, mood ("spectra") | Frozen dump |
 
 Every import pins the dump version it read, and re-running an import is idempotent.
 
 ## Attribution and licensing
 
-- **Wikipedia extracts** are CC BY-SA. The attribution is stored alongside the text, not attached at render time, so a snippet cannot travel through the system without it.
+- **Wikipedia extracts** are CC BY-SA 4.0. The attribution — title, URL, licence, dump version and revision id — is stored in the same row as the text, not attached at render time, so a snippet cannot travel through the system without it. See [Importing prose](/lyrid/guides/importing-prose/).
 - **MusicBrainz** data is used under its own terms; the schema keeps MBIDs so anything shown can be traced back.
 - **YouTube** is embedded through the official player only. Video and channel ids come from MusicBrainz URL relationships, so the YouTube Data API is not used at all and no quota applies.
 - **Previews** are the official 30-second clips from Deezer and iTunes. lyrid never streams full tracks itself.

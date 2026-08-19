@@ -4,3 +4,5 @@ pub mod discogs_xml;
 pub mod listenbrainz;
 pub mod musicbrainz;
 pub mod wikidata;
+pub mod wikipedia;
+pub mod wikitext;

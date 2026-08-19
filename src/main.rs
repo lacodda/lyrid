@@ -47,6 +47,11 @@ enum ImportCommand {
     /// to the canon by their MusicBrainz id.
     #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
     Wikidata(import::wikidata::Args),
+    /// Import Wikipedia lead paragraphs, with their CC BY-SA attribution.
+    /// Requires the Wikidata import to have run first: the article titles come
+    /// from its sitelinks.
+    #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
+    Wikipedia(import::wikipedia::Args),
 }
 
 #[tokio::main]
@@ -84,6 +89,10 @@ async fn main() -> Result<()> {
         Some(Command::Import(ImportCommand::Wikidata(args))) => {
             let pool = connect(&config).await?;
             import::wikidata::run(&pool, &args).await
+        }
+        Some(Command::Import(ImportCommand::Wikipedia(args))) => {
+            let pool = connect(&config).await?;
+            import::wikipedia::run(&pool, &args).await
         }
     }
 }

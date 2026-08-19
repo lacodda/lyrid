@@ -44,6 +44,9 @@ cargo run -- import discogs --masters ./discogs_masters.xml.gz --labels ./discog
 # Add biography and influence, streamed straight from Wikidata (nothing stored):
 cargo run -- import wikidata
 
+# Add prose, reached through the multistream index (1.9 MB per article, not 27 GB):
+cargo run -- import wikipedia --dump ./enwiki-multistream.xml.bz2 --index ./enwiki-index.txt.bz2
+
 cd web && pnpm install && pnpm dev        # the SPA
 cd docs/site && pnpm install && pnpm dev  # the documentation site
 ```

@@ -213,6 +213,31 @@ vocabulary in `artist_genre`. Discogs terms carry a release count behind them;
 these are editorial claims with no weight. Mixing two vocabularies in one table
 is the mistake `similarity_metric` exists to prevent.
 
+## `artist_prose`
+
+The words on an artist card: Wikipedia lead paragraphs under CC BY-SA 4.0.
+
+| Column | Meaning |
+| --- | --- |
+| `extract` | The lead, as plain text: templates resolved or removed, links flattened, references gone |
+| `source_title` | The article title, verbatim ("Nirvana (band)") |
+| `source_url` | The article address, which the licence requires be shown |
+| `licence` | `CC BY-SA 4.0` |
+| `dump_version` | Which dump the words came from |
+| `revision_id` | The article revision, so a claim can be dated exactly |
+| `source_chars`, `extract_chars` | How much of the original survived parsing |
+
+**The attribution is in the same row as the text, deliberately.** Unlike every
+other source in the canon, this one carries an obligation that travels with
+each snippet. Storing the credit beside the words rather than attaching it at
+render time means no query can select the prose and forget the licence — they
+are one row.
+
+`source_chars` and `extract_chars` exist to find leads the parser mangled: a
+ratio far from the usual one is the signature of a template it did not know.
+See [Importing prose](/lyrid/guides/importing-prose/) and
+[ADR 0007](https://github.com/lacodda/lyrid/blob/main/docs/adr/0007-prose-parsed-from-wikitext.md).
+
 ## Replacing the canon
 
 An importer truncates the tables it owns and writes the new contents in one
