@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.2] - 2026-08-19
+
+### Features
+- Add Wikipedia prose with its attribution
+
 ## [0.4.1] - 2026-08-18
 
 ### Features
