@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod import;
+mod layout;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -25,6 +26,9 @@ enum Command {
     /// Build the canonical universe from an open data dump.
     #[command(subcommand)]
     Import(ImportCommand),
+    /// Project the similarity graph into sky coordinates and cut the tile
+    /// pyramid. Requires the similarity import to have run first.
+    Layout(layout::build::Args),
 }
 
 #[derive(Subcommand)]
@@ -93,6 +97,10 @@ async fn main() -> Result<()> {
         Some(Command::Import(ImportCommand::Wikipedia(args))) => {
             let pool = connect(&config).await?;
             import::wikipedia::run(&pool, &args).await
+        }
+        Some(Command::Layout(args)) => {
+            let pool = connect(&config).await?;
+            layout::build::run(&pool, &args).await
         }
     }
 }

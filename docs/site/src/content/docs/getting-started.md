@@ -62,7 +62,13 @@ MusicBrainz comes first in every case: every later import resolves against the c
 
 The last one streams a 100 GB dump straight from the network without ever storing it — about ten hours, so run it in the background. What it extracts is a few hundred megabytes.
 
-See [Importing MusicBrainz](/lyrid/guides/importing-musicbrainz/), [Importing similarity](/lyrid/guides/importing-similarity/), [Importing genres and labels](/lyrid/guides/importing-genres/) [Importing facts and influence](/lyrid/guides/importing-facts/) and [Importing prose](/lyrid/guides/importing-prose/). Everything else runs fine without them; there is simply nothing to look at yet.
+Once the canon is filled, the sky is built from it:
+
+```sh
+cargo run --release -- layout --tiles ./tiles   # coordinates, then the tile pyramid
+```
+
+See [Importing MusicBrainz](/lyrid/guides/importing-musicbrainz/), [Importing similarity](/lyrid/guides/importing-similarity/), [Importing genres and labels](/lyrid/guides/importing-genres/) [Importing facts and influence](/lyrid/guides/importing-facts/) [Importing prose](/lyrid/guides/importing-prose/) and [Building the sky](/lyrid/guides/building-the-sky/). Everything else runs fine without them; there is simply nothing to look at yet.
 
 :::note[Adding a migration]
 Migrations are embedded into the binary at compile time, so a newly added `.sql` file needs a rebuild before it will apply — `cargo build` after adding one, or the server will happily run the old set.

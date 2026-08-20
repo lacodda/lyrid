@@ -238,6 +238,35 @@ ratio far from the usual one is the signature of a template it did not know.
 See [Importing prose](/lyrid/guides/importing-prose/) and
 [ADR 0007](https://github.com/lacodda/lyrid/blob/main/docs/adr/0007-prose-parsed-from-wikitext.md).
 
+## `sky_layout`
+
+One row per layout run: where the stars were put, and by what.
+
+| Column | Meaning |
+| --- | --- |
+| `key` | Stable name, e.g. `listenbrainz-2020-fd300-s24301` |
+| `metric_id` | Which similarity graph was projected — a layout of another metric is another sky |
+| `description` | Algorithm and parameters, in enough detail to run it again |
+| `seed` | The random seed the run used |
+| `stars` | How many were placed, so a truncated run shows as a number rather than a suspicion |
+
+Versioned for the same reason similarity is: a layout is not a fact but a
+rendering of one, and recomputing it moves every star. Coordinates are
+comparable **within** a layout and never across two.
+
+## `artist_position`
+
+Where each star sits: `(layout_id, artist_id, x, y)`.
+
+Single precision on purpose — the layout is a picture, not a measurement, and
+`real` is finer than any zoom level shows. Indexed by `(layout_id, x, y)` so
+the tile builder can walk a layout in spatial order instead of sorting
+millions of rows per level.
+
+Artists with no similarity edges have no position: there is nothing to place
+them near. See [Building the sky](/lyrid/guides/building-the-sky/) and
+[ADR 0008](https://github.com/lacodda/lyrid/blob/main/docs/adr/0008-layout-written-here.md).
+
 ## Replacing the canon
 
 An importer truncates the tables it owns and writes the new contents in one
