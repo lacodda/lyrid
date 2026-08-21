@@ -9,7 +9,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "lint": "eslint . && tsc --noEmit"
+    "lint": "eslint . && tsc --noEmit",
+    "prototype": "vite --open /prototype/sky.html"
   },
   "dependencies": {
     "react": "^19.2.8",
