@@ -23,6 +23,8 @@ One layout, computed offline and versioned, shared by everyone. This is a delibe
 - Landmarks are shared. "Between the two big post-punk clusters" is a direction, not a private impression.
 - Re-laying the map silently would move everyone's landmarks, so the canon is versioned rather than continuously recomputed.
 
+How the coordinates are actually computed — and why the layout is written here rather than taken from a library — is in [Building the sky](/lyrid/guides/building-the-sky/) and [ADR 0008](https://github.com/lacodda/lyrid/blob/main/docs/adr/0008-layout-written-here.md). What the client receives is in the [tile format](/lyrid/reference/tile-format/).
+
 ## The fog is yours
 
 The only per-user layer of the map is the fog of war: what you have and have not heard. It is a small coverage texture, kilobytes in size, sampled while stars are drawn.
