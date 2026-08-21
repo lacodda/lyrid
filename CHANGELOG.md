@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.6.0] - 2026-08-21
+
+### Features
+- Prove the frame budget with a renderer prototype
+- Put the sky in the product
+
 ## [0.5.0] - 2026-08-21
 
 ### Bug Fixes
