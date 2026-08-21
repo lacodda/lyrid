@@ -406,6 +406,40 @@ async fn write_artist_discogs(tx: &mut sqlx::PgTransaction<'_>, mapping: &HashMa
     Ok(written)
 }
 
+/// Turns per-Discogs-artist counts into the rows `artist_genre` holds.
+///
+/// Summed before insertion, not after. A canonical artist can carry several
+/// Discogs links -- MusicBrainz keeps one act where Discogs split it, and
+/// 24,185 artists in a full canon do -- so the same (artist, genre) pair can
+/// arrive from two Discogs entries. Postgres refuses to let one statement
+/// update a row twice ("ON CONFLICT DO UPDATE command cannot affect row a
+/// second time"), and summing is also the honest answer: those really are the
+/// same artist's releases.
+///
+/// Separate from the writing so the tests exercise these rules rather than a
+/// reimplementation of them.
+fn genre_rows(mapping: &HashMap<i32, Vec<i32>>, counts: &GenreCounts, genre_ids: &HashMap<(String, bool), i32>) -> Vec<(i32, i32, i32)> {
+    let mut totals: HashMap<(i32, i32), i32> = HashMap::new();
+    for (discogs_id, per_artist) in counts {
+        let Some(artists) = mapping.get(discogs_id) else {
+            continue;
+        };
+        for artist in artists {
+            for (key, releases) in per_artist {
+                if let Some(genre_id) = genre_ids.get(key) {
+                    *totals.entry((*artist, *genre_id)).or_insert(0) += *releases;
+                }
+            }
+        }
+    }
+
+    // Sorted so a re-import writes the same rows in the same order: the canon
+    // is rebuilt from dumps, and hash order is not reproducible.
+    let mut rows: Vec<(i32, i32, i32)> = totals.into_iter().map(|((artist, genre), releases)| (artist, genre, releases)).collect();
+    rows.sort_unstable();
+    rows
+}
+
 /// Writes the genre vocabulary and each artist's aggregated genres.
 async fn write_genres(tx: &mut sqlx::PgTransaction<'_>, mapping: &HashMap<i32, Vec<i32>>, counts: &GenreCounts) -> Result<i64> {
     // The vocabulary first: a few thousand rows, inserted once, so the
@@ -433,19 +467,7 @@ async fn write_genres(tx: &mut sqlx::PgTransaction<'_>, mapping: &HashMap<i32, V
 
     // One Discogs artist can be several canonical artists (MusicBrainz splits
     // an act Discogs keeps whole), so the counts fan out over all of them.
-    let mut rows: Vec<(i32, i32, i32)> = Vec::new();
-    for (discogs_id, per_artist) in counts {
-        let Some(artists) = mapping.get(discogs_id) else {
-            continue;
-        };
-        for artist in artists {
-            for (key, releases) in per_artist {
-                if let Some(genre_id) = genre_ids.get(key) {
-                    rows.push((*artist, *genre_id, *releases));
-                }
-            }
-        }
-    }
+    let rows = genre_rows(mapping, counts, &genre_ids);
 
     let mut written = 0i64;
     for chunk in rows.chunks(BATCH) {
@@ -523,6 +545,42 @@ async fn write_labels(tx: &mut sqlx::PgTransaction<'_>, labels: &[Label]) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sums_genres_when_one_artist_has_several_discogs_entries() {
+        // MusicBrainz keeps one act where Discogs split it: 24,185 artists in
+        // a full canon carry more than one Discogs link. Both entries'
+        // releases belong to the same star, so they add up -- and emitting the
+        // pair twice instead would make Postgres refuse the whole insert
+        // ("ON CONFLICT DO UPDATE command cannot affect row a second time").
+        let mut counts: GenreCounts = HashMap::new();
+        counts.insert(700, HashMap::from([(("Techno".to_string(), true), 3)]));
+        counts.insert(701, HashMap::from([(("Techno".to_string(), true), 5)]));
+
+        // Both Discogs ids resolve to canonical artist 42.
+        let mapping: HashMap<i32, Vec<i32>> = HashMap::from([(700, vec![42]), (701, vec![42])]);
+        let genre_ids: HashMap<(String, bool), i32> = HashMap::from([(("Techno".to_string(), true), 9)]);
+
+        let rows = genre_rows(&mapping, &counts, &genre_ids);
+        assert_eq!(rows, vec![(42, 9, 8)], "the two entries should sum, not collide");
+    }
+
+    #[test]
+    fn genre_rows_come_out_in_a_stable_order() {
+        // The canon is rebuilt from dumps; hash order would make two imports
+        // of the same input write different files.
+        let counts: GenreCounts = HashMap::from([
+            (1, HashMap::from([(("Rock".to_string(), false), 2)])),
+            (2, HashMap::from([(("Jazz".to_string(), false), 1)])),
+        ]);
+        let mapping: HashMap<i32, Vec<i32>> = HashMap::from([(1, vec![5]), (2, vec![3])]);
+        let genre_ids: HashMap<(String, bool), i32> = HashMap::from([(("Rock".to_string(), false), 10), (("Jazz".to_string(), false), 11)]);
+
+        let first = genre_rows(&mapping, &counts, &genre_ids);
+        let second = genre_rows(&mapping, &counts, &genre_ids);
+        assert_eq!(first, second);
+        assert!(first.windows(2).all(|w| w[0] <= w[1]), "rows should be sorted");
+    }
 
     #[test]
     fn reads_the_discogs_id_out_of_every_url_form() {

@@ -171,6 +171,15 @@ pub fn run(graph: &Graph, params: &Params, mut progress: impl FnMut(u32, f32)) -
         let tree = Quadtree::build(&xs, &ys, &graph.masses, params.theta);
         let mut movement = 0f32;
 
+        // Global cooling: the layout takes big steps while it is finding the
+        // shape and small ones while it settles into it. Without it a
+        // force-directed run oscillates around its answer instead of
+        // arriving, which is what "movement stopped falling" looks like from
+        // outside.
+        #[expect(clippy::cast_precision_loss, reason = "iteration counts are small")]
+        let elapsed = iteration as f32 / params.iterations.max(1) as f32;
+        let cooling = 1.0 - elapsed * 0.9;
+
         // Accumulated in index order: parallel accumulation would make the
         // result depend on thread scheduling, and a versioned layout cannot
         // afford that.
@@ -197,8 +206,25 @@ pub fn run(graph: &Graph, params: &Params, mut progress: impl FnMut(u32, f32)) -
                 fy += dy * weight * params.attraction;
             }
 
-            vxs[i] = (vxs[i] + fx) * params.damping;
-            vys[i] = (vys[i] + fy) * params.damping;
+            // Divided by the star's degree, as ForceAtlas2 does. Without
+            // this a hub with thousands of edges gathers a force hundreds of
+            // times larger than an ordinary star's and pins itself against
+            // the step cap forever: measured on the real graph, the top
+            // degree is 5650 against a mean of 58, and the layout stopped
+            // converging entirely -- movement fell only 1% per ten rounds
+            // while the average star ran at 77% of the cap.
+            //
+            // Dividing makes a star's position depend on where its
+            // neighbours are rather than on how many it has.
+            // A degree is a small count -- the largest in the real graph is
+            // 5650 -- so f32 represents it exactly.
+            #[expect(clippy::cast_precision_loss, reason = "a vertex degree is far below f32's exact-integer range")]
+            let degree = (to - from).max(1) as f32;
+            fx /= degree;
+            fy /= degree;
+
+            vxs[i] = (vxs[i] + fx) * params.damping * cooling;
+            vys[i] = (vys[i] + fy) * params.damping * cooling;
 
             // A star cannot cross the whole map in one round: an unbounded
             // step turns a dense cluster into an explosion the layout never
