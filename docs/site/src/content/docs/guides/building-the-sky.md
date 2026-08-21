@@ -117,6 +117,35 @@ dump ([ADR 0004](https://github.com/lacodda/lyrid/blob/main/docs/adr/0004-simila
 It is normalised against the brightest star and square-rooted, so the long
 tail stays visible instead of collapsing into the hubs.
 
+## What a real run looks like
+
+Measured against the full canon — 2.96M artists, of which 206,636 appear in
+the similarity graph, joined by 5.96M edges:
+
+| | |
+| --- | --- |
+| Stars placed | 206,636 |
+| Iterations | 300 |
+| Peak memory | ~170 MB |
+| Time | 13.4 minutes |
+| Tiles | 250 files, 6.3 MB |
+
+**Distance tracks similarity**, which is the claim the map makes. Averaged over
+200,000 edges of the finished layout:
+
+| Edge strength | Average distance |
+| --- | --- |
+| Strong (≥ 0.5) | 10 |
+| Medium (0.1–0.5) | 21 |
+| Weak (0.01–0.1) | 72 |
+| Faint (< 0.01) | 479 |
+
+**Genres separate without being told to.** Discogs genres take no part in the
+layout — it sees only the listening graph — yet styles land in regions a third
+the width of the sky or less: Delta Blues 0.23, Country Blues 0.29, Texas
+Blues 0.31, Electric Blues 0.32, Classic Rock 0.32. The blues family lands
+together because people listen to it together.
+
 ## Judging a layout
 
 Some of it is testable and tested: connected stars end up closer than

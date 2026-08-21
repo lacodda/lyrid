@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.5.0] - 2026-08-21
+
+### Bug Fixes
+- Make the layout converge, and let one artist have two Discogs entries
+
+### Documentation
+- Specify the tile format the renderer will read
+- Link the sky page to how the layout is built
+
+### Features
+- Project the similarity graph into a sky of tiles
+
 ## [0.4.2] - 2026-08-19
 
 ### Features
