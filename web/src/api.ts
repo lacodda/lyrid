@@ -26,3 +26,53 @@ function isHealth(value: unknown): value is Health {
   const candidate = value as Record<string, unknown>
   return typeof candidate.status === 'string' && typeof candidate.version === 'string' && typeof candidate.database === 'string'
 }
+
+/** A genre as Discogs sees it, with the weight behind it. */
+export interface Genre {
+  name: string
+  is_style: boolean
+  releases: number
+}
+
+/** A neighbour in the similarity graph. */
+export interface Neighbour {
+  id: number
+  name: string
+  score: number
+}
+
+/** Everything a card shows about one star. */
+export interface Artist {
+  id: number
+  mbid: string
+  name: string
+  comment: string | null
+  kind: string | null
+  area: string | null
+  begin_year: number | null
+  end_year: number | null
+  position: { x: number; y: number; brightness: number } | null
+  genres: Genre[]
+  similar: Neighbour[]
+}
+
+/** A search result, with a place to fly to. */
+export interface Hit {
+  id: number
+  name: string
+  comment: string | null
+  x: number | null
+  y: number | null
+}
+
+export async function fetchArtist(id: number, signal?: AbortSignal): Promise<Artist> {
+  const response = await fetch(`/api/artists/${String(id)}`, { signal })
+  if (!response.ok) throw new Error(response.status === 404 ? 'no such artist' : 'the canon could not be read')
+  return (await response.json()) as Artist
+}
+
+export async function searchArtists(term: string, signal?: AbortSignal): Promise<Hit[]> {
+  const response = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { signal })
+  if (!response.ok) throw new Error('the canon could not be searched')
+  return (await response.json()) as Hit[]
+}

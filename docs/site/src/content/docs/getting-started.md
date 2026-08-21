@@ -74,13 +74,39 @@ See [Importing MusicBrainz](/lyrid/guides/importing-musicbrainz/), [Importing si
 Migrations are embedded into the binary at compile time, so a newly added `.sql` file needs a rebuild before it will apply — `cargo build` after adding one, or the server will happily run the old set.
 :::
 
-## The SPA
+## The sky
 
 ```sh
 cd web
 pnpm install
 pnpm dev
 ```
+
+The map needs tiles. Point the layout at the folder the dev server publishes:
+
+```sh
+cargo run --release -- layout --tiles web/public/tiles
+```
+
+Then `http://localhost:5173` shows the sky itself — drag to pan, wheel to
+zoom, click a star for its card, and search by name. The pyramid is generated
+data, not source, so it is not committed; rebuild it whenever the canon
+changes.
+
+### The renderer prototype
+
+`web/prototype/sky.html` is the standalone page the renderer was measured in,
+kept because re-running it costs twenty seconds and answers "did that change
+cost us frames?".
+
+```sh
+cd web && pnpm prototype                        # open it
+# ?benchmark  runs a fixed sweep over every level and reports frame times
+# ?stress=8   draws the scene eight times per frame, to find the real ceiling
+```
+
+The numbers it produced are in
+[ADR 0009](https://github.com/lacodda/lyrid/blob/main/docs/adr/0009-renderer-measured.md).
 
 Vite serves the SPA on `http://127.0.0.1:5173` and proxies `/health` and `/api` to the API, so the browser only ever talks to one origin and no CORS configuration is needed.
 

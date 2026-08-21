@@ -17,6 +17,7 @@ pub struct AppState {
 pub fn router(pool: PgPool) -> Router {
     Router::new()
         .route("/health", get(health))
+        .merge(crate::api::artists::routes())
         .with_state(AppState { pool })
         .layer(TraceLayer::new_for_http())
 }

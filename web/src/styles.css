@@ -6,7 +6,7 @@
   --lyrid-text: #e8ecf6;
   --lyrid-muted: #8d96ad;
   --lyrid-warn: #e8b04a;
-  --lyrid-glass: rgb(20 28 48 / 0.5);
+  --lyrid-glass: rgb(20 28 48 / 0.72);
   --lyrid-edge: rgb(122 152 214 / 0.16);
 
   color-scheme: dark;
@@ -18,106 +18,268 @@
   box-sizing: border-box;
 }
 
-body {
+html,
+body,
+#root {
+  height: 100%;
   margin: 0;
-  background:
-    radial-gradient(1100px 720px at 78% -10%, rgb(74 143 232 / 0.16), transparent 60%),
-    radial-gradient(820px 620px at 10% 110%, rgb(74 143 232 / 0.1), transparent 62%),
-    var(--lyrid-void);
+  background: var(--lyrid-void);
 }
 
-.shell {
-  min-height: 100dvh;
-  max-width: 44rem;
-  margin: 0 auto;
-  padding: clamp(2rem, 10vh, 6rem) 1.25rem 4rem;
-  display: flex;
-  flex-direction: column;
-  gap: 2.25rem;
+/* The sky is the page. Everything else floats over it, so nothing here
+   scrolls or reflows while the camera moves. */
+.app {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
 }
 
-.shell__header {
-  display: flex;
-  align-items: center;
-  gap: 0.9rem;
+.sky,
+.sky__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
-.shell__mark {
-  width: 3rem;
-  height: 3rem;
+.sky__canvas {
+  display: block;
+  cursor: grab;
+  touch-action: none;
 }
 
-.shell__title {
+.sky__canvas:active {
+  cursor: grabbing;
+}
+
+.sky__notice {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
   margin: 0;
-  font-size: 2rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.shell__tagline {
-  margin: 0.15rem 0 0;
   color: var(--lyrid-muted);
-  font-size: 0.95rem;
+  pointer-events: none;
 }
 
-/* ----------------------------------------------------------------- panel -- */
-
-.panel {
-  border: 1px solid var(--lyrid-edge);
-  border-radius: 0.9rem;
-  background: var(--lyrid-glass);
-  backdrop-filter: blur(12px);
-  padding: 1.6rem 1.5rem;
+.sky__notice--error {
+  color: var(--lyrid-warn);
+  padding: 0 2rem;
+  text-align: center;
+  max-width: 32rem;
+  margin: 0 auto;
 }
 
-.panel__title {
-  margin: 0 0 0.7rem;
+/* ------------------------------------------------------------------ shell */
+
+.app__header {
+  position: absolute;
+  top: 1.25rem;
+  left: 1.5rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  pointer-events: none;
+}
+
+.app__mark {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+.app__title {
+  margin: 0;
   font-size: 1.15rem;
   font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
-.panel__body {
+.app__tagline {
   margin: 0;
+  font-size: 0.78rem;
   color: var(--lyrid-muted);
+}
+
+.app__status {
+  position: absolute;
+  bottom: 1rem;
+  left: 1.5rem;
+  margin: 0;
+  font: 0.75rem/1.4 ui-monospace, monospace;
+  color: var(--lyrid-muted);
+  pointer-events: none;
+}
+
+/* ----------------------------------------------------------------- search */
+
+.search {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.5rem;
+  width: min(22rem, calc(100vw - 3rem));
+}
+
+.search__input {
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--lyrid-edge);
+  border-radius: 8px;
+  background: var(--lyrid-glass);
+  backdrop-filter: blur(10px);
+  color: var(--lyrid-text);
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.search__input::placeholder {
+  color: var(--lyrid-muted);
+}
+
+.search__input:focus-visible {
+  outline: 2px solid var(--lyrid-azure);
+  outline-offset: 1px;
+}
+
+.search__hits {
+  margin: 0.4rem 0 0;
+  padding: 0.3rem;
+  list-style: none;
+  border: 1px solid var(--lyrid-edge);
+  border-radius: 8px;
+  background: var(--lyrid-glass);
+  backdrop-filter: blur(10px);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.search__hit {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search__hit:hover,
+.search__hit:focus-visible {
+  background: rgb(74 143 232 / 0.16);
+  outline: none;
+}
+
+.search__hit-name {
+  display: block;
+  font-size: 0.9rem;
+}
+
+.search__hit-comment {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--lyrid-muted);
+}
+
+/* ------------------------------------------------------------------- card */
+
+.card {
+  position: absolute;
+  top: 5.5rem;
+  right: 1.5rem;
+  width: min(22rem, calc(100vw - 3rem));
+  max-height: calc(100vh - 8rem);
+  overflow-y: auto;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--lyrid-edge);
+  border-radius: 10px;
+  background: var(--lyrid-glass);
+  backdrop-filter: blur(12px);
+}
+
+.card__close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.6rem;
+  border: 0;
+  background: transparent;
+  color: var(--lyrid-muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.card__close:hover {
+  color: var(--lyrid-text);
+}
+
+.card__name {
+  margin: 0 1.5rem 0.15rem 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.card__comment {
+  margin: 0 0 0.6rem;
+  font-size: 0.82rem;
+  color: var(--lyrid-muted);
+}
+
+.card__facts {
+  margin: 0 0 0.9rem;
+  font-size: 0.82rem;
+  color: var(--lyrid-muted);
+}
+
+.card__genres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.card__genre {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--lyrid-edge);
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
+
+/* The release count is what makes a genre a claim rather than a label. */
+.card__genre-count {
+  color: var(--lyrid-azure);
+  font-size: 0.7rem;
+}
+
+.card__section {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lyrid-muted);
+}
+
+.card__similar {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
   line-height: 1.7;
 }
 
-/* ---------------------------------------------------------------- status -- */
-
-.status {
-  margin: 1.7rem 0 0;
-  padding-top: 1.15rem;
-  border-top: 1px solid var(--lyrid-edge);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  font-family: ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
+.card__muted {
+  margin: 0;
+  color: var(--lyrid-muted);
   font-size: 0.85rem;
 }
 
-.status__row {
-  display: flex;
-  gap: 0.9rem;
-  align-items: baseline;
-}
-
-.status__key {
-  min-width: 5rem;
-  color: var(--lyrid-muted);
-}
-
-.status__value {
-  margin: 0;
-}
-
-.status__value--ok {
-  color: var(--lyrid-azure);
-}
-
-.status__value--warn {
+.card__muted--error {
   color: var(--lyrid-warn);
-}
-
-.status__value--idle {
-  color: var(--lyrid-azure-dim);
 }
