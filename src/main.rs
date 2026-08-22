@@ -127,7 +127,7 @@ async fn serve(config: &config::Config) -> Result<()> {
         .with_context(|| format!("failed to bind {}", config.addr))?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), addr = %config.addr, "lyrid listening");
 
-    axum::serve(listener, app::router(pool))
+    axum::serve(listener, app::router(pool, config.static_dir.as_deref()))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("server error")?;

@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
@@ -12,6 +13,12 @@ pub struct Config {
     pub addr: SocketAddr,
     /// `PostgreSQL` connection string (`DATABASE_URL`).
     pub database_url: String,
+    /// Directory holding the built SPA and the tile pyramid (`LYRID_STATIC`).
+    ///
+    /// Unset in development, where Vite serves those and proxies the API here.
+    /// Set on a stand, where this process is the only thing listening — which
+    /// is the difference the stand exists to expose.
+    pub static_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -24,7 +31,12 @@ impl Config {
         let addr = lookup("LYRID_ADDR").unwrap_or_else(|| DEFAULT_ADDR.to_string());
         let addr = addr.parse().with_context(|| format!("LYRID_ADDR is not a valid socket address: {addr}"))?;
         let database_url = lookup("DATABASE_URL").context("DATABASE_URL is not set (e.g. postgres://lyrid:lyrid@localhost:5432/lyrid)")?;
-        Ok(Self { addr, database_url })
+        let static_dir = lookup("LYRID_STATIC").filter(|path| !path.trim().is_empty()).map(PathBuf::from);
+        Ok(Self {
+            addr,
+            database_url,
+            static_dir,
+        })
     }
 }
 
@@ -54,6 +66,28 @@ mod tests {
     fn requires_database_url() {
         let error = Config::from_lookup(env(&[])).unwrap_err();
         assert!(error.to_string().contains("DATABASE_URL"));
+    }
+
+    #[test]
+    fn serves_no_static_files_unless_told_where() {
+        // Development is the unset case: Vite serves the SPA and proxies here.
+        let config = Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid")])).unwrap();
+        assert!(config.static_dir.is_none());
+    }
+
+    #[test]
+    fn reads_the_static_directory() {
+        let config = Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid"), ("LYRID_STATIC", "/srv/lyrid")])).unwrap();
+        assert_eq!(config.static_dir.as_deref(), Some(std::path::Path::new("/srv/lyrid")));
+    }
+
+    #[test]
+    fn treats_an_empty_static_directory_as_unset() {
+        // An unset variable and one set to nothing mean the same thing; a
+        // compose file that leaves it blank should not make the server serve
+        // the process's working directory.
+        let config = Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid"), ("LYRID_STATIC", "  ")])).unwrap();
+        assert!(config.static_dir.is_none());
     }
 
     #[test]
