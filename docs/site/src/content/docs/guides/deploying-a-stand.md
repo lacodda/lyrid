@@ -54,8 +54,9 @@ Three things worth knowing:
 - **It is not quick, and it is not stuck.** Removing 2.86M artists means
   clearing fourteen child tables first — see
   [ADR 0010](https://github.com/lacodda/lyrid/blob/main/docs/adr/0010-a-slice-for-a-small-stand.md)
-  for why that order matters. Expect tens of minutes on a desktop and longer on
-  a small machine. Each table is logged as it finishes, so progress is visible.
+  for why that order matters. Measured end to end on the real canon it took
+  **about an hour** on a desktop, and a small machine will be slower. Each
+  table is logged as it finishes, so progress is visible.
 - **Space returns only after `VACUUM FULL`.** Postgres marks the deleted rows
   dead but keeps the files. On a machine chosen for being small, that is the
   step that actually frees the disk.

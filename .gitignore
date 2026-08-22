@@ -30,3 +30,6 @@ Thumbs.db
 
 # A benchmark run's output; the baseline that matters is committed beside it.
 /web/prototype/benchmark.json
+
+# Staging directory assembled by tools/stage-deploy.sh for a stand upload.
+/deploy/

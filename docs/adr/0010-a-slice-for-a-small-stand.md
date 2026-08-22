@@ -54,9 +54,15 @@ recording. `ON DELETE CASCADE` in PostgreSQL is enforced by a **per-row
 trigger**, not a set operation: `EXPLAIN ANALYZE` on a 200-row delete reports
 `calls=200` for each of the sixteen constraints. Measured at 5.46 ms per
 artist, deleting 2.86M artists directly projects to **over four hours**, and a
-first attempt was cancelled after 44 minutes without finishing. Emptying the
-child tables first leaves the cascades with nothing to find, and the final
-delete becomes an ordinary bulk operation.
+first attempt was cancelled after 44 minutes without finishing.
+
+Emptying the child tables first is a large win but not a complete one, and the
+distinction is worth being precise about. The triggers still fire once per row
+— they simply find less to do. Measured after the children were cleared, the
+per-artist cost fell from 5.46 ms to roughly 0.9 ms, so the final delete over
+2.86M artists still takes tens of minutes. A full cut of the real canon,
+measured end to end, took **about an hour**: the fourteen child tables in
+roughly five minutes and the artists themselves for the rest.
 
 **The list of tables comes from the catalogue, not from this code.** Reading
 `pg_constraint` for everything referencing `artist` with `ON DELETE CASCADE`
@@ -85,3 +91,10 @@ that matters. The command says so when it finishes.
 **Someone still needs a machine that can import in full.** This trades a
 one-time cost on a capable machine for a permanently smaller stand, which is
 the right way round: the import runs occasionally, the stand runs always.
+
+## Confirmed
+
+A full cut was run against a copy of the real canon. It kept exactly 100,000
+artists and 5,462,460 edges, every one of them with a position, and left **no
+orphaned row** in `artist_similarity` or `artist_position` — the property the
+cascade was there to guarantee, verified rather than assumed.
