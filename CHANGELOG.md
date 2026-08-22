@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.6.1] - 2026-08-22
+
+### Bug Fixes
+- Clear child tables before their parents
+
+### Build
+- Stage a stand upload from the committed tree
+
+### Features
+- Serve the built SPA and the tile pyramid
+- Add a stand image and a slice command
+
 ## [0.6.0] - 2026-08-21
 
 ### Features
