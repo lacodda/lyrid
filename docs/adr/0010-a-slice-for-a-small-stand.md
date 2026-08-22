@@ -98,3 +98,9 @@ A full cut was run against a copy of the real canon. It kept exactly 100,000
 artists and 5,462,460 edges, every one of them with a position, and left **no
 orphaned row** in `artist_similarity` or `artist_position` — the property the
 cascade was there to guarantee, verified rather than assumed.
+
+After `VACUUM FULL` the database went from **4251 MB to 897 MB** — a 4.7x
+reduction, and the number that decides whether a stand can hold it. Dumped for
+transport it is **119 MB** compressed (`pg_dump -Fc -Z6`), alongside 6.3 MB of
+tiles: small enough to move a finished slice over the network in minutes, which
+is what makes importing the canon on the stand itself unnecessary.

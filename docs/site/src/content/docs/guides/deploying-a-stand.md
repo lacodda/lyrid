@@ -58,8 +58,10 @@ Three things worth knowing:
   **about an hour** on a desktop, and a small machine will be slower. Each
   table is logged as it finishes, so progress is visible.
 - **Space returns only after `VACUUM FULL`.** Postgres marks the deleted rows
-  dead but keeps the files. On a machine chosen for being small, that is the
-  step that actually frees the disk.
+  dead but keeps the files, so the database still measures its old size until
+  the tables are rewritten. Measured on the real canon: **4251 MB before, 897
+  MB after** — on a machine chosen for being small, this is the step that
+  actually frees the disk, not an optional tidy-up.
 
 Use `--dry-run` to see what would go without changing anything.
 
