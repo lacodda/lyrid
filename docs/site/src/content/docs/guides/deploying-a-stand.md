@@ -47,10 +47,15 @@ retains **5,462,464 of 5,955,657 similarity edges — 92% of the graph from 3.4%
 of the artists**. Connectivity is concentrated enough that the result reads as
 the sky, not a thinned copy of it.
 
-Two things worth knowing:
+Three things worth knowing:
 
 - **Run `lyrid layout` first.** Brightness comes from the layout, so the
   command refuses to run before one exists.
+- **It is not quick, and it is not stuck.** Removing 2.86M artists means
+  clearing fourteen child tables first — see
+  [ADR 0010](https://github.com/lacodda/lyrid/blob/main/docs/adr/0010-a-slice-for-a-small-stand.md)
+  for why that order matters. Expect tens of minutes on a desktop and longer on
+  a small machine. Each table is logged as it finishes, so progress is visible.
 - **Space returns only after `VACUUM FULL`.** Postgres marks the deleted rows
   dead but keeps the files. On a machine chosen for being small, that is the
   step that actually frees the disk.

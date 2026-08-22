@@ -48,11 +48,28 @@ independently would be five chances to disagree, and disagreement here produces
 a star with no edges or an edge with no star. One `DELETE` cannot disagree with
 itself.
 
-**The schema does the work.** All sixteen artist-referencing tables cascade on
-delete, so removing an artist removes their URLs, release groups, genres, prose
-and edges without the command naming any of those tables — and a table added
-later is covered automatically, provided it cascades. `label` is the one large
-table standing outside that graph and is dropped outright.
+**Children are cleared in bulk before their parents.** This is the one place
+where the obvious implementation is unusably slow, and the reason is worth
+recording. `ON DELETE CASCADE` in PostgreSQL is enforced by a **per-row
+trigger**, not a set operation: `EXPLAIN ANALYZE` on a 200-row delete reports
+`calls=200` for each of the sixteen constraints. Measured at 5.46 ms per
+artist, deleting 2.86M artists directly projects to **over four hours**, and a
+first attempt was cancelled after 44 minutes without finishing. Emptying the
+child tables first leaves the cascades with nothing to find, and the final
+delete becomes an ordinary bulk operation.
+
+**The list of tables comes from the catalogue, not from this code.** Reading
+`pg_constraint` for everything referencing `artist` with `ON DELETE CASCADE`
+keeps the property the cascade was providing: a table added later is covered
+without anyone remembering to edit the command. `label` references no artist at
+all and is dropped outright.
+
+Two smaller traps sit alongside it. The temporary table of kept artists must be
+`ANALYZE`d after it is filled, or the planner assumes a handful of rows and
+picks a nested loop for every prune. And the identifiers interpolated into
+those statements are validated before use — they come from the catalogue rather
+than from input, but a statement that cannot be parameterised should not rest
+on that alone.
 
 **A slice requires a layout.** Brightness comes from `artist_position`, so the
 command refuses to run before `lyrid layout` and says so, rather than failing
