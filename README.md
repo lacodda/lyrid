@@ -21,7 +21,9 @@ The universe is assembled locally from open dumps and datasets — MusicBrainz, 
 
 ## Status
 
-Pre-alpha. The stars are in and the routes between them: a MusicBrainz full export builds the canon (~3M artists with countries, years, release groups and URL relationships), and the ListenBrainz relations dataset adds ~7M similarity edges with the brightness derived from them. The sky layout and the renderer come next. Watch this repository.
+Pre-alpha, and the sky is on screen. A MusicBrainz full export builds the canon (~3M artists with countries, years, release groups and URL relationships); the ListenBrainz relations dataset adds ~6M similarity edges and the brightness derived from them; Discogs, Wikidata and Wikipedia fill in genres, facts and prose. The force-directed layout places 206,636 stars, the tile pyramid cuts them into static files, and the WebGL2 renderer draws all of them at 60 FPS on integrated graphics — measured, with roughly five times that as the ceiling ([ADR 0009](https://github.com/lacodda/lyrid/blob/main/docs/adr/0009-renderer-measured.md)).
+
+Deployable to a small machine: `lyrid slice` cuts the canon to the brightest artists, keeping 92% of the similarity graph from 3.4% of the artists ([ADR 0010](https://github.com/lacodda/lyrid/blob/main/docs/adr/0010-a-slice-for-a-small-stand.md)). The star card, audio previews and accounts come next. Watch this repository.
 
 ## Development
 
