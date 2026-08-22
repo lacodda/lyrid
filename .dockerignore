@@ -1,0 +1,19 @@
+# The build context is uploaded to the daemon, so keep it to sources.
+# `target` alone is gigabytes, and a host-built one is the wrong architecture.
+target
+node_modules
+web/node_modules
+web/dist
+docs/site/node_modules
+docs/site/dist
+docs/site/.astro
+
+# Generated locally from a full canon; a stand builds its own slice.
+tiles
+
+# Never in an image: credentials and anything the assistant leaves behind.
+.env
+.git
+.claude
+CLAUDE.md
+AGENTS.md

@@ -3,6 +3,7 @@ mod app;
 mod config;
 mod import;
 mod layout;
+mod slice;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -30,6 +31,9 @@ enum Command {
     /// Project the similarity graph into sky coordinates and cut the tile
     /// pyramid. Requires the similarity import to have run first.
     Layout(layout::build::Args),
+    /// Cut the canon down to the brightest artists, for a stand too small to
+    /// hold all of it. Requires the layout to have run first.
+    Slice(slice::Args),
 }
 
 #[derive(Subcommand)]
@@ -98,6 +102,10 @@ async fn main() -> Result<()> {
         Some(Command::Import(ImportCommand::Wikipedia(args))) => {
             let pool = connect(&config).await?;
             import::wikipedia::run(&pool, &args).await
+        }
+        Some(Command::Slice(args)) => {
+            let pool = connect(&config).await?;
+            slice::run(&pool, &args).await
         }
         Some(Command::Layout(args)) => {
             let pool = connect(&config).await?;
