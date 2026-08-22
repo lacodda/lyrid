@@ -33,3 +33,6 @@ Thumbs.db
 
 # Staging directory assembled by tools/stage-deploy.sh for a stand upload.
 /deploy/
+
+# Local working artifacts: slice dumps and anything else not meant to ship.
+/.local/
