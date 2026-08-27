@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.6.2] - 2026-08-27
+
+### Documentation
+- Record the measured size after a cut
+
+### Features
+- Move a slice onto a stand instead of building it there
+
 ## [0.6.1] - 2026-08-22
 
 ### Bug Fixes
@@ -9,6 +17,9 @@ All notable changes to this project are documented in this file.
 
 ### Build
 - Stage a stand upload from the committed tree
+
+### Documentation
+- Generate for v0.6.1
 
 ### Features
 - Serve the built SPA and the tile pyramid
