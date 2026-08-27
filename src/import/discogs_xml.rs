@@ -115,7 +115,7 @@ impl<R: BufRead, T: Record> Records<R, T> {
             };
             match event {
                 Event::Eof => return Ok(None),
-                Event::Start(start) if start.name().as_ref() == T::ELEMENT.as_bytes() => {
+                Event::Start(start) if start.name().as_ref() == T::ELEMENT => {
                     let attributes = collect_attributes(&start);
                     let mut record = T::open(Attributes { pairs: &attributes });
                     self.read_subtree(&mut record)?;
@@ -123,7 +123,7 @@ impl<R: BufRead, T: Record> Records<R, T> {
                 }
                 // A record with no children at all: `<artist/>` appears in the
                 // dumps where an entry has been emptied.
-                Event::Empty(empty) if empty.name().as_ref() == T::ELEMENT.as_bytes() => {
+                Event::Empty(empty) if empty.name().as_ref() == T::ELEMENT => {
                     let attributes = collect_attributes(&empty);
                     return Ok(Some(T::open(Attributes { pairs: &attributes })));
                 }
@@ -160,14 +160,14 @@ impl<R: BufRead, T: Record> Records<R, T> {
             };
             match event {
                 Event::Start(start) => {
-                    path.push(String::from_utf8_lossy(start.name().as_ref()).into_owned());
+                    path.push(start.name().as_ref().to_owned());
                     open_attributes.push(collect_attributes(&start));
                     self.text.clear();
                 }
                 Event::Empty(empty) => {
                     // A self-closing element has attributes but no text --
                     // `<image .../>` and, in emptied records, `<name/>`.
-                    let name = String::from_utf8_lossy(empty.name().as_ref()).into_owned();
+                    let name = empty.name().as_ref().to_owned();
                     path.push(name);
                     let attributes = collect_attributes(&empty);
                     report(record, &path, "", &attributes);
@@ -178,9 +178,7 @@ impl<R: BufRead, T: Record> Records<R, T> {
                     // Text arrives in pieces: an entity in the middle of a
                     // value splits it, so this accumulates rather than
                     // replaces.
-                    if let Ok(decoded) = text.decode() {
-                        self.text.push_str(&decoded);
-                    }
+                    self.text.push_str(&text.into_inner());
                 }
                 // An entity reference is its own event, not part of the text
                 // around it. Ignoring it silently deletes a character from
@@ -188,15 +186,13 @@ impl<R: BufRead, T: Record> Records<R, T> {
                 // "Sigur Rós" becomes "Sigur Rs" -- and these dumps are full
                 // of both: `&amp;` in band names, `&#243;` in non-ASCII ones.
                 Event::GeneralRef(reference) => {
-                    if let Ok(name) = reference.decode() {
-                        self.text.push_str(&resolve_entity(&name));
-                    }
+                    self.text.push_str(&resolve_entity(reference.as_ref()));
                 }
                 Event::CData(data) => {
-                    self.text.push_str(&String::from_utf8_lossy(&data));
+                    self.text.push_str(&data.into_inner());
                 }
                 Event::End(end) => {
-                    if end.name().as_ref() == T::ELEMENT.as_bytes() && path.is_empty() {
+                    if end.name().as_ref() == T::ELEMENT && path.is_empty() {
                         return Ok(());
                     }
                     let attributes = open_attributes.pop().unwrap_or_default();
@@ -264,12 +260,7 @@ fn collect_attributes(start: &quick_xml::events::BytesStart<'_>) -> Vec<(String,
         .attributes()
         .with_checks(false)
         .filter_map(Result::ok)
-        .map(|attribute| {
-            (
-                String::from_utf8_lossy(attribute.key.as_ref()).into_owned(),
-                String::from_utf8_lossy(&attribute.value).into_owned(),
-            )
-        })
+        .map(|attribute| (attribute.key.as_ref().to_owned(), attribute.value.into_owned()))
         .collect()
 }
 
