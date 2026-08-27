@@ -1,6 +1,6 @@
 [package]
 name = "lyrid"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2024"
 rust-version = "1.94"
 description = "A music universe: a canonical sky of artists and genres you explore through real listening"
