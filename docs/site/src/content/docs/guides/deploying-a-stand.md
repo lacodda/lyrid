@@ -35,7 +35,9 @@ reads: URL relationships, release groups and labels alone account for more than
 half. Meanwhile only 206,636 artists have a position at all — a star with no
 edges has nowhere to be placed.
 
-So a stand carries a slice:
+So a stand carries a slice. It is cut on the machine that holds the canon, not
+here: see [Filling a stand](/lyrid/guides/filling-a-stand/) for moving it
+across. The command itself:
 
 ```sh
 lyrid slice --keep 100000
@@ -70,9 +72,11 @@ Use `--dry-run` to see what would go without changing anything.
 Tiles are data, not part of the image: they are cut from the layout and would
 otherwise force a rebuild every time the sky changed. They live in a named
 volume mounted at `/app/static/tiles`, and the server serves them directly.
+Like the slice, they are cut where the canon is and copied over — see
+[Filling a stand](/lyrid/guides/filling-a-stand/).
 
 ```sh
-lyrid layout --tiles /app/static/tiles
+lyrid layout --tiles tiles
 ```
 
 One detail the volume depends on: the image creates that directory and gives it
