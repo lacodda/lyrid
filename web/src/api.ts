@@ -41,6 +41,36 @@ export interface Neighbour {
   score: number
 }
 
+/** Where an act comes from, as Wikidata records it. */
+export interface Origin {
+  place: string | null
+  country: string | null
+  /** A person's birthplace rather than a group's place of formation. */
+  is_birth: boolean
+  inception_year: number | null
+}
+
+/**
+ * A Wikipedia lead and the credit its licence requires.
+ *
+ * The fields arrive together because the row they come from stores them
+ * together: there is no server response carrying the extract alone, and the
+ * card renders none of it without the attribution below it.
+ */
+export interface Prose {
+  extract: string
+  source_title: string
+  source_url: string
+  licence: string
+}
+
+/** One release group, as a discography line. */
+export interface Release {
+  name: string
+  primary_type: string | null
+  year: number | null
+}
+
 /** Everything a card shows about one star. */
 export interface Artist {
   id: number
@@ -54,6 +84,13 @@ export interface Artist {
   position: { x: number; y: number; brightness: number } | null
   genres: Genre[]
   similar: Neighbour[]
+  origin: Origin | null
+  labels: string[]
+  /** Directed, so the two lists are different facts and stay apart. */
+  influenced_by: Neighbour[]
+  influenced: Neighbour[]
+  prose: Prose | null
+  releases: Release[]
 }
 
 /** A search result, with a place to fly to. */

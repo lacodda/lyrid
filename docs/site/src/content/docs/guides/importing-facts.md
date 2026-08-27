@@ -21,19 +21,36 @@ Wikidata is CC0, so it raises none of the licensing questions that
 [ADR 0005](https://github.com/lacodda/lyrid/blob/main/docs/adr/0005-genres-from-discogs.md)
 had to settle for genres.
 
-## The 100 GB is read, not stored
+## Download the dump first
 
-The full dump is 102.7 GB compressed, and there is no smaller music-only
-edition. It never touches your disk: the importer decompresses straight from
-the HTTP response and keeps only what it extracts.
+The full dump is ~96 GB compressed, and there is no smaller music-only
+edition. The importer can read it straight from the network without ever
+writing it down — but for a full pass, download it first:
+
+```sh
+curl -fL --retry 5 -C - -o latest-all.json.bz2   https://dumps.wikimedia.org/wikidatawiki/entities/latest-all.json.bz2
+
+lyrid import wikidata --dump ./latest-all.json.bz2
+```
+
+**Why not stream the whole thing.** A full pass takes about ten hours, and a
+connection held open that long does not survive: measured on the real dump, the
+server dropped the connection after 24 minutes and three million entities, and
+the pass died with `Peer disconnected` — everything read up to that point
+thrown away. `curl -C -` resumes from what is already on disk, so an
+interruption costs seconds instead of the whole run. The cost is ~96 GB of
+disk, temporarily.
+
+Streaming still has its place for a short run against the live dump — see
+`--limit` below — where the window is small enough that a drop is unlikely:
 
 ```sh
 lyrid import wikidata
 ```
 
-That is the whole command — the official dump URL is the default. Measured
-against the live dump, the importer reads about 700 entities a second, which
-puts a full pass at roughly **ten hours** — so run it as a background job:
+The official dump URL is the default. Measured against the live dump, the
+importer reads about 700 entities a second, which puts a full pass at roughly
+**ten hours** — so run it as a background job:
 
 ```
 INFO lyrid::import::wikidata: streaming the Wikidata dump; nothing is written to disk url=…
@@ -49,10 +66,11 @@ stop early:
 lyrid import wikidata --limit 400000
 ```
 
-A downloaded copy works too, if you would rather keep one:
+Reading from the network writes nothing to disk, which is why it suits a
+short `--limit` run:
 
-```sh
-lyrid import wikidata --dump ./latest-all.json.bz2
+```
+INFO lyrid::import::wikidata: streaming the Wikidata dump; nothing is written to disk url=…
 ```
 
 ### Why not the smaller dump

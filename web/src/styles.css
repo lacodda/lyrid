@@ -257,6 +257,64 @@ body,
   font-size: 0.7rem;
 }
 
+/* The lead paragraphs: the one block on the card that is prose rather than
+   data, so it reads at a comfortable measure rather than as a field. */
+.card__prose {
+  margin: 0 0 1rem;
+}
+
+.card__extract {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+/* Deliberately quiet but never absent: CC BY-SA is the condition on which the
+   text above may be shown. */
+.card__credit {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--lyrid-muted);
+}
+
+.card__credit a {
+  color: var(--lyrid-azure);
+}
+
+.card__labels {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.card__releases {
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+.card__release {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  line-height: 1.7;
+}
+
+/* A long title must not push the year off the card or wrap the row into two;
+   the year is the anchor a reader scans down. */
+.card__release-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card__release-year {
+  flex: none;
+  color: var(--lyrid-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .card__section {
   margin: 0 0 0.35rem;
   font-size: 0.72rem;

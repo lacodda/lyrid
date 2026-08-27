@@ -49,8 +49,9 @@ fly to is a dead end.
 ## `GET /api/artists/{id}`
 
 Everything a card shows. This is where the import pipelines meet — the name
-and years from MusicBrainz, the genres from Discogs with a release count
-behind each, the neighbours from co-listening.
+and years from MusicBrainz, the lead paragraphs from Wikipedia, origin and
+influence from Wikidata, the genres from Discogs with a release count behind
+each, the neighbours from co-listening.
 
 ```json
 {
@@ -67,7 +68,23 @@ behind each, the neighbours from co-listening.
     { "name": "Rock", "is_style": false, "releases": 314 },
     { "name": "Grunge", "is_style": true, "releases": 303 }
   ],
-  "similar": [{ "id": 1289, "name": "Sonic Youth", "score": 0.0114 }]
+  "similar": [{ "id": 1289, "name": "Sonic Youth", "score": 0.0114 }],
+  "origin": {
+    "place": "Aberdeen",
+    "country": "United States",
+    "is_birth": false,
+    "inception_year": 1987
+  },
+  "labels": ["DGC Records", "Sub Pop"],
+  "influenced_by": [{ "id": 2201, "name": "Pixies", "score": 0.9 }],
+  "influenced": [{ "id": 4410, "name": "Bush", "score": 0.4 }],
+  "prose": {
+    "extract": "Nirvana was an American rock band formed in Aberdeen…",
+    "source_title": "Nirvana (band)",
+    "source_url": "https://en.wikipedia.org/wiki/Nirvana_(band)",
+    "licence": "CC BY-SA 4.0"
+  },
+  "releases": [{ "name": "Bleach", "primary_type": "Album", "year": 1989 }]
 }
 ```
 
@@ -84,7 +101,39 @@ The tiles carry a normalised version of the same number.
 claim rather than a label: "Rock 314" says more than "Rock".
 
 `similar` reads both columns of `artist_similarity`, since a pair is stored
-once.
+once. Both it and the influence lists pin the newest similarity metric: an
+edge is keyed by `(metric_id, source_id, target_id)`, so joining without one
+would list the same neighbour once per metric — on scores that are not
+comparable across metrics anyway.
+
+**`prose` is never served without its attribution.** The extract and the
+credit are one row in the database and one object here, so no response can
+carry the words alone. Wikipedia leads arrive under CC BY-SA, and the licence
+travels with them to the client, which renders both together or neither
+([ADR 0007](https://github.com/lacodda/lyrid/blob/main/docs/adr/0007-prose-parsed-from-wikitext.md)).
+
+`origin` answers a different question from `area`: Wikidata records a city,
+MusicBrainz a country. `is_birth` says which claim it is — a person's
+birthplace or a group's place of formation — because "born in Seattle" and
+"formed in Seattle" are not the same statement. `inception_year` sits beside
+MusicBrainz's `begin_year` rather than replacing it: the two can disagree, and
+a curated value is not silently overwritten by a crowdsourced one.
+
+`influenced_by` and `influenced` are separate lists because influence is
+directed. Merging them would assert a symmetry Wikidata never claimed.
+
+`releases` are ordered albums first and then oldest first, which approximates
+"the records this artist is known for" from the only fields the canon holds.
+Newest-first looks obvious and is wrong: the Beatles carry 696 release groups
+typed `Album`, nearly all reissues, so the newest dozen are recent repackagings
+and the famous records are nowhere. The honest limit is that MusicBrainz marks
+a live album or a compilation through *secondary* types, which the import does
+not read yet, so concert recordings typed `Album` still appear among the studio
+records.
+
+Most artists have neither prose nor influence links: in a canon of three
+million, an encyclopaedia article is the exception. Those fields are `null` or
+empty rather than absent, and the card hides the block.
 
 ## What is deliberately absent
 

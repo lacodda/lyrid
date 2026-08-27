@@ -1,8 +1,16 @@
 //! What the sky asks about a star.
 //!
-//! Deliberately thin: the map itself is static tiles and never touches the
-//! database, so these endpoints serve only what a click or a search box needs
-//! — a name, where it sits, and enough of the canon to recognise it.
+//! The map itself is static tiles and never touches the database, so these
+//! endpoints serve only what a click or a search box needs. For the card that
+//! means the whole canon meeting on one screen: the name and years from
+//! `MusicBrainz`, genres from Discogs with a release count behind each, origin
+//! and influence from Wikidata, the lead paragraphs from Wikipedia, and the
+//! neighbours from co-listening.
+//!
+//! One rule here is not a matter of taste. Wikipedia prose arrives under
+//! CC BY-SA, and its attribution is stored in the same row as the text; this
+//! module keeps them together all the way to the wire, so a client cannot
+//! receive the words without the credit they require.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -36,6 +44,58 @@ struct Artist {
     genres: Vec<Genre>,
     /// Nearest neighbours in the similarity graph.
     similar: Vec<Neighbour>,
+    /// Where the act comes from, as Wikidata records it.
+    origin: Option<Origin>,
+    /// Labels the act has been signed to.
+    labels: Vec<String>,
+    /// Who shaped this artist, and who they went on to shape. Directed, so
+    /// the two directions are different facts and are kept apart.
+    influenced_by: Vec<Neighbour>,
+    influenced: Vec<Neighbour>,
+    /// The lead of the artist's Wikipedia article, with the credit its licence
+    /// requires travelling in the same value.
+    prose: Option<Prose>,
+    /// Release groups, newest first.
+    releases: Vec<Release>,
+}
+
+/// Where an act comes from, and which question that answers.
+#[derive(Serialize)]
+struct Origin {
+    /// The place itself: "Seattle", "Liverpool".
+    place: Option<String>,
+    /// The country, when Wikidata records one separately.
+    country: Option<String>,
+    /// True when this is a person's birthplace rather than a group's place of
+    /// formation. "Formed in Seattle" and "born in Seattle" are different
+    /// claims and the card says which one it is showing.
+    is_birth: bool,
+    /// Wikidata's inception year, kept beside `MusicBrainz`'s own `begin_year`
+    /// rather than replacing it: the two can disagree, and a curated value
+    /// should not be silently overwritten by a crowdsourced one.
+    inception_year: Option<i16>,
+}
+
+/// A Wikipedia lead, inseparable from its attribution.
+///
+/// Every field the licence requires is here because the row it came from
+/// stores them together. Serialising the extract without them would need a
+/// deliberate act, not an oversight.
+#[derive(Serialize)]
+struct Prose {
+    extract: String,
+    source_title: String,
+    source_url: String,
+    licence: String,
+}
+
+/// One release group, as a discography line.
+#[derive(Serialize)]
+struct Release {
+    name: String,
+    /// "Album", "Single", "EP"... from `MusicBrainz`'s primary type.
+    primary_type: Option<String>,
+    year: Option<i16>,
 }
 
 #[derive(Serialize)]
@@ -132,11 +192,17 @@ async fn load_artist(pool: &PgPool, id: i32) -> sqlx::Result<Option<Artist>> {
 
     // Similarity is stored once per unordered pair, so neighbours come from
     // both columns.
+    //
+    // The metric is pinned for the same reason as in `influences`: an edge is
+    // keyed by (metric_id, source_id, target_id), and a second metric would
+    // otherwise put the same neighbour in the list once per metric, on scores
+    // that are not comparable across metrics anyway.
     let similar = sqlx::query_as::<_, (i32, String, f32)>(
         "SELECT other.id, other.name, e.score
          FROM artist_similarity e
          JOIN artist other ON other.id = CASE WHEN e.source_id = $1 THEN e.target_id ELSE e.source_id END
-         WHERE e.source_id = $1 OR e.target_id = $1
+         WHERE (e.source_id = $1 OR e.target_id = $1)
+           AND e.metric_id = (SELECT max(id) FROM similarity_metric)
          ORDER BY e.score DESC
          LIMIT 10",
     )
@@ -146,6 +212,18 @@ async fn load_artist(pool: &PgPool, id: i32) -> sqlx::Result<Option<Artist>> {
     .into_iter()
     .map(|(id, name, score)| Neighbour { id, name, score })
     .collect();
+
+    let origin = origin(pool, id).await?;
+    let labels = labels(pool, id).await?;
+    let prose = prose(pool, id).await?;
+    let releases = releases(pool, id).await?;
+
+    // Influence is directed, so each direction is its own query rather than
+    // one query over both columns: "shaped by" and "went on to shape" are
+    // different claims, and collapsing them would invent symmetry Wikidata
+    // never asserted. Ordered by brightness so the better-known names lead.
+    let influenced_by = influences(pool, id, Direction::Sources).await?;
+    let influenced = influences(pool, id, Direction::Targets).await?;
 
     let (id, mbid, name, comment, kind, area, begin_year, end_year) = row;
     Ok(Some(Artist {
@@ -160,7 +238,159 @@ async fn load_artist(pool: &PgPool, id: i32) -> sqlx::Result<Option<Artist>> {
         position,
         genres,
         similar,
+        origin,
+        labels,
+        influenced_by,
+        influenced,
+        prose,
+        releases,
     }))
+}
+
+/// Where the act comes from, resolved from Wikidata item ids into words.
+///
+/// Wikidata stores a place as an item id, and the labels for those items were
+/// captured during the same dump pass precisely so a card does not have to
+/// reach back into a hundred gigabytes to say "Seattle".
+async fn origin(pool: &PgPool, id: i32) -> sqlx::Result<Option<Origin>> {
+    Ok(sqlx::query_as::<_, (Option<String>, Option<String>, Option<bool>, Option<i16>)>(
+        "SELECT place.label, country.label, f.origin_is_birth, f.inception_year
+         FROM artist_fact f
+         LEFT JOIN wikidata_item place ON place.qid = f.origin_qid
+         LEFT JOIN wikidata_item country ON country.qid = f.country_qid
+         WHERE f.artist_id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .map(|(place, country, is_birth, inception_year)| Origin {
+        place,
+        country,
+        is_birth: is_birth.unwrap_or(false),
+        inception_year,
+    }))
+}
+
+async fn labels(pool: &PgPool, id: i32) -> sqlx::Result<Vec<String>> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT item.label
+         FROM artist_wikidata_label l
+         JOIN wikidata_item item ON item.qid = l.label_qid
+         WHERE l.artist_id = $1 AND item.label IS NOT NULL
+         ORDER BY item.label
+         LIMIT 8",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await
+}
+
+/// The Wikipedia lead, selected together with the credit its licence requires.
+///
+/// The extract and the attribution come out of the row that stores them
+/// together. There is no query in this codebase that can hand back the words
+/// alone.
+async fn prose(pool: &PgPool, id: i32) -> sqlx::Result<Option<Prose>> {
+    Ok(
+        sqlx::query_as::<_, (String, String, String, String)>("SELECT extract, source_title, source_url, licence FROM artist_prose WHERE artist_id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?
+            .map(|(extract, source_title, source_url, licence)| Prose {
+                extract,
+                source_title,
+                source_url,
+                licence,
+            }),
+    )
+}
+
+/// The discography, ordered albums first and then oldest first.
+///
+/// That approximates "the records this artist is known for" from the only
+/// fields the canon holds, and neither half is arbitrary. Newest-first looks
+/// obvious and is wrong: the Beatles carry 696 release groups typed Album,
+/// almost all reissues and compilations, so the newest twelve are 2025-2026
+/// repackagings and Abbey Road is nowhere. Oldest-first surfaces the debut,
+/// because compilations of a body of work can only come after it.
+///
+/// The honest limit: `MusicBrainz` separates a studio album from a live one
+/// through *secondary* types, which the v0.2.0 import does not read, so
+/// concert recordings typed Album still appear among the studio records.
+/// Fixing that means re-importing the canon, which is a stage of its own.
+async fn releases(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Release>> {
+    Ok(sqlx::query_as::<_, (String, Option<String>, Option<i16>)>(
+        "SELECT name, primary_type, year
+         FROM release_group
+         WHERE artist_id = $1
+         ORDER BY CASE primary_type
+                    WHEN 'Album' THEN 0
+                    WHEN 'EP' THEN 1
+                    WHEN 'Single' THEN 2
+                    ELSE 3
+                  END,
+                  year IS NULL, year, name
+         LIMIT 12",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|(name, primary_type, year)| Release { name, primary_type, year })
+    .collect())
+}
+
+/// Which end of the influence arrow to follow.
+#[derive(Clone, Copy)]
+enum Direction {
+    /// Who shaped this artist.
+    Sources,
+    /// Whom this artist shaped.
+    Targets,
+}
+
+async fn influences(pool: &PgPool, id: i32, direction: Direction) -> sqlx::Result<Vec<Neighbour>> {
+    // Two fixed statements rather than one with a swapped column pair: the
+    // planner sees each one whole, and each uses the index built for its own
+    // direction (the reverse one exists for exactly this query).
+    //
+    // Prominence is keyed by (metric_id, artist_id), so joining it without
+    // naming a metric would return one row per metric and repeat every
+    // influence in the list. Today there is a single metric and the bug would
+    // be invisible; v0.17.1 adds a second one, at which point every card would
+    // quietly show its influences twice. The subquery pins one metric now.
+    let sql = match direction {
+        Direction::Sources => {
+            "SELECT a.id, a.name, coalesce(p.weight, 0)
+             FROM artist_influence i
+             JOIN artist a ON a.id = i.influence_id
+             LEFT JOIN artist_prominence p
+               ON p.artist_id = a.id
+              AND p.metric_id = (SELECT max(id) FROM similarity_metric)
+             WHERE i.artist_id = $1
+             ORDER BY coalesce(p.weight, 0) DESC, a.name
+             LIMIT 8"
+        }
+        Direction::Targets => {
+            "SELECT a.id, a.name, coalesce(p.weight, 0)
+             FROM artist_influence i
+             JOIN artist a ON a.id = i.artist_id
+             LEFT JOIN artist_prominence p
+               ON p.artist_id = a.id
+              AND p.metric_id = (SELECT max(id) FROM similarity_metric)
+             WHERE i.influence_id = $1
+             ORDER BY coalesce(p.weight, 0) DESC, a.name
+             LIMIT 8"
+        }
+    };
+
+    Ok(sqlx::query_as::<_, (i32, String, f32)>(sql)
+        .bind(id)
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|(id, name, score)| Neighbour { id, name, score })
+        .collect())
 }
 
 #[derive(Deserialize)]
