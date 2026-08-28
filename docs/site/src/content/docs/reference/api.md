@@ -68,7 +68,7 @@ each, the neighbours from co-listening.
     { "name": "Rock", "is_style": false, "releases": 314 },
     { "name": "Grunge", "is_style": true, "releases": 303 }
   ],
-  "similar": [{ "id": 1289, "name": "Sonic Youth", "score": 0.0114 }],
+  "similar": [{ "id": 12389, "name": "Red Hot Chili Peppers", "score": 0.0141 }],
   "origin": {
     "place": "Aberdeen",
     "country": "United States",
