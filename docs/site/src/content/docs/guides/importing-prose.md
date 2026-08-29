@@ -76,6 +76,15 @@ articles**, not against assumptions:
 That 13% is why the parser counts braces instead of matching a pattern: a
 pattern that stops at the first `}}` truncates one lead in eight.
 
+**What the survey did not catch.** The first two full runs both died on the
+same class of mistake — a fixed byte window landing inside a multi-byte
+character, once on an en dash and once on an `á` opening an article — and
+neither shape appears in 867 articles. The rule now is that a fixed byte count
+never indexes a string, and each article is parsed behind a guard: a panic
+costs that one article, counted and named in the log, instead of the hours
+already spent. Measured on the full run afterwards: **181,491 articles located,
+177,976 with prose, 3,515 without a usable lead, zero panics.**
+
 **Some templates are kept**, because deleting them breaks the sentence:
 
 | Template | Becomes |
