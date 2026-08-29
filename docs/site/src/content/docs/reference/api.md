@@ -75,11 +75,11 @@ each, the neighbours from co-listening.
     "is_birth": false,
     "inception_year": 1987
   },
-  "labels": ["DGC Records", "Sub Pop"],
-  "influenced_by": [{ "id": 2201, "name": "Pixies", "score": 0.9 }],
-  "influenced": [{ "id": 4410, "name": "Bush", "score": 0.4 }],
+  "labels": ["DGC Records", "Geffen Records", "Sub Pop"],
+  "influenced_by": [{ "id": 1419, "name": "Black Sabbath", "score": 6.44 }],
+  "influenced": [{ "id": 12068, "name": "Nickelback", "score": 11.05 }],
   "prose": {
-    "extract": "Nirvana was an American rock band formed in Aberdeen…",
+    "extract": "Nirvana was an American rock band formed in Aberdeen, Washington, in 1987.…",
     "source_title": "Nirvana (band)",
     "source_url": "https://en.wikipedia.org/wiki/Nirvana_(band)",
     "licence": "CC BY-SA 4.0"
@@ -134,6 +134,12 @@ records.
 Most artists have neither prose nor influence links: in a canon of three
 million, an encyclopaedia article is the exception. Those fields are `null` or
 empty rather than absent, and the card hides the block.
+
+Measured on the full canon: of the **206,636 artists with a place in the sky**,
+**77,616 (38%) carry Wikidata facts** and **55,738 (27%) carry prose**. The
+`score` on an influence is the neighbour's graph weight, which is why the
+better-known names lead the list — it is not a strength of influence, which
+Wikidata does not record.
 
 ## What is deliberately absent
 
