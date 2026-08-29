@@ -281,6 +281,22 @@ body,
   color: var(--lyrid-azure);
 }
 
+/* Quiet: an affordance, not an action the card is asking for. */
+.card__more {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--lyrid-azure);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.card__more:hover {
+  text-decoration: underline;
+}
+
 .card__labels {
   margin: 0 0 1rem;
   font-size: 0.85rem;

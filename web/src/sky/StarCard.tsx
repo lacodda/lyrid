@@ -55,7 +55,7 @@ export function StarCard({ artistId, onClose }: Props) {
 
           {artist.prose && (
             <div className="card__prose">
-              <p className="card__extract">{artist.prose.extract}</p>
+              <Extract text={artist.prose.extract} />
               {/* The credit is not decoration and not optional: the extract
                   above is CC BY-SA, and this line is the condition on which it
                   may be shown at all. It renders with the words or not at
@@ -112,6 +112,31 @@ export function StarCard({ artistId, onClose }: Props) {
         </>
       )}
     </aside>
+  )
+}
+
+/**
+ * The lead, opened to its first paragraph.
+ *
+ * Leads run from 38 to 9,187 characters, median 362 — so most fit, and the
+ * famous names people actually click do not: the Beatles' lead is 3,893
+ * characters and would fill the card, pushing the genres, the discography and
+ * the neighbours off the screen. The first paragraph is the summary Wikipedia
+ * leads are written to have; the rest is there for whoever wants it.
+ */
+function Extract({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  // Paragraphs arrive separated by a blank line, as the parser joins them.
+  const [first, ...rest] = text.split('\n\n')
+  if (rest.length === 0) return <p className="card__extract">{text}</p>
+
+  return (
+    <>
+      <p className="card__extract">{expanded ? text : first}</p>
+      <button className="card__more" onClick={() => setExpanded(!expanded)}>
+        {expanded ? 'less' : `more (${String(rest.length)} more paragraph${rest.length > 1 ? 's' : ''})`}
+      </button>
+    </>
   )
 }
 
