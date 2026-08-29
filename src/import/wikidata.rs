@@ -14,10 +14,19 @@
 //! Two things make one pass sufficient:
 //!
 //! - **Facts are references, not words.** Place of birth is `Q24826`, not
-//!   "Liverpool". Resolving them afterwards would mean a second 103 GB pass, so
-//!   every entity's English label is captured as it goes by and the ones
-//!   actually referenced are written at the end. All labels together are about
-//!   half a gigabyte of memory -- measured against the dump, not guessed.
+//!   "Liverpool", so the labels for referenced items have to come from
+//!   somewhere. Keeping every label as it goes by does not fit: measured on a
+//!   full run, 25 million labels cost 3.1 GB at 27% of the file, which
+//!   extrapolates to 10-11 GB -- more memory than this machine has. (An
+//!   earlier note here claimed half a gigabyte; that number came from a
+//!   400,000-entity `--limit` run and did not survive contact with the whole
+//!   dump.)
+//!
+//!   So the file is read twice. The first pass collects facts and notes which
+//!   item ids they point at -- tens of thousands, not tens of millions. The
+//!   second reads labels for exactly those. Two passes over a local file cost
+//!   time, which is cheap here; the alternative costs memory the machine does
+//!   not have, and fails on the ninth hour.
 //! - **The enwiki article title is taken now**, while the dump is open, because
 //!   the prose import needs it and it exists nowhere else in the canon.
 //!
@@ -80,16 +89,29 @@ pub struct Args {
     pub limit: Option<u64>,
 }
 
-/// One entity, decoded only as far as this import cares about.
+/// One entity, decoded only as far as the fact pass cares about.
+///
+/// No `labels` here: naming the items facts point at is the second pass's job,
+/// and a field decoded only to be dropped is paid for 123 million times.
 #[derive(Deserialize)]
 struct Entity {
     id: String,
     #[serde(default)]
-    labels: HashMap<String, LabelValue>,
-    #[serde(default)]
     claims: HashMap<String, Vec<Statement>>,
     #[serde(default)]
     sitelinks: HashMap<String, Sitelink>,
+}
+
+/// One entity as the label pass sees it.
+///
+/// Separate from `Entity` on purpose: `claims` and `sitelinks` are almost the
+/// whole weight of a line, and the second pass wants neither. Skipping them
+/// keeps a 123-million-entity pass from paying for data it discards.
+#[derive(Deserialize)]
+struct LabelOnly {
+    id: String,
+    #[serde(default)]
+    labels: HashMap<String, LabelValue>,
 }
 
 #[derive(Deserialize)]
@@ -229,22 +251,24 @@ fn open_dump(args: &Args) -> Result<Box<dyn BufRead>> {
     Ok(Box::new(BufReader::with_capacity(1 << 22, decoder)))
 }
 
-/// Reads the whole dump in one pass.
+/// Reads the dump: facts first, then the labels those facts refer to.
 fn read_dump(args: &Args, canon: &HashMap<String, i32>) -> Result<Harvest> {
+    let mut harvest = read_facts(args, canon)?;
+    harvest.labels = read_labels(args, &wanted_qids(&harvest))?;
+    Ok(harvest)
+}
+
+/// First pass: every fact this import keeps, and nothing else.
+fn read_facts(args: &Args, canon: &HashMap<String, i32>) -> Result<Harvest> {
     let reader = open_dump(args)?;
     let mut harvest = Harvest::default();
 
     for line in reader.lines() {
         let line = line.context("failed to read a dump line")?;
-        harvest.entities += take_line(&line, canon, &mut harvest.by_mbid, &mut harvest.labels, &mut harvest.with_mbid);
+        harvest.entities += take_line(&line, canon, &mut harvest.by_mbid, &mut harvest.with_mbid);
 
         if harvest.entities % 1_000_000 == 0 && harvest.entities > 0 {
-            tracing::info!(
-                entities = harvest.entities,
-                matched = harvest.by_mbid.len(),
-                labels = harvest.labels.len(),
-                "still reading"
-            );
+            tracing::info!(entities = harvest.entities, matched = harvest.by_mbid.len(), "still reading facts");
         }
         if args.limit.is_some_and(|limit| harvest.entities >= limit) {
             tracing::info!(entities = harvest.entities, "stopping at the requested limit");
@@ -252,7 +276,87 @@ fn read_dump(args: &Args, canon: &HashMap<String, i32>) -> Result<Harvest> {
         }
     }
 
+    tracing::info!(entities = harvest.entities, matched = harvest.by_mbid.len(), "facts read");
     Ok(harvest)
+}
+
+/// Which item ids the harvested facts point at and therefore need naming.
+///
+/// The artists themselves are named by MusicBrainz, so only the things facts
+/// *refer to* are wanted: places, countries, genres, record labels. Influence
+/// targets are resolved through the canon rather than by label, but their
+/// q-numbers are cheap to carry and one missing name is worse than one extra.
+fn wanted_qids(harvest: &Harvest) -> HashSet<i32> {
+    let mut wanted = HashSet::new();
+    for facts in harvest.by_mbid.values() {
+        wanted.extend(facts.origin_qid);
+        wanted.extend(facts.country_qid);
+        wanted.extend(facts.genres.iter().copied());
+        wanted.extend(facts.labels.iter().copied());
+    }
+    wanted
+}
+
+/// Second pass: the English label of each wanted item, and no others.
+///
+/// This is why the dump is read twice rather than held in memory. The wanted
+/// set is tens of thousands of items; every label in the file is tens of
+/// millions, which does not fit.
+fn read_labels(args: &Args, wanted: &HashSet<i32>) -> Result<HashMap<i32, String>> {
+    if wanted.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    tracing::info!(wanted = wanted.len(), "reading labels for the items the facts point at");
+    let reader = open_dump(args)?;
+    let mut labels = HashMap::with_capacity(wanted.len());
+    let mut entities = 0u64;
+
+    for line in reader.lines() {
+        let line = line.context("failed to read a dump line")?;
+        entities += take_label(&line, wanted, &mut labels);
+
+        if entities > 0 && entities.is_multiple_of(5_000_000) {
+            tracing::info!(entities, labels = labels.len(), "still reading labels");
+        }
+        // Every wanted label found: the rest of the file has nothing left to
+        // give, and stopping saves hours on a run whose references happen to
+        // sit early in the file.
+        if labels.len() == wanted.len() {
+            tracing::info!(labels = labels.len(), "every wanted label found");
+            break;
+        }
+        if args.limit.is_some_and(|limit| entities >= limit) {
+            break;
+        }
+    }
+
+    tracing::info!(labels = labels.len(), wanted = wanted.len(), "labels read");
+    Ok(labels)
+}
+
+/// Handles one line of the label pass, returning how many entities it held.
+///
+/// Deliberately does not parse the whole entity: a label pass that paid full
+/// deserialisation for 123 million items would cost more than the memory it
+/// saves. The id and the English label are enough.
+fn take_label(line: &str, wanted: &HashSet<i32>, labels: &mut HashMap<i32, String>) -> u64 {
+    let trimmed = line.trim().trim_end_matches(',');
+    if trimmed.is_empty() || trimmed == "[" || trimmed == "]" {
+        return 0;
+    }
+    let Ok(entity) = serde_json::from_str::<LabelOnly>(trimmed) else {
+        return 0;
+    };
+    let Some(qid) = qid_number(&entity.id) else {
+        return 1;
+    };
+    if wanted.contains(&qid)
+        && let Some(label) = entity.labels.get("en")
+    {
+        labels.insert(qid, label.value.clone());
+    }
+    1
 }
 
 /// Handles one line of the dump, returning how many entities it contained
@@ -260,7 +364,7 @@ fn read_dump(args: &Args, canon: &HashMap<String, i32>) -> Result<Harvest> {
 ///
 /// Separate from the reading loop so the tests exercise the shipped rules
 /// rather than a reimplementation of them.
-fn take_line(line: &str, canon: &HashMap<String, i32>, by_mbid: &mut HashMap<String, Facts>, labels: &mut HashMap<i32, String>, with_mbid: &mut u64) -> u64 {
+fn take_line(line: &str, canon: &HashMap<String, i32>, by_mbid: &mut HashMap<String, Facts>, with_mbid: &mut u64) -> u64 {
     // The file is a JSON array: the first and last lines are its brackets, and
     // every entity line carries a trailing comma.
     let trimmed = line.trim().trim_end_matches(',');
@@ -279,13 +383,6 @@ fn take_line(line: &str, canon: &HashMap<String, i32>, by_mbid: &mut HashMap<Str
         // as read but carry nothing this import wants.
         return 1;
     };
-
-    // Every label is kept: an item that is somebody's birthplace is itself an
-    // entity in this file, and it may have gone past long before the artist
-    // who references it.
-    if let Some(label) = entity.labels.get("en") {
-        labels.insert(qid, label.value.clone());
-    }
 
     let Some(mbid_statements) = entity.claims.get(P_MBID) else {
         return 1;
@@ -598,14 +695,24 @@ mod tests {
         HashMap::from([(MBID_A.to_string(), 1), (MBID_B.to_string(), 2)])
     }
 
-    /// Runs lines through the importer's own rules.
-    fn take(lines: &[&str]) -> (HashMap<String, Facts>, HashMap<i32, String>, u64, u64) {
+    /// Runs lines through the fact pass's own rules.
+    fn take(lines: &[&str]) -> (HashMap<String, Facts>, u64, u64) {
         let canon = canon();
-        let (mut by_mbid, mut labels, mut with_mbid, mut read) = (HashMap::new(), HashMap::new(), 0, 0);
+        let (mut by_mbid, mut with_mbid, mut read) = (HashMap::new(), 0, 0);
         for line in lines {
-            read += take_line(line, &canon, &mut by_mbid, &mut labels, &mut with_mbid);
+            read += take_line(line, &canon, &mut by_mbid, &mut with_mbid);
         }
-        (by_mbid, labels, with_mbid, read)
+        (by_mbid, with_mbid, read)
+    }
+
+    /// Runs lines through the label pass, for a given set of wanted items.
+    fn take_labels(lines: &[&str], wanted: &[i32]) -> HashMap<i32, String> {
+        let wanted: HashSet<i32> = wanted.iter().copied().collect();
+        let mut labels = HashMap::new();
+        for line in lines {
+            take_label(line, &wanted, &mut labels);
+        }
+        labels
     }
 
     /// A minimal entity in the dump's own shape.
@@ -625,7 +732,7 @@ mod tests {
 
     #[test]
     fn skips_the_arrays_brackets() {
-        let (facts, _, _, read) = take(&["[", "]", "  "]);
+        let (facts, _, read) = take(&["[", "]", "  "]);
         assert!(facts.is_empty());
         assert_eq!(read, 0);
     }
@@ -637,7 +744,7 @@ mod tests {
         let line_known = entity("Q1", &format!(r#""claims":{{{}}}"#, mbid_claim(MBID_A)));
         let line_stranger = entity("Q2", &format!(r#""claims":{{{}}}"#, mbid_claim("00000000-0000-0000-0000-000000000000")));
 
-        let (facts, _, with_mbid, read) = take(&[&line_known, &line_stranger]);
+        let (facts, with_mbid, read) = take(&[&line_known, &line_stranger]);
         assert_eq!(read, 2);
         assert_eq!(with_mbid, 2, "both had an MBID");
         assert_eq!(facts.len(), 1, "only the canonical one was kept");
@@ -645,12 +752,40 @@ mod tests {
     }
 
     #[test]
-    fn keeps_every_label_even_for_entities_it_ignores() {
-        // A city is nobody's artist but is somebody's birthplace, and it may
-        // appear millions of lines before them.
-        let city = entity("Q24826", r#""labels":{"en":{"language":"en","value":"Liverpool"}}"#);
-        let (_, labels, _, _) = take(&[&city]);
+    fn names_a_wanted_item_and_ignores_the_rest() {
+        // A city is nobody's artist but is somebody's birthplace, so its name
+        // is wanted. The other city is referenced by nothing, and keeping it
+        // is what cost 10 GB before the pass was split in two.
+        let wanted_city = entity("Q24826", r#""labels":{"en":{"language":"en","value":"Liverpool"}}"#);
+        let other_city = entity("Q1297", r#""labels":{"en":{"language":"en","value":"Chicago"}}"#);
+
+        let labels = take_labels(&[&wanted_city, &other_city], &[24826]);
         assert_eq!(labels.get(&24826).map(String::as_str), Some("Liverpool"));
+        assert_eq!(labels.len(), 1, "an unreferenced item should not be named");
+    }
+
+    #[test]
+    fn wants_the_items_the_facts_point_at() {
+        // What the second pass has to look for: the places, country, genres
+        // and record labels the harvested facts refer to -- and nothing for
+        // the artists themselves, which MusicBrainz already names.
+        let mut harvest = Harvest::default();
+        harvest.by_mbid.insert(
+            MBID_A.to_string(),
+            Facts {
+                qid: 11649,
+                origin_qid: Some(24826),
+                country_qid: Some(145),
+                genres: vec![11399],
+                labels: vec![2000],
+                ..Facts::default()
+            },
+        );
+
+        let wanted = wanted_qids(&harvest);
+        assert!(wanted.contains(&24826) && wanted.contains(&145));
+        assert!(wanted.contains(&11399) && wanted.contains(&2000));
+        assert!(!wanted.contains(&11649), "the artist's own item is named by MusicBrainz");
     }
 
     #[test]
@@ -666,7 +801,7 @@ mod tests {
                 item_claim(P_BIRTH_PLACE, 24826)
             ),
         );
-        let (facts, _, _, _) = take(&[&line]);
+        let (facts, _, _) = take(&[&line]);
         let found = &facts[MBID_A];
         assert_eq!(found.origin_qid, Some(233_808));
         assert!(!found.origin_is_birth);
@@ -675,7 +810,7 @@ mod tests {
     #[test]
     fn falls_back_to_birth_place_for_people() {
         let line = entity("Q1", &format!(r#""claims":{{{},{}}}"#, mbid_claim(MBID_A), item_claim(P_BIRTH_PLACE, 24826)));
-        let (facts, _, _, _) = take(&[&line]);
+        let (facts, _, _) = take(&[&line]);
         assert_eq!(facts[MBID_A].origin_qid, Some(24826));
         assert!(facts[MBID_A].origin_is_birth);
     }
@@ -686,7 +821,7 @@ mod tests {
         // the format, and a parser expecting a digit reads nothing.
         let time = r#""P571":[{"mainsnak":{"datavalue":{"value":{"time":"+1987-01-01T00:00:00Z","precision":9},"type":"time"}}}]"#;
         let line = entity("Q1", &format!(r#""claims":{{{},{time}}}"#, mbid_claim(MBID_A)));
-        let (facts, _, _, _) = take(&[&line]);
+        let (facts, _, _) = take(&[&line]);
         assert_eq!(facts[MBID_A].inception_year, Some(1987));
     }
 
@@ -699,7 +834,7 @@ mod tests {
                 mbid_claim(MBID_A)
             ),
         );
-        let (facts, _, _, _) = take(&[&line]);
+        let (facts, _, _) = take(&[&line]);
         assert_eq!(facts[MBID_A].enwiki_title.as_deref(), Some("Nirvana (band)"));
     }
 
@@ -711,14 +846,14 @@ mod tests {
             r#"{"mainsnak":{"datavalue":{"value":{"entity-type":"item","id":"Q83440"},"type":"wikibase-entityid"}}}"#
         );
         let line = entity("Q1", &format!(r#""claims":{{{},{genres}}}"#, mbid_claim(MBID_A)));
-        let (facts, _, _, _) = take(&[&line]);
+        let (facts, _, _) = take(&[&line]);
         assert_eq!(facts[MBID_A].genres, vec![11399, 83440]);
     }
 
     #[test]
     fn survives_a_malformed_line() {
         let good = entity("Q1", &format!(r#""claims":{{{}}}"#, mbid_claim(MBID_A)));
-        let (facts, _, _, read) = take(&["{not json", &good]);
+        let (facts, _, read) = take(&["{not json", &good]);
         assert_eq!(read, 1, "the broken line is not counted as an entity");
         assert_eq!(facts.len(), 1);
     }
@@ -728,7 +863,7 @@ mod tests {
         // "unknown value" statements carry no datavalue at all.
         let unknown = r#""P740":[{"mainsnak":{"snaktype":"somevalue","property":"P740"}}]"#;
         let line = entity("Q1", &format!(r#""claims":{{{},{unknown}}}"#, mbid_claim(MBID_A)));
-        let (facts, _, _, _) = take(&[&line]);
+        let (facts, _, _) = take(&[&line]);
         assert_eq!(facts[MBID_A].origin_qid, None);
     }
 
@@ -736,9 +871,11 @@ mod tests {
     fn ignores_entities_that_are_not_items() {
         // Lexemes share the file with items and have no Q-number.
         let lexeme = r#"{"type":"lexeme","id":"L1234","lemmas":{}},"#;
-        let (facts, labels, _, read) = take(&[lexeme]);
+        let (facts, _, read) = take(&[lexeme]);
         assert_eq!(read, 1, "it was still a line of the dump");
         assert!(facts.is_empty());
-        assert!(labels.is_empty());
+        // The label pass has to skip it too, and for the same reason: no
+        // Q-number to key it by.
+        assert!(take_labels(&[lexeme], &[1234]).is_empty());
     }
 }
