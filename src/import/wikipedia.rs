@@ -183,6 +183,7 @@ fn read_articles(args: &Args, offsets: &HashMap<u64, Vec<String>>, wanted: &Hash
     let mut prose = Vec::new();
     let mut streams_read = 0usize;
     let mut without_lead = 0usize;
+    let mut panicked = 0usize;
 
     for (offset, titles) in offsets {
         file.seek(SeekFrom::Start(*offset)).with_context(|| format!("cannot seek to {offset}"))?;
@@ -201,7 +202,24 @@ fn read_articles(args: &Args, offsets: &HashMap<u64, Vec<String>>, wanted: &Hash
             let Some(article) = find_article(&xml, title) else { continue };
 
             let source_chars = i32::try_from(article.text.chars().count()).unwrap_or(i32::MAX);
-            match wikitext::lead(&article.text) {
+
+            // One unparseable article must not cost the whole run.
+            //
+            // The parser walks wikitext written by hand by thousands of
+            // editors, and a full pass takes hours: twice already a fixed byte
+            // window landed inside a multi-byte character and a panic threw
+            // away everything read so far. Both were fixed and are covered by
+            // tests, but the dump refreshes monthly and the next article is
+            // written by someone new. So a panic here loses one article and is
+            // counted, rather than losing the pass.
+            let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wikitext::lead(&article.text)));
+            let Ok(parsed) = attempt else {
+                tracing::warn!(title = %title, "the parser panicked on this article; skipping it");
+                panicked += 1;
+                continue;
+            };
+
+            match parsed {
                 Some(extract) => prose.push(Prose {
                     artist_id,
                     title: title.clone(),
@@ -217,7 +235,18 @@ fn read_articles(args: &Args, offsets: &HashMap<u64, Vec<String>>, wanted: &Hash
         }
     }
 
-    tracing::info!(streams_read, extracted = prose.len(), skipped_without_lead = without_lead, "articles read");
+    if panicked > 0 {
+        // Loud, because a rising count means the parser has met a shape it
+        // does not handle -- and the titles are in the log to reproduce it.
+        tracing::warn!(panicked, "articles the parser could not read; their prose is missing");
+    }
+    tracing::info!(
+        streams_read,
+        extracted = prose.len(),
+        skipped_without_lead = without_lead,
+        panicked,
+        "articles read"
+    );
     Ok(prose)
 }
 

@@ -27,8 +27,14 @@
 #[must_use]
 pub fn lead(wikitext: &str) -> Option<String> {
     // A redirect is a pointer, not an article.
+    //
+    // Compared as bytes rather than by slicing the string: an article opening
+    // with a multi-byte character puts no boundary at byte 9, and `&s[..9]`
+    // panics there. Found on the real dump twice, at two different fixed
+    // widths -- so the rule here is that a fixed byte count never indexes a
+    // str, only a &[u8].
     let trimmed = wikitext.trim_start();
-    if trimmed.len() >= 9 && trimmed[..9].eq_ignore_ascii_case("#redirect") {
+    if trimmed.len() >= 9 && trimmed.as_bytes()[..9].eq_ignore_ascii_case(b"#redirect") {
         return None;
     }
 
@@ -389,7 +395,15 @@ fn decode_entities(text: &str) -> String {
         out.push_str(&rest[..start]);
         let tail = &rest[start..];
         // An entity is short; anything longer is a stray ampersand.
-        let Some(end) = tail[..tail.len().min(12)].find(';') else {
+        //
+        // The window is measured in bytes but must land on a character
+        // boundary: slicing to a fixed byte count panics when the twelfth byte
+        // falls inside a multi-byte character, and leads are full of them.
+        // Found on the real dump, where "Bee Gees &ndash; 1958–2003" ends an
+        // en dash astride the limit.
+        let window = tail.len().min(12);
+        let window = (0..=window).rev().find(|n| tail.is_char_boundary(*n)).unwrap_or(0);
+        let Some(end) = tail[..window].find(';') else {
             out.push('&');
             rest = &tail[1..];
             continue;
@@ -738,5 +752,43 @@ mod tests {
         let text = "This article covers the history of recorded music in the twentieth century and beyond.";
         let lead = lead(text).unwrap();
         assert!(lead.starts_with("This article covers"));
+    }
+
+    #[test]
+    fn an_article_opening_with_a_multi_byte_character_does_not_panic() {
+        // The redirect check compares a fixed nine bytes. An article whose
+        // opening puts a character across that boundary panicked the second
+        // full prose run, after the first had already been fixed at a
+        // different fixed width.
+        for filler in 0..12 {
+            let text = format!("{}á is a Spanish singer who recorded eleven albums between 1970 and 1994.", "x".repeat(filler));
+            let lead = lead(&text);
+            assert!(lead.is_some(), "the lead should survive (filler {filler}): {text:?}");
+        }
+        // The check itself must still work.
+        assert!(lead("#REDIRECT [[Somewhere]]").is_none());
+        assert!(lead("#redirect [[Somewhere]]").is_none());
+    }
+
+    #[test]
+    fn a_multi_byte_character_at_the_entity_window_does_not_panic() {
+        // The entity scan looks ahead a fixed number of bytes, and this lead
+        // puts an en dash astride that limit. Slicing to the byte count panics
+        // -- which is exactly how the first full prose run died, after locating
+        // 181,491 articles.
+        for filler in 0..16 {
+            let text = format!("&{}–2003 was a year", "x".repeat(filler));
+            let decoded = decode_entities(&text);
+            assert!(decoded.contains("2003"), "the text should survive: {decoded}");
+        }
+    }
+
+    #[test]
+    fn resolves_the_entities_editors_write_by_hand() {
+        assert_eq!(decode_entities("200&nbsp;million"), "200 million");
+        assert_eq!(decode_entities("1958&ndash;2003"), "1958–2003");
+        assert_eq!(decode_entities("a &#124; b"), "a | b");
+        // A stray ampersand is not an entity and must survive as itself.
+        assert_eq!(decode_entities("Fun & Games"), "Fun & Games");
     }
 }
