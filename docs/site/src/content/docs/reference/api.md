@@ -147,8 +147,10 @@ imported — so building this card sends no request to Spotify or Deezer, which
 is what [ADR 0002](https://github.com/lacodda/lyrid/blob/main/docs/adr/0002-universe-from-open-dumps.md)
 requires of the critical path. The honest consequence is on the card: these
 are **artist pages, not tracks**, because MusicBrainz relates an artist to a
-service and not a recording to one. A per-track preview would need an API call
-per star.
+service and not a recording to one — only 29 of its 15,944 YouTube links point
+at a video. A per-track preview would need an API call per star; the reasoning
+and what would change that is in
+[ADR 0011](https://github.com/lacodda/lyrid/blob/main/docs/adr/0011-listening-from-the-canon.md).
 
 The service name is read from the URL rather than passed through from
 MusicBrainz's own vocabulary ("free streaming", "purchase for download"),

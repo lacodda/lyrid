@@ -50,6 +50,13 @@ next to the code it constrains:
 - [0002 · The universe comes from open dumps](https://github.com/lacodda/lyrid/blob/main/docs/adr/0002-universe-from-open-dumps.md)
 - [0003 · Sky map: tile pyramid and a custom WebGL2 renderer](https://github.com/lacodda/lyrid/blob/main/docs/adr/0003-sky-map-architecture.md)
 - [0004 · Similarity from a published dataset, brightness from the graph](https://github.com/lacodda/lyrid/blob/main/docs/adr/0004-similarity-from-a-published-dataset.md)
+- [0005 · Genres from Discogs, not MusicBrainz](https://github.com/lacodda/lyrid/blob/main/docs/adr/0005-genres-from-discogs.md)
+- [0006 · Facts and influence from the Wikidata dump](https://github.com/lacodda/lyrid/blob/main/docs/adr/0006-facts-from-the-wikidata-dump.md)
+- [0007 · Prose parsed from wikitext, attribution stored with it](https://github.com/lacodda/lyrid/blob/main/docs/adr/0007-prose-parsed-from-wikitext.md)
+- [0008 · The layout is written here](https://github.com/lacodda/lyrid/blob/main/docs/adr/0008-layout-written-here.md)
+- [0009 · The renderer is measured, not estimated](https://github.com/lacodda/lyrid/blob/main/docs/adr/0009-renderer-measured.md)
+- [0010 · A slice for a small stand](https://github.com/lacodda/lyrid/blob/main/docs/adr/0010-a-slice-for-a-small-stand.md)
+- [0011 · Listening from the canon, not from an API](https://github.com/lacodda/lyrid/blob/main/docs/adr/0011-listening-from-the-canon.md)
 
 ## Releases
 
