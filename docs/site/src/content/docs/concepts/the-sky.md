@@ -47,6 +47,14 @@ fragment instead, because it says where the sender was looking — which may be 
 wide view holding that star among others. A fragment that has been truncated or
 hand-edited opens the whole sky rather than a camera at nowhere.
 
+The star whose card is open wears a **halo**, because arriving somewhere is no
+use if you cannot tell which point of light you arrived at. It is drawn as a
+second pass over the field rather than as a property of every star — the field
+is one instanced draw call whose cost is measured, and a per-star comparison
+would spend that budget on two hundred thousand stars to change one. Its size
+is in pixels, not world units, so it stays a marker at every zoom rather than
+becoming an object that grows as you approach.
+
 The other way to take a view with you is a **poster**: the frame as drawn, saved
 as a PNG at the resolution it is drawn. It is captured inside the render loop —
 a WebGL colour buffer is undefined the moment a frame ends, so a screenshot
