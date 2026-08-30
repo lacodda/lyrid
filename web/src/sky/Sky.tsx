@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { advance } from './flight'
-import { SkyRenderer, type Camera, type Star } from './renderer'
-import { fetchLevel, fetchSky, levelFor, type Sky as SkyMeta, type Tile } from './tiles'
+import { SkyRenderer, type Camera, type Halo, type Star } from './renderer'
+import { fetchLevel, fetchSky, levelFor, tileAction, type Sky as SkyMeta, type Tile } from './tiles'
 
 /** What the sky is doing, for the caller to show around it. */
 export interface SkyState {
@@ -30,6 +30,8 @@ interface Props {
   target?: View | null
   /** The view to open on, instead of the whole sky. */
   initial?: View | null
+  /** The star to mark with a halo — the one whose card is open. */
+  marked?: Halo | null
   /**
    * Handed a function that captures the current frame as a PNG.
    *
@@ -49,7 +51,7 @@ interface Props {
  * entirely. A component that re-rendered per frame would spend more time in
  * reconciliation than in drawing.
  */
-export function Sky({ onState, onPick, target, initial, onCapture }: Props) {
+export function Sky({ onState, onPick, target, initial, marked, onCapture }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -64,6 +66,15 @@ export function Sky({ onState, onPick, target, initial, onCapture }: Props) {
   const flight = useRef<View | null>(null)
   // The opening view is consumed once, when the sky's extent is known.
   const initialView = useRef<View | null>(initial ?? null)
+
+  // Read every frame, so it lives outside React like the camera does. A prop
+  // read directly in the loop would be captured at the effect's first run and
+  // never change; the ref is updated in an effect rather than during render,
+  // which is where a render-phase write would be a lie about purity.
+  const markedRef = useRef<Halo | null>(null)
+  useEffect(() => {
+    markedRef.current = marked ?? null
+  }, [marked])
 
   // A pending capture, resolved by the render loop on the next frame it draws.
   const pendingCapture = useRef<((blob: Blob | null) => void) | null>(null)
@@ -132,14 +143,16 @@ export function Sky({ onState, onPick, target, initial, onCapture }: Props) {
           if (sky) {
             const wanted = levelFor(sky, canvas.width / camera.current.scale)
             const tile = levels.current.get(wanted)
-            if (tile && wanted !== shownLevel.current) {
-              renderer.upload(tile.packed)
-              shownLevel.current = wanted
-            } else if (!tile) {
-              // Fetched once; until it lands the previous level keeps drawing,
-              // so zooming never shows an empty sky.
+            const action = tileAction(tile, wanted, shownLevel.current)
+            if (action.do === 'fetch') {
+              // Marked as being fetched so the request is made once; until it
+              // lands the previous level keeps drawing, so zooming never shows
+              // an empty sky.
               levels.current.set(wanted, { packed: new Float32Array(0), stars: [] })
               void fetchLevel(wanted, '/tiles', abort.signal).then(loaded => levels.current.set(wanted, loaded))
+            } else if (action.do === 'upload' && tile) {
+              renderer.upload(tile.packed)
+              shownLevel.current = wanted
             }
 
             const wantsCapture = pendingCapture.current
@@ -148,7 +161,13 @@ export function Sky({ onState, onPick, target, initial, onCapture }: Props) {
               // next pan by hand.
               flight.current = null
             }
-            renderer.draw(camera.current, [canvas.width, canvas.height], now * 0.001, reduceMotion.matches ? 0 : 1)
+            renderer.draw(
+              camera.current,
+              [canvas.width, canvas.height],
+              now * 0.001,
+              reduceMotion.matches ? 0 : 1,
+              markedRef.current
+            )
             // Read while the frame is still in the colour buffer: after this
             // callback returns, the browser is free to discard it.
             if (wantsCapture) {

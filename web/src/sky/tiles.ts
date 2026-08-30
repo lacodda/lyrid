@@ -102,6 +102,25 @@ export async function fetchLevel(level: number, root = '/tiles', signal?: AbortS
  * Levels filter by brightness rather than resolution, so this is "how much of
  * the sky is on screen" turned into "how many stars to admit".
  */
+/**
+ * What the render loop should do about the level it wants to show.
+ *
+ * Pulled out of the loop because the rule has a trap in it, and a trap in a
+ * render loop is invisible: the placeholder that marks a level as *being
+ * fetched* must never reach the renderer. Uploading it would draw nothing and
+ * record the level as shown, so the real tiles arriving a moment later would
+ * find the level already "current" and never replace them — an empty sky, for
+ * good.
+ */
+export type TileAction = { do: 'fetch' } | { do: 'upload' } | { do: 'wait' }
+
+export function tileAction(tile: Tile | undefined, wanted: number, shown: number): TileAction {
+  if (!tile) return { do: 'fetch' }
+  // Still a placeholder: keep drawing whatever is already uploaded.
+  if (tile.packed.length === 0) return { do: 'wait' }
+  return wanted === shown ? { do: 'wait' } : { do: 'upload' }
+}
+
 export function levelFor(sky: Sky, visibleSpan: number): number {
   const span = sky.max_x - sky.min_x
   const fraction = Math.max(visibleSpan / span, 1e-6)
