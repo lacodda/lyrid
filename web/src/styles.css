@@ -100,10 +100,19 @@ body,
   color: var(--lyrid-muted);
 }
 
-.app__status {
+/* Everything that sits in the bottom-left sits in one stack, so nothing can
+   land on top of anything else as the pieces grow. */
+.app__corner {
   position: absolute;
-  bottom: 1rem;
   left: 1.5rem;
+  bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.app__status {
   margin: 0;
   font: 0.75rem/1.4 ui-monospace, monospace;
   color: var(--lyrid-muted);
@@ -182,12 +191,63 @@ body,
   color: var(--lyrid-muted);
 }
 
-/* Bottom-left, opposite the status line: present but never in the way of the
-   sky, which is the thing worth looking at. */
+/* Scratch panel: here to settle a look by eye, bound for settings. Styled
+   plainly on purpose — it is not meant to become part of the design. */
+.halo-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px dashed var(--lyrid-edge);
+  border-radius: 6px;
+  background: var(--lyrid-glass);
+  backdrop-filter: blur(12px);
+}
+
+.halo-picker__label {
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lyrid-muted);
+}
+
+.halo-picker__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.halo-picker__row button {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--lyrid-edge);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--lyrid-muted);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.halo-picker__row button:hover {
+  color: var(--lyrid-text);
+}
+
+.halo-picker__swatch {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border-radius: 50%;
+}
+
+/* The chosen one, in both rows. */
+.halo-picker__on {
+  border-color: var(--lyrid-azure);
+  color: var(--lyrid-text);
+  box-shadow: 0 0 0 1px var(--lyrid-azure);
+}
+
+/* Present but never in the way of the sky, which is the thing worth looking at. */
 .app__share {
-  position: absolute;
-  left: 1.5rem;
-  bottom: 1.5rem;
   display: flex;
   gap: 0.5rem;
 }

@@ -4,6 +4,8 @@ import { Sky, type SkyState, type View } from '@/sky/Sky'
 import { StarCard } from '@/sky/StarCard'
 import { Search } from '@/sky/Search'
 import { readLocation, writeLocation } from '@/sky/location'
+import { HaloPicker, HALO_COLOURS, HALO_DEFAULT } from '@/sky/HaloPicker'
+import { HALO_SHAPES, type HaloShape } from '@/sky/renderer'
 import { fetchArtist } from '@/api'
 import type { Star } from '@/sky/renderer'
 
@@ -66,6 +68,27 @@ export function App() {
     return () => abort.abort()
   }, [opened])
 
+  // How the marked star is drawn. Remembered per browser: this is a personal
+  // preference about a marker, worth nothing to anyone else and not worth a
+  // round trip. Reads are guarded because storage can be refused outright.
+  const [shape, setShape] = useState<HaloShape>(() => remembered('lyrid.halo.shape', HALO_SHAPES[0], HALO_SHAPES))
+  const [colour, setColour] = useState<[number, number, number]>(() => {
+    const names = HALO_COLOURS.map(option => option.name)
+    const name = remembered('lyrid.halo.colour', HALO_DEFAULT.name, names)
+    return (HALO_COLOURS.find(option => option.name === name) ?? HALO_DEFAULT).rgb
+  })
+
+  const chooseShape = useCallback((next: HaloShape) => {
+    setShape(next)
+    remember('lyrid.halo.shape', next)
+  }, [])
+
+  const chooseColour = useCallback((next: [number, number, number]) => {
+    setColour(next)
+    const named = HALO_COLOURS.find(c => c.rgb[0] === next[0] && c.rgb[1] === next[1] && c.rgb[2] === next[2])
+    if (named) remember('lyrid.halo.colour', named.name)
+  }, [])
+
   // Handed up by the sky once its loop is running; stable, so the sky's effect
   // does not restart on every render.
   const captureRef = useRef<(() => Promise<Blob | null>) | null>(null)
@@ -86,7 +109,14 @@ export function App() {
 
   return (
     <main className="app">
-      <Sky onState={onState} onPick={onPick} target={target} initial={opened.view} onCapture={onCapture} />
+      <Sky
+        onState={onState}
+        onPick={onPick}
+        target={target}
+        initial={opened.view}
+        marked={picked && { x: picked.x, y: picked.y, shape, colour }}
+        onCapture={onCapture}
+      />
 
       <header className="app__header">
         <img className="app__mark" src="/mark.svg" alt="" />
@@ -102,12 +132,14 @@ export function App() {
           than leaving the previous artist on screen while the new one loads. */}
       {picked && <StarCard key={picked.artistId} artistId={picked.artistId} onClose={() => setPicked(null)} />}
 
-      {state && <Share capture={captureRef} />}
-
       {state && (
-        <p className="app__status">
-          {state.stars.toLocaleString('en')} stars · level {state.level} · v{__APP_VERSION__}
-        </p>
+        <div className="app__corner">
+          <HaloPicker shape={shape} colour={colour} onShape={chooseShape} onColour={chooseColour} />
+          <Share capture={captureRef} />
+          <p className="app__status">
+            {state.stars.toLocaleString('en')} stars · level {state.level} · v{__APP_VERSION__}
+          </p>
+        </div>
       )}
     </main>
   )
@@ -159,4 +191,29 @@ function Share({ capture }: { capture: { current: (() => Promise<Blob | null>) |
       <button onClick={savePoster}>save poster</button>
     </div>
   )
+}
+
+/**
+ * A remembered choice, or the fallback.
+ *
+ * Storage can be refused outright — a private window, or a browser told to
+ * block site data — and it throws rather than returning null when it is. The
+ * value is checked against what the code knows about, so a stale or
+ * hand-edited entry cannot put the renderer into a shape it has no branch for.
+ */
+function remembered<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
+  try {
+    const stored = window.localStorage.getItem(key)
+    return allowed.includes(stored as T) ? (stored as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function remember(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value)
+  } catch {
+    // Nothing to do and nothing to say: the choice still holds for this visit.
+  }
 }
