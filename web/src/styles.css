@@ -182,6 +182,33 @@ body,
   color: var(--lyrid-muted);
 }
 
+/* Bottom-left, opposite the status line: present but never in the way of the
+   sky, which is the thing worth looking at. */
+.app__share {
+  position: absolute;
+  left: 1.5rem;
+  bottom: 1.5rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.app__share button {
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--lyrid-edge);
+  border-radius: 6px;
+  background: var(--lyrid-glass);
+  backdrop-filter: blur(12px);
+  color: var(--lyrid-muted);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.app__share button:hover {
+  border-color: var(--lyrid-azure);
+  color: var(--lyrid-azure);
+}
+
 /* ------------------------------------------------------------------- card */
 
 .card {

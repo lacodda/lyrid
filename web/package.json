@@ -10,6 +10,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint . && tsc --noEmit",
+    "test": "vitest run",
     "prototype": "vite --open /prototype/sky.html"
   },
   "dependencies": {
@@ -27,7 +28,8 @@
     "globals": "^17.11.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.68.0",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   },
   "packageManager": "pnpm@10.15.0"
 }

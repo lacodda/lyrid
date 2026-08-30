@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { advance } from './flight'
 import { SkyRenderer, type Camera, type Star } from './renderer'
 import { fetchLevel, fetchSky, levelFor, type Sky as SkyMeta, type Tile } from './tiles'
 
@@ -8,11 +9,37 @@ export interface SkyState {
   stars: number
   level: number
   scale: number
+  /** Where the camera is now, so the caller can put it in the address. */
+  view: View
+}
+
+/** Where the camera should be: a place in the sky and how close. */
+export interface View {
+  x: number
+  y: number
+  scale: number
 }
 
 interface Props {
   onState?: (state: SkyState) => void
   onPick?: (star: Star | null) => void
+  /**
+   * Somewhere to fly to. Changing this starts a flight; the camera is left
+   * alone while it stays the same, so panning by hand is never fought.
+   */
+  target?: View | null
+  /** The view to open on, instead of the whole sky. */
+  initial?: View | null
+  /**
+   * Handed a function that captures the current frame as a PNG.
+   *
+   * The capture has to happen inside the render loop: without
+   * `preserveDrawingBuffer` the colour buffer is undefined the moment the
+   * frame ends, so a `toBlob` from outside would save an empty image. Turning
+   * that flag on permanently would cost every frame for a button pressed
+   * rarely, so instead one frame is drawn and read on the spot.
+   */
+  onCapture?: (capture: () => Promise<Blob | null>) => void
 }
 
 /**
@@ -22,7 +49,7 @@ interface Props {
  * entirely. A component that re-rendered per frame would spend more time in
  * reconciliation than in drawing.
  */
-export function Sky({ onState, onPick }: Props) {
+export function Sky({ onState, onPick, target, initial, onCapture }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -32,6 +59,21 @@ export function Sky({ onState, onPick }: Props) {
   const meta = useRef<SkyMeta | null>(null)
   const levels = useRef<Map<number, Tile>>(new Map())
   const shownLevel = useRef(-1)
+  // Where the camera is flying, and nothing when it is still. Outside React
+  // for the same reason as the camera: this is read every frame.
+  const flight = useRef<View | null>(null)
+  // The opening view is consumed once, when the sky's extent is known.
+  const initialView = useRef<View | null>(initial ?? null)
+
+  // A pending capture, resolved by the render loop on the next frame it draws.
+  const pendingCapture = useRef<((blob: Blob | null) => void) | null>(null)
+
+  // A flight starts when the target changes, not on every render: React
+  // re-renders for reasons that have nothing to do with the camera, and
+  // restarting the flight each time would drag the view back mid-pan.
+  useEffect(() => {
+    if (target) flight.current = target
+  }, [target])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -74,7 +116,7 @@ export function Sky({ onState, onPick }: Props) {
       try {
         const sky = await fetchSky('/tiles', abort.signal)
         meta.current = sky
-        camera.current = {
+        camera.current = initialView.current ?? {
           x: (sky.min_x + sky.max_x) / 2,
           y: (sky.min_y + sky.max_y) / 2,
           scale: canvas.width / (sky.max_x - sky.min_x),
@@ -100,12 +142,37 @@ export function Sky({ onState, onPick }: Props) {
               void fetchLevel(wanted, '/tiles', abort.signal).then(loaded => levels.current.set(wanted, loaded))
             }
 
+            const wantsCapture = pendingCapture.current
+            if (flight.current && advance(camera.current, flight.current, reduceMotion.matches)) {
+              // Cleared on arrival: a target left in place would fight the
+              // next pan by hand.
+              flight.current = null
+            }
             renderer.draw(camera.current, [canvas.width, canvas.height], now * 0.001, reduceMotion.matches ? 0 : 1)
-            onState?.({ stars: renderer.starCount, level: shownLevel.current, scale: camera.current.scale })
+            // Read while the frame is still in the colour buffer: after this
+            // callback returns, the browser is free to discard it.
+            if (wantsCapture) {
+              pendingCapture.current = null
+              canvas.toBlob(blob => wantsCapture(blob), 'image/png')
+            }
+
+            onState?.({
+              stars: renderer.starCount,
+              level: shownLevel.current,
+              scale: camera.current.scale,
+              view: { ...camera.current },
+            })
           }
           frame = requestAnimationFrame(loop)
         }
         frame = requestAnimationFrame(loop)
+
+        onCapture?.(
+          () =>
+            new Promise<Blob | null>(resolve => {
+              pendingCapture.current = resolve
+            })
+        )
       } catch (cause) {
         if (abort.signal.aborted) return
         setError(cause instanceof Error ? cause.message : 'the sky could not be loaded')
@@ -120,7 +187,7 @@ export function Sky({ onState, onPick }: Props) {
       cancelAnimationFrame(frame)
       window.removeEventListener('resize', resize)
     }
-  }, [onState])
+  }, [onState, onCapture])
 
   // ------------------------------------------------------------- controls
   const dragging = useRef(false)
