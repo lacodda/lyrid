@@ -17,7 +17,7 @@ Named after the Lyrids — the meteor shower radiating from Lyra, the lyre of Or
 
 ## Built on open data
 
-The universe is assembled locally from open dumps and datasets — MusicBrainz, ListenBrainz, Discogs, Wikidata, Wikipedia, AcousticBrainz — with similarity and the sky layout computed by lyrid itself. Listening goes through official previews and embeds; scrobbling connects via ListenBrainz.
+The universe is assembled locally from open dumps and datasets — MusicBrainz, ListenBrainz, Discogs, Wikidata, Wikipedia, AcousticBrainz — with similarity and the sky layout computed by lyrid itself. Listening goes out to the services the canon already links to, and to the artist's own channel embedded in place — never through a streaming API on the critical path ([ADR 0011](https://github.com/lacodda/lyrid/blob/main/docs/adr/0011-listening-from-the-canon.md)); scrobbling connects via ListenBrainz.
 
 ## Status
 

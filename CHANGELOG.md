@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.8.0] - 2026-08-30
+
+### Documentation
+- Record why the ether is links and a channel
+
+### Features
+- Serve where an artist can be heard
+
 ## [0.7.0] - 2026-08-30
 
 ### Bug Fixes
@@ -12,6 +20,7 @@ All notable changes to this project are documented in this file.
 - Name a neighbour that exists
 - Take the card example from the running canon
 - Record what the 867-article survey missed
+- Generate for v0.7.0
 
 ### Features
 - Let the card show the whole canon
