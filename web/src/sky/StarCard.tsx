@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { fetchArtist, type Artist, type Neighbour, type Origin } from '@/api'
+import { fetchArtist, type Artist, type Link, type Neighbour, type Origin } from '@/api'
 
 interface Props {
   artistId: number
@@ -104,6 +104,8 @@ export function StarCard({ artistId, onClose }: Props) {
             </>
           )}
 
+          <Listen links={artist.listen} uploads={artist.youtube_uploads} />
+
           {/* Influence is directed, so the two lists are separate claims and
               never merged into one "related" pile. */}
           <Names heading="shaped by" people={artist.influenced_by} />
@@ -137,6 +139,63 @@ function Extract({ text }: { text: string }) {
         {expanded ? 'less' : `more (${String(rest.length)} more paragraph${rest.length > 1 ? 's' : ''})`}
       </button>
     </>
+  )
+}
+
+/**
+ * Where to go and hear this artist.
+ *
+ * The links come from the canon rather than from a streaming API, which is
+ * what keeps the card offline-shaped: nothing here waits on a service that
+ * could be down or rate-limiting. The honest consequence is that they are
+ * artist pages, not tracks — MusicBrainz relates an artist to a service, not
+ * a recording to one.
+ */
+function Listen({ links, uploads }: { links: Link[]; uploads: string | null }) {
+  if (links.length === 0) return null
+  return (
+    <>
+      <h3 className="card__section">listen</h3>
+      {uploads && <Player uploads={uploads} />}
+      <ul className="card__links">
+        {links.map(link => (
+          <li key={link.url}>
+            <a href={link.url} target="_blank" rel="noreferrer">
+              {link.service}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </>
+  )
+}
+
+/**
+ * The artist's own channel, played in place.
+ *
+ * Loaded on click rather than with the card: a YouTube iframe pulls scripts
+ * and sets cookies, and this card opens on every star a visitor touches.
+ * Until then it is a button, and a visitor who never presses it never meets
+ * YouTube at all.
+ */
+function Player({ uploads }: { uploads: string }) {
+  const [playing, setPlaying] = useState(false)
+  if (!playing) {
+    return (
+      <button className="card__play" onClick={() => setPlaying(true)}>
+        ▶ play this artist's channel
+      </button>
+    )
+  }
+  return (
+    <div className="card__player">
+      <iframe
+        src={`https://www.youtube-nocookie.com/embed/videoseries?list=${uploads}`}
+        title="the artist's channel"
+        allow="accelerometer; clipboard-write; encrypted-media; picture-in-picture"
+        allowFullScreen
+      />
+    </div>
   )
 }
 

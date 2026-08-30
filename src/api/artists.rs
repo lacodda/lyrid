@@ -57,6 +57,27 @@ struct Artist {
     prose: Option<Prose>,
     /// Release groups, newest first.
     releases: Vec<Release>,
+    /// Where this artist can actually be heard, and where they can be read
+    /// about. From the canon's own URL relationships, so no request leaves
+    /// this server to build the card.
+    listen: Vec<Link>,
+    /// The playlist id that embeds this artist's `YouTube` channel, when the
+    /// canon knows a channel in an embeddable form. This is the one address
+    /// on the card a page can play rather than link to.
+    youtube_uploads: Option<String>,
+}
+
+/// One outbound link, with the service named rather than the raw kind.
+///
+/// `MusicBrainz` describes a link by what it is for -- "free streaming",
+/// "purchase for download" -- while a listener thinks in services. The host
+/// carries the name, so it is read here rather than left to the client: the
+/// rule for what counts as listenable belongs in one place.
+#[derive(Serialize)]
+struct Link {
+    /// "Spotify", "Bandcamp", "`YouTube`"...
+    service: String,
+    url: String,
 }
 
 /// Where an act comes from, and which question that answers.
@@ -213,6 +234,12 @@ async fn load_artist(pool: &PgPool, id: i32) -> sqlx::Result<Option<Artist>> {
     .map(|(id, name, score)| Neighbour { id, name, score })
     .collect();
 
+    let listen = listen(pool, id).await?;
+    let youtube_uploads = listen
+        .iter()
+        .find(|link| link.service == "YouTube")
+        .and_then(|link| uploads_playlist(&link.url));
+
     let origin = origin(pool, id).await?;
     let labels = labels(pool, id).await?;
     let prose = prose(pool, id).await?;
@@ -244,6 +271,8 @@ async fn load_artist(pool: &PgPool, id: i32) -> sqlx::Result<Option<Artist>> {
         influenced,
         prose,
         releases,
+        listen,
+        youtube_uploads,
     }))
 }
 
@@ -338,6 +367,154 @@ async fn releases(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Release>> {
     .into_iter()
     .map(|(name, primary_type, year)| Release { name, primary_type, year })
     .collect())
+}
+
+/// Where the artist can be heard, newest-known service first.
+///
+/// Read from the canon's own URL relationships: nothing here calls out to a
+/// streaming service, which is what ADR 0002 requires of the critical path.
+/// The trade is visible on the card - these are artist pages, not tracks,
+/// because `MusicBrainz` links an artist to a service and not a recording to
+/// one. Measured on the slice: of 100,000 placed stars, 49,090 have somewhere
+/// to go and 14,198 have a `YouTube` channel.
+async fn listen(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Link>> {
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT kind, url
+         FROM artist_url
+         WHERE artist_id = $1
+           AND kind IN ('free streaming', 'streaming', 'bandcamp', 'soundcloud',
+                        'youtube', 'purchase for download', 'official homepage')
+         ORDER BY kind, url",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut links: Vec<Link> = Vec::new();
+    for (kind, url) in rows {
+        let service = service_of(&url, &kind);
+        // One row per service, and one per address: an artist with four
+        // Spotify links is a cataloguing artefact, not four places to listen.
+        // The address check catches the same shop filed under two kinds --
+        // the Beatles' Korean shop is both "streaming" and "purchase for
+        // download", and unnamed links keep the kind as their service, so
+        // deduplicating by name alone would let it through twice.
+        if links.iter().any(|link| link.service == service || link.url == url) {
+            continue;
+        }
+        links.push(Link { service, url });
+    }
+    // Streaming first, then the artist's own places: someone who clicked a
+    // star wants to hear it before they want to read a homepage.
+    links.sort_by_key(|link| service_rank(&link.service));
+    // Measured on the canon: a median artist has 4 of these and 90% have 9 or
+    // fewer, but the tail reaches 53 - a wall of regional shops nobody scrolls.
+    // The ranking above means what survives the cut is the part worth showing.
+    links.truncate(8);
+    Ok(links)
+}
+
+/// Names the service behind a URL.
+///
+/// Matched on the registrable name rather than the whole host, for two
+/// reasons found in the canon: Bandcamp gives every artist their own
+/// subdomain (10,006 of them, all one service), and the shops run national
+/// domains -- `music.amazon.com` and `music.amazon.co.uk` are the same shop.
+/// So the host is reduced to the label before its public suffix, and matched
+/// exactly. That exactness matters: a substring test would read
+/// `notspotify.com` as Spotify.
+///
+/// Anything unrecognised falls back to `MusicBrainz`'s own word for the link,
+/// which is a fair description even when it is not a name -- the canon has a
+/// long tail of shops this list will never cover.
+fn service_of(url: &str, kind: &str) -> String {
+    const SERVICES: [(&str, &str); 18] = [
+        ("spotify", "Spotify"),
+        ("deezer", "Deezer"),
+        ("apple", "Apple Music"),
+        ("itunes", "Apple Music"),
+        ("tidal", "Tidal"),
+        ("youtube", "YouTube"),
+        ("soundcloud", "SoundCloud"),
+        ("bandcamp", "Bandcamp"),
+        ("qobuz", "Qobuz"),
+        ("beatport", "Beatport"),
+        ("amazon", "Amazon Music"),
+        ("napster", "Napster"),
+        ("junodownload", "Juno Download"),
+        ("traxsource", "Traxsource"),
+        ("pandora", "Pandora"),
+        ("7digital", "7digital"),
+        ("melon", "Melon"),
+        ("mora", "mora"),
+    ];
+
+    let Some(name) = registrable_name(url) else { return kind.to_string() };
+    for (label, service) in SERVICES {
+        if name == label {
+            return (*service).to_string();
+        }
+    }
+    kind.to_string()
+}
+
+/// The "uploads" playlist of a `YouTube` channel, which is embeddable.
+///
+/// Every channel has an implicit playlist of everything it has posted, and its
+/// id is the channel id with `UC` swapped for `UU`. That playlist embeds
+/// through the standard player, so the card can play an artist's own channel
+/// without the `YouTube` Data API -- which ADR 0002 keeps out of the critical
+/// path.
+///
+/// Only the `/channel/UC…` form carries the id: `/user/…` and `/@handle` links
+/// name a channel without giving its id, and resolving them needs the very API
+/// this avoids. Measured on the canon: 10,155 of 15,944 channels are the
+/// embeddable form; the rest stay a link.
+fn uploads_playlist(url: &str) -> Option<String> {
+    let id = url.split("/channel/").nth(1)?.split(['/', '?', '#']).next()?;
+    // A channel id is "UC" and 22 more characters of base64url. Checked so a
+    // malformed link becomes no player rather than a broken one.
+    let rest = id.strip_prefix("UC")?;
+    let well_formed = rest.len() == 22 && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    well_formed.then(|| format!("UU{rest}"))
+}
+
+/// The label a domain is registered under: `music.amazon.co.uk` -> `amazon`.
+///
+/// Not a public-suffix list -- that would be a dependency and a data file for
+/// a naming nicety. The rule instead: drop the last label, and drop the one
+/// before it too when it is a country-code second level like `co.uk` or
+/// `com.au`. Wrong for a handful of exotic suffixes, which then fall back to
+/// the link's own kind rather than being named wrongly.
+fn registrable_name(url: &str) -> Option<String> {
+    let host = url.split("//").nth(1).unwrap_or(url).split('/').next()?;
+    let host = host.split(':').next()?;
+    let labels: Vec<&str> = host.split('.').filter(|label| !label.is_empty()).collect();
+    if labels.len() < 2 {
+        return None;
+    }
+
+    let last = labels[labels.len() - 1];
+    let second = labels[labels.len() - 2];
+    // "co.uk", "com.au", "co.jp": the second-level label is a suffix too, so
+    // the name is one further left.
+    let name_at = if last.len() == 2 && matches!(second, "co" | "com" | "net" | "org" | "ac" | "or") {
+        labels.len().checked_sub(3)?
+    } else {
+        labels.len() - 2
+    };
+    Some(labels[name_at].to_lowercase())
+}
+
+/// Listening comes before reading, and the big services before the rest.
+fn service_rank(service: &str) -> u8 {
+    match service {
+        "YouTube" => 0,
+        "Spotify" | "Apple Music" | "Deezer" | "Tidal" => 1,
+        "Bandcamp" | "SoundCloud" => 2,
+        "official homepage" => 9,
+        _ => 5,
+    }
 }
 
 /// Which end of the influence arrow to follow.
@@ -479,6 +656,73 @@ mod tests {
 
     fn app() -> Router {
         routes().with_state(AppState { pool: dead_pool() })
+    }
+
+    #[test]
+    fn names_a_service_by_its_domain_suffix() {
+        // Bandcamp gives every artist a subdomain -- 10,006 of them in the
+        // canon -- so an exact host match would name none of them.
+        assert_eq!(service_of("https://3six.bandcamp.com/", "bandcamp"), "Bandcamp");
+        assert_eq!(service_of("https://open.spotify.com/artist/31v7", "streaming"), "Spotify");
+        assert_eq!(service_of("https://music.apple.com/us/artist/420535261", "streaming"), "Apple Music");
+        assert_eq!(service_of("https://itunes.apple.com/artist/1", "purchase for download"), "Apple Music");
+        assert_eq!(service_of("https://www.youtube.com/channel/UC58", "youtube"), "YouTube");
+    }
+
+    #[test]
+    fn a_channel_link_becomes_its_uploads_playlist() {
+        // UC -> UU is the whole trick, and it is what lets the card play a
+        // channel without the YouTube Data API.
+        assert_eq!(
+            uploads_playlist("https://www.youtube.com/channel/UCc4K7bAqpdBP8jh1j9XZAww").as_deref(),
+            Some("UUc4K7bAqpdBP8jh1j9XZAww")
+        );
+        // Trailing paths and queries are not part of the id.
+        assert_eq!(
+            uploads_playlist("https://www.youtube.com/channel/UCc4K7bAqpdBP8jh1j9XZAww/videos?x=1").as_deref(),
+            Some("UUc4K7bAqpdBP8jh1j9XZAww")
+        );
+    }
+
+    #[test]
+    fn a_channel_without_an_id_stays_a_link() {
+        // 5,789 of the canon's 15,944 channels are named rather than
+        // identified; resolving them needs the API this design avoids, so
+        // they get no player at all rather than a broken one.
+        assert_eq!(uploads_playlist("https://www.youtube.com/user/gratefulvideo"), None);
+        assert_eq!(uploads_playlist("https://www.youtube.com/@someartist"), None);
+        assert_eq!(uploads_playlist("https://www.youtube.com/c/NateIngalls"), None);
+        // Malformed ids are refused rather than turned into a dead player.
+        assert_eq!(uploads_playlist("https://www.youtube.com/channel/UCtooshort"), None);
+        assert_eq!(uploads_playlist("https://www.youtube.com/channel/XY123456789012345678901"), None);
+    }
+
+    #[test]
+    fn a_national_domain_is_the_same_shop() {
+        // Found on the card: music.amazon.co.uk went unnamed while
+        // music.amazon.com was named, which reads as two different shops.
+        assert_eq!(service_of("https://music.amazon.co.uk/artists/B00G", "streaming"), "Amazon Music");
+        assert_eq!(service_of("https://music.amazon.com/artists/B001", "streaming"), "Amazon Music");
+        assert_eq!(service_of("https://us.7digital.com/artist/1", "purchase for download"), "7digital");
+        assert_eq!(service_of("https://www.7digital.com/artist/1", "purchase for download"), "7digital");
+    }
+
+    #[test]
+    fn a_lookalike_domain_is_not_the_service() {
+        // The suffix must be a domain boundary: "notspotify.com" and
+        // "spotify.com.example.org" are not Spotify.
+        assert_eq!(service_of("https://notspotify.com/artist/1", "streaming"), "streaming");
+        assert_eq!(service_of("https://spotify.com.example.org/x", "streaming"), "streaming");
+    }
+
+    #[test]
+    fn an_unknown_host_keeps_musicbrainzs_own_word_for_it() {
+        // Better a fair description than a guessed brand: the canon has a long
+        // tail of shops this list will never name.
+        assert_eq!(service_of("https://music.bugs.co.kr/artist/1", "streaming"), "streaming");
+        assert_eq!(service_of("https://ototoy.jp/artist/1", "purchase for download"), "purchase for download");
+        // And a URL with no host at all does not become one.
+        assert_eq!(service_of("not a url", "streaming"), "streaming");
     }
 
     #[tokio::test]

@@ -331,6 +331,57 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
+.card__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+.card__links a {
+  color: var(--lyrid-azure);
+}
+
+/* A button, not a player: the iframe arrives only if someone asks for it. */
+.card__play {
+  display: block;
+  width: 100%;
+  margin: 0 0 0.6rem;
+  padding: 0.5rem;
+  border: 1px solid var(--lyrid-edge);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lyrid-text);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.card__play:hover {
+  border-color: var(--lyrid-azure);
+  color: var(--lyrid-azure);
+}
+
+/* 16:9 without a fixed height, so the player follows the card's width. */
+.card__player {
+  position: relative;
+  margin: 0 0 0.8rem;
+  padding-top: 56.25%;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.card__player iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
 .card__section {
   margin: 0 0 0.35rem;
   font-size: 0.72rem;

@@ -71,6 +71,12 @@ export interface Release {
   year: number | null
 }
 
+/** One outbound link, with the service named by the server. */
+export interface Link {
+  service: string
+  url: string
+}
+
 /** Everything a card shows about one star. */
 export interface Artist {
   id: number
@@ -91,6 +97,10 @@ export interface Artist {
   influenced: Neighbour[]
   prose: Prose | null
   releases: Release[]
+  /** Where this artist can be heard, from the canon's own links. */
+  listen: Link[]
+  /** Playlist id that embeds the artist's YouTube channel, when there is one. */
+  youtube_uploads: string | null
 }
 
 /** A search result, with a place to fly to. */

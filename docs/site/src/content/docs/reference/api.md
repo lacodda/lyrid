@@ -84,7 +84,13 @@ each, the neighbours from co-listening.
     "source_url": "https://en.wikipedia.org/wiki/Nirvana_(band)",
     "licence": "CC BY-SA 4.0"
   },
-  "releases": [{ "name": "Bleach", "primary_type": "Album", "year": 1989 }]
+  "releases": [{ "name": "Bleach", "primary_type": "Album", "year": 1989 }],
+  "listen": [
+    { "service": "YouTube", "url": "https://www.youtube.com/channel/UCzGrGrvf9g8CVVzh_LvGf-g" },
+    { "service": "Spotify", "url": "https://open.spotify.com/artist/6olE6TJLqED3rqDCT0FyPh" },
+    { "service": "Bandcamp", "url": "https://nirvana.bandcamp.com/" }
+  ],
+  "youtube_uploads": "UUzGrGrvf9g8CVVzh_LvGf-g"
 }
 ```
 
@@ -135,6 +141,33 @@ Most artists have neither prose nor influence links: in a canon of three
 million, an encyclopaedia article is the exception. Those fields are `null` or
 empty rather than absent, and the card hides the block.
 
+**`listen` comes from the canon, not from a streaming API.** MusicBrainz
+records where an artist can be found, and those relationships are already
+imported — so building this card sends no request to Spotify or Deezer, which
+is what [ADR 0002](https://github.com/lacodda/lyrid/blob/main/docs/adr/0002-universe-from-open-dumps.md)
+requires of the critical path. The honest consequence is on the card: these
+are **artist pages, not tracks**, because MusicBrainz relates an artist to a
+service and not a recording to one. A per-track preview would need an API call
+per star.
+
+The service name is read from the URL rather than passed through from
+MusicBrainz's own vocabulary ("free streaming", "purchase for download"),
+because a listener thinks in services. Matching is on the registrable domain
+name: Bandcamp gives every artist a subdomain (10,006 in the canon) and the
+shops run national domains, so `music.amazon.co.uk` and `music.amazon.com` are
+one shop. A host the list does not know keeps MusicBrainz's word for it. The
+list is capped at eight: a median artist has four of these, 90% have nine or
+fewer, and the tail reaches 53.
+
+**`youtube_uploads` is a playlist id, not a channel URL.** Every channel has an
+implicit "uploads" playlist whose id is the channel id with `UC` swapped for
+`UU`, and that playlist embeds in the standard player — so the card can play an
+artist's own channel without the YouTube Data API. Only the `/channel/UC…` link
+form carries the id; `/user/…` and `/@handle` name a channel without giving it,
+and resolving those needs the very API this avoids. Measured: **10,155 of
+15,944 channels** are the embeddable form, and 49,090 of 100,000 placed artists
+in the slice have somewhere to listen at all.
+
 Measured on the full canon: of the **206,636 artists with a place in the sky**,
 **77,616 (38%) carry Wikidata facts** and **55,738 (27%) carry prose**. The
 `score` on an influence is the neighbour's graph weight, which is why the
@@ -150,3 +183,8 @@ Wikidata does not record.
   arrive with the profiles milestone.
 - **No pagination on search.** Twelve hits is a search box, not a catalogue;
   browsing the canon is what the map is for.
+- **No track previews.** A thirty-second preview needs a per-track lookup
+  against a streaming API, and no dump carries the track ids to avoid one.
+  What the canon holds is artist pages, so that is what `listen` serves; the
+  channel embed is as close to playing as this can get without an API in the
+  critical path.
