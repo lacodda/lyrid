@@ -2,10 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.9.0] - 2026-08-30
+
+### Features
+- Make a view worth sending to someone
+
 ## [0.8.0] - 2026-08-30
 
 ### Documentation
 - Record why the ether is links and a channel
+- Generate for v0.8.0
 
 ### Features
 - Serve where an artist can be heard
