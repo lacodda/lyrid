@@ -2,7 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.9.1] - 2026-08-30
+
+### Bug Fixes
+- Stop the placeholder tile from emptying the sky
+- Stack the bottom-left controls instead of overlapping them
+
+### Features
+- Mark the star whose card is open
+
 ## [0.9.0] - 2026-08-30
+
+### Documentation
+- Generate for v0.9.0
 
 ### Features
 - Make a view worth sending to someone
