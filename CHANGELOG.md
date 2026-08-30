@@ -2,10 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.7.0] - 2026-08-30
+
+### Bug Fixes
+- Read the dump twice rather than hold every label
+- Stop slicing wikitext at a fixed byte count
+
+### Documentation
+- Name a neighbour that exists
+- Take the card example from the running canon
+- Record what the 867-article survey missed
+
+### Features
+- Let the card show the whole canon
+- Open a long lead to its first paragraph
+
 ## [0.6.2] - 2026-08-27
 
 ### Documentation
 - Record the measured size after a cut
+- Generate for v0.6.2
 
 ### Features
 - Move a slice onto a stand instead of building it there
