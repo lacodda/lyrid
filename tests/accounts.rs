@@ -10,7 +10,7 @@
 //! These need a database. Without `LYRID_TEST_DATABASE_URL` they cannot run,
 //! and rather than passing quietly they **fail** — a suite that skips itself
 //! reports success for code nobody executed. CI sets the variable; a
-//! developer who wants the fast path runs `cargo test --lib`.
+//! developer who wants the fast path runs `cargo test --bins`.
 //!
 //! Each test works inside a transaction that is rolled back, so a run leaves
 //! the database exactly as it found it.
@@ -162,6 +162,18 @@ const CAMERA_IS_CURRENT: &str = "SELECT p.layout_id IS NOT NULL
         AND p.layout_id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
     FROM user_profile p WHERE p.user_id = $1";
 
+/// The same expression against a sky with no layouts in it.
+///
+/// The empty set is produced by a `WHERE false` rather than by emptying the
+/// table: `DELETE FROM sky_layout` needs the foreign key from
+/// `artist_position` dropped first, and an `ALTER TABLE` takes a lock over
+/// the whole canon -- which deadlocked against the other tests in this file
+/// the moment they ran in parallel. A test that has to lock the canon to
+/// check one expression is testing the wrong thing.
+const CAMERA_IS_CURRENT_WITH_NO_SKY: &str = "SELECT p.layout_id IS NOT NULL
+        AND p.layout_id = (SELECT id FROM sky_layout WHERE false ORDER BY created_at DESC LIMIT 1)
+    FROM user_profile p WHERE p.user_id = $1";
+
 #[tokio::test]
 async fn an_orphaned_camera_is_refused_even_when_there_is_no_sky() {
     // Found by hand, not by a test: with `IS NOT DISTINCT FROM`, a camera
@@ -184,14 +196,9 @@ async fn an_orphaned_camera_is_refused_even_when_there_is_no_sky() {
     let (keep,): (Option<bool>,) = sqlx::query_as(CAMERA_IS_CURRENT).bind(id).fetch_one(&mut *tx).await.unwrap();
     assert_eq!(keep, Some(false), "an orphaned camera passed while layouts existed");
 
-    // And with no layouts at all -- the state that exposed the defect.
-    sqlx::query("ALTER TABLE artist_position DROP CONSTRAINT artist_position_layout_id_fkey")
-        .execute(&mut *tx)
-        .await
-        .unwrap();
-    sqlx::query("DELETE FROM sky_layout").execute(&mut *tx).await.unwrap();
-
-    let (keep,): (Option<bool>,) = sqlx::query_as(CAMERA_IS_CURRENT).bind(id).fetch_one(&mut *tx).await.unwrap();
+    // And with no layouts at all -- the state that exposed the defect, and
+    // the state a fresh stand is in before the sky is built.
+    let (keep,): (Option<bool>,) = sqlx::query_as(CAMERA_IS_CURRENT_WITH_NO_SKY).bind(id).fetch_one(&mut *tx).await.unwrap();
     assert_ne!(keep, Some(true), "an orphaned camera was called current in a database with no sky at all");
 
     tx.rollback().await.unwrap();
