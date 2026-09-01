@@ -10,6 +10,7 @@ lyrid is configured entirely through the environment. There is no configuration 
 | `DATABASE_URL` | yes | — | PostgreSQL connection string, e.g. `postgres://lyrid:lyrid@localhost:5432/lyrid` |
 | `LYRID_ADDR` | no | `0.0.0.0:8080` | Socket address the HTTP server binds to |
 | `LYRID_STATIC` | no | — | Directory holding the built SPA and the tile pyramid. Unset means API only. |
+| `LYRID_SECURE_COOKIE` | no | `false` | Marks the session cookie `Secure`. Set to `true` when the server is reached over HTTPS. |
 | `RUST_LOG` | no | `lyrid=info,tower_http=info` | Log filter, in `tracing-subscriber` `EnvFilter` syntax |
 
 ## How it is read
@@ -43,6 +44,30 @@ Two rules hold when it is set:
   `/star/54` is a client-side route, not a missing file. The status matters
   beyond the browser: a `404` carrying a working page still tells crawlers and
   uptime monitors that the site is broken.
+
+## The session cookie
+
+`LYRID_SECURE_COOKIE` decides one attribute of one cookie, and getting it
+wrong fails in opposite directions:
+
+- **Off over HTTPS** — the session cookie travels without `Secure`, so a
+  downgrade to plain HTTP would send the token in the clear.
+- **On over plain HTTP** — the browser accepts the cookie and then never sends
+  it back. Every request is anonymous, sign-in appears to succeed and nothing
+  is remembered, and there is no error anywhere to read.
+
+It defaults to off because the stand runs plain HTTP on a home network, where
+the second failure is the one that would actually happen. Production over
+HTTPS sets it to `true`.
+
+Only the exact word `true` (in any case, with surrounding spaces ignored)
+turns it on. A typo, an empty value or `yes` leaves it off rather than being
+guessed at, because the failure it would cause is silent.
+
+The rest of the cookie is not configurable: it is always `HttpOnly` (no script
+can read the token, so an XSS hole cannot leak it), always `SameSite=Lax` (a
+link from elsewhere arrives signed in; a cross-site form post does not carry
+the session), and always expires 30 days after it is issued.
 
 ## Local development
 

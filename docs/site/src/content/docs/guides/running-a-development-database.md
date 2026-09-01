@@ -68,3 +68,33 @@ DATABASE_URL=postgres://user:password@host:5432/database cargo run
 ```
 
 Keep real credentials in `.env`, which is not committed — never in `.env.example`, a config file, or a test fixture.
+
+## Running the tests that need a database
+
+Most of the suite runs against no database at all. The account rules are the
+exception: constraints, cascades and the query deciding whether a saved camera
+still means anything live in the schema and in SQL, and none of that can be
+checked without a real PostgreSQL.
+
+Those tests read `LYRID_TEST_DATABASE_URL` — deliberately not `DATABASE_URL`,
+so that inheriting the variable already in `.env` cannot point them at a
+database someone cares about.
+
+```sh
+LYRID_TEST_DATABASE_URL=postgres://lyrid:lyrid@localhost:5432/lyrid cargo test
+```
+
+Every test does its work inside a transaction and rolls it back, so a run
+leaves the database as it found it.
+
+Without the variable they **fail** rather than skipping. A suite that skips
+itself reports success for code nobody executed, and the first defect these
+tests were written for was found by hand precisely because nothing was
+checking that path. To run only the suites that need no database:
+
+```sh
+cargo test --bins
+```
+
+CI does both: the cross-platform job runs `cargo test --bins`, and a
+Linux-only job with a PostgreSQL service container runs the rest.

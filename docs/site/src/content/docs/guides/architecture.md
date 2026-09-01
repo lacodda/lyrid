@@ -57,6 +57,7 @@ next to the code it constrains:
 - [0009 · The renderer is measured, not estimated](https://github.com/lacodda/lyrid/blob/main/docs/adr/0009-renderer-measured.md)
 - [0010 · A slice for a small stand](https://github.com/lacodda/lyrid/blob/main/docs/adr/0010-a-slice-for-a-small-stand.md)
 - [0011 · Listening from the canon, not from an API](https://github.com/lacodda/lyrid/blob/main/docs/adr/0011-listening-from-the-canon.md)
+- [0012 · Accounts with a password, sessions in the database](https://github.com/lacodda/lyrid/blob/main/docs/adr/0012-accounts-with-a-password.md)
 
 ## Releases
 

@@ -181,8 +181,11 @@ Wikidata does not record.
 - **No endpoint returns the sky.** Positions are in tiles; an API that served
   200,000 stars per pan would defeat the architecture
   ([ADR 0003](https://github.com/lacodda/lyrid/blob/main/docs/adr/0003-sky-map-architecture.md)).
-- **No write endpoints yet.** Accounts, the fog of war and everything per-user
-  arrive with the profiles milestone.
+- **Nothing per-user on these routes.** The sky, the card and the search never
+  ask who is asking, and they answer the same for a visitor as for a
+  signed-in account. Accounts and the profile have
+  [their own endpoints](/lyrid/reference/accounts/); the fog of war and the
+  rest of the game arrive with their own versions.
 - **No pagination on search.** Twelve hits is a search box, not a catalogue;
   browsing the canon is what the map is for.
 - **No track previews.** A thirty-second preview needs a per-track lookup
