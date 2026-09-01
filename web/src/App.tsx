@@ -7,6 +7,8 @@ import { readLocation, writeLocation } from '@/sky/location'
 import { HaloPicker, HALO_COLOURS, HALO_DEFAULT } from '@/sky/HaloPicker'
 import { HALO_SHAPES, type HaloShape } from '@/sky/renderer'
 import { fetchArtist } from '@/api'
+import { AccountPanel } from '@/AccountPanel'
+import { fetchMe, saveProfile, worthSaving, type Me } from '@/account'
 import type { Star } from '@/sky/renderer'
 
 /**
@@ -20,11 +22,16 @@ import type { Star } from '@/sky/renderer'
  * and `#x,y,scale` says where the camera is, so any view can be sent to
  * someone else. See `location.ts` for why the two live in different halves of
  * the URL.
+ *
+ * An account adds memory to all of that and takes nothing away: a visitor who
+ * never signs in gets the same sky, with their marker remembered per browser
+ * as it always was.
  */
 export function App() {
   const [state, setState] = useState<SkyState | null>(null)
   const [picked, setPicked] = useState<Star | null>(null)
   const [target, setTarget] = useState<View | null>(null)
+  const [me, setMe] = useState<Me | null>(null)
 
   // Read once, before anything renders: the opening view must reach the sky
   // on its first frame, not after a flight from somewhere else. A lazy
@@ -68,9 +75,9 @@ export function App() {
     return () => abort.abort()
   }, [opened])
 
-  // How the marked star is drawn. Remembered per browser: this is a personal
-  // preference about a marker, worth nothing to anyone else and not worth a
-  // round trip. Reads are guarded because storage can be refused outright.
+  // How the marked star is drawn. Without an account this is remembered per
+  // browser, as it always was; with one it follows the person to their next
+  // machine. Reads are guarded because storage can be refused outright.
   const [shape, setShape] = useState<HaloShape>(() => remembered('lyrid.halo.shape', HALO_SHAPES[0], HALO_SHAPES))
   const [colour, setColour] = useState<[number, number, number]>(() => {
     const names = HALO_COLOURS.map(option => option.name)
@@ -78,16 +85,63 @@ export function App() {
     return (HALO_COLOURS.find(option => option.name === name) ?? HALO_DEFAULT).rgb
   })
 
-  const chooseShape = useCallback((next: HaloShape) => {
-    setShape(next)
-    remember('lyrid.halo.shape', next)
-  }, [])
+  // What the account already holds, so a save is only sent when something has
+  // actually changed. A ref rather than state: nothing renders from it.
+  const savedCamera = useRef<{ x: number; y: number; scale: number } | null>(null)
 
-  const chooseColour = useCallback((next: [number, number, number]) => {
-    setColour(next)
-    const named = HALO_COLOURS.find(c => c.rgb[0] === next[0] && c.rgb[1] === next[1] && c.rgb[2] === next[2])
-    if (named) remember('lyrid.halo.colour', named.name)
-  }, [])
+  // Whatever the profile says, applied to the sky. Called on sign-in and once
+  // at startup for a session that is already open.
+  const adopt = useCallback((profile: Me | null) => {
+    setMe(profile)
+    savedCamera.current = profile?.camera ?? null
+    if (!profile) return
+
+    if (profile.halo_shape && (HALO_SHAPES as readonly string[]).includes(profile.halo_shape)) {
+      setShape(profile.halo_shape as HaloShape)
+    }
+    const named = HALO_COLOURS.find(option => option.name === profile.halo_colour)
+    if (named) setColour(named.rgb)
+
+    // The link wins over the saved camera. A fragment in the address was put
+    // there by whoever sent it and says where to look; the saved camera is
+    // only where this person happened to stop last time, and overriding a
+    // shared view with it would make every link open somewhere else.
+    if (profile.camera && !opened.view && opened.artistId === null) {
+      setTarget(profile.camera)
+    }
+  }, [opened])
+
+  // Who is signed in. Asked of the server rather than read from storage: the
+  // session cookie is HttpOnly, so this page cannot see it, and a local flag
+  // would only be a guess about a cookie that may have expired.
+  useEffect(() => {
+    const abort = new AbortController()
+    fetchMe(abort.signal).then(adopt, () => {
+      // A visitor is the normal case and not an error; a server that cannot
+      // answer leaves the sky anonymous, which still works.
+    })
+    return () => abort.abort()
+  }, [adopt])
+
+  const chooseShape = useCallback(
+    (next: HaloShape) => {
+      setShape(next)
+      remember('lyrid.halo.shape', next)
+      if (me) void saveProfile({ halo_shape: next }).catch(() => undefined)
+    },
+    [me]
+  )
+
+  const chooseColour = useCallback(
+    (next: [number, number, number]) => {
+      setColour(next)
+      const named = HALO_COLOURS.find(c => c.rgb[0] === next[0] && c.rgb[1] === next[1] && c.rgb[2] === next[2])
+      if (!named) return
+      remember('lyrid.halo.colour', named.name)
+      if (me) void saveProfile({ halo_colour: named.name }).catch(() => undefined)
+    },
+    [me]
+  )
 
   // Handed up by the sky once its loop is running; stable, so the sky's effect
   // does not restart on every render.
@@ -106,6 +160,22 @@ export function App() {
       window.history.replaceState(null, '', next)
     }
   }, [state, picked])
+
+  // Where the sky was left, saved for next time. The camera changes on every
+  // frame, so this asks whether the view has really moved before spending a
+  // request -- see `worthSaving`. The answer is compared against what the
+  // account already holds rather than against the previous frame, or a slow
+  // drift would never cross the threshold and never be saved at all.
+  useEffect(() => {
+    if (!me || !state) return
+    const now = state.view
+    if (!worthSaving(savedCamera.current, now)) return
+    savedCamera.current = now
+    void saveProfile({ camera: now }).catch(() => {
+      // Nothing to say: the view is still on screen, and the next real move
+      // tries again.
+    })
+  }, [me, state])
 
   return (
     <main className="app">
@@ -133,7 +203,12 @@ export function App() {
       {picked && <StarCard key={picked.artistId} artistId={picked.artistId} onClose={() => setPicked(null)} />}
 
       {state && (
+        // One stack in the bottom-left, so nothing can land on top of
+        // anything else as the pieces grow -- the defect v0.9.1 fixed, and
+        // the reason the account panel joins the stack rather than claiming
+        // a corner of its own. The top-right is the search box and the card.
         <div className="app__corner">
+          <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} />
           <HaloPicker shape={shape} colour={colour} onShape={chooseShape} onColour={chooseColour} />
           <Share capture={captureRef} />
           <p className="app__status">
