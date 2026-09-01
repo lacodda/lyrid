@@ -13,6 +13,13 @@ pub struct Config {
     pub addr: SocketAddr,
     /// `PostgreSQL` connection string (`DATABASE_URL`).
     pub database_url: String,
+    /// Whether session cookies are marked `Secure` (`LYRID_SECURE_COOKIE`).
+    ///
+    /// Off by default because the stand is plain HTTP on a home network, and
+    /// a `Secure` cookie there is never sent at all -- an account nobody can
+    /// log into is not more secure, it is broken. Production over HTTPS turns
+    /// it on.
+    pub secure_cookie: bool,
     /// Directory holding the built SPA and the tile pyramid (`LYRID_STATIC`).
     ///
     /// Unset in development, where Vite serves those and proxies the API here.
@@ -32,9 +39,14 @@ impl Config {
         let addr = addr.parse().with_context(|| format!("LYRID_ADDR is not a valid socket address: {addr}"))?;
         let database_url = lookup("DATABASE_URL").context("DATABASE_URL is not set (e.g. postgres://lyrid:lyrid@localhost:5432/lyrid)")?;
         let static_dir = lookup("LYRID_STATIC").filter(|path| !path.trim().is_empty()).map(PathBuf::from);
+        // Anything but an explicit "true" leaves it off: a typo in a compose
+        // file must not silently switch on a flag that makes every login fail
+        // over plain HTTP.
+        let secure_cookie = lookup("LYRID_SECURE_COOKIE").is_some_and(|value| value.trim().eq_ignore_ascii_case("true"));
         Ok(Self {
             addr,
             database_url,
+            secure_cookie,
             static_dir,
         })
     }
@@ -88,6 +100,31 @@ mod tests {
         // the process's working directory.
         let config = Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid"), ("LYRID_STATIC", "  ")])).unwrap();
         assert!(config.static_dir.is_none());
+    }
+
+    #[test]
+    fn cookies_are_insecure_unless_told_otherwise() {
+        // The stand is plain HTTP; defaulting to Secure would make every
+        // login there fail with no visible error at all.
+        let config = Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid")])).unwrap();
+        assert!(!config.secure_cookie);
+    }
+
+    #[test]
+    fn only_an_explicit_true_turns_secure_cookies_on() {
+        let on = |value: &str| {
+            Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid"), ("LYRID_SECURE_COOKIE", value)]))
+                .unwrap()
+                .secure_cookie
+        };
+        assert!(on("true"));
+        assert!(on("TRUE"));
+        assert!(on(" true "));
+        // A value meant as "off" must never read as "on".
+        assert!(!on("false"));
+        assert!(!on("0"));
+        assert!(!on(""), "an empty value is not a yes");
+        assert!(!on("yes"), "only the documented word counts");
     }
 
     #[test]

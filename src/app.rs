@@ -15,6 +15,10 @@ use tower_http::trace::TraceLayer;
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
+    /// Whether session cookies are marked `Secure`. Carried in the state
+    /// because it is a property of how this server is reached, and the
+    /// handlers that write cookies have no other way to know.
+    pub secure_cookie: bool,
 }
 
 /// The router, optionally serving the built SPA and the tile pyramid.
@@ -23,11 +27,12 @@ pub struct AppState {
 /// is `None`. On a stand this process is the only thing listening, and the
 /// difference between those two arrangements is exactly what a stand exists
 /// to expose.
-pub fn router(pool: PgPool, static_dir: Option<&Path>) -> Router {
+pub fn router(pool: PgPool, secure_cookie: bool, static_dir: Option<&Path>) -> Router {
     let api = Router::new()
         .route("/health", get(health))
         .merge(crate::api::artists::routes())
-        .with_state(AppState { pool });
+        .merge(crate::api::accounts::routes())
+        .with_state(AppState { pool, secure_cookie });
 
     let Some(root) = static_dir else {
         return api.layer(TraceLayer::new_for_http());
@@ -137,7 +142,7 @@ mod tests {
         // stand must not repeat that: a tile that does not exist has to say
         // so, or a client that trusts the status draws a web page as stars.
         let dir = static_root();
-        let app = router(dead_pool(), Some(dir.path()));
+        let app = router(dead_pool(), false, Some(dir.path()));
 
         let response = app.oneshot(Request::get("/tiles/9/9/9.bin").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -153,7 +158,7 @@ mod tests {
     #[tokio::test]
     async fn an_existing_tile_is_served_as_it_is() {
         let dir = static_root();
-        let app = router(dead_pool(), Some(dir.path()));
+        let app = router(dead_pool(), false, Some(dir.path()));
 
         let response = app.oneshot(Request::get("/tiles/0/0/0.bin").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -167,7 +172,7 @@ mod tests {
         // A deep link into the map is a client route, not a file: it has to
         // load the app rather than 404.
         let dir = static_root();
-        let app = router(dead_pool(), Some(dir.path()));
+        let app = router(dead_pool(), false, Some(dir.path()));
 
         let response = app.oneshot(Request::get("/star/54").body(Body::empty()).unwrap()).await.unwrap();
         // 200, not the 404 the miss produced: a crawler or a monitor reads the
@@ -183,7 +188,7 @@ mod tests {
     async fn the_api_still_answers_when_static_files_are_served() {
         // The fallback must not swallow the routes it sits behind.
         let dir = static_root();
-        let app = router(dead_pool(), Some(dir.path()));
+        let app = router(dead_pool(), false, Some(dir.path()));
 
         let response = app.oneshot(Request::get("/health").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -193,14 +198,14 @@ mod tests {
     async fn without_a_static_directory_nothing_but_the_api_is_served() {
         // Development: Vite owns the SPA, and this process answering with one
         // would mask a misconfigured proxy.
-        let app = router(dead_pool(), None);
+        let app = router(dead_pool(), false, None);
         let response = app.oneshot(Request::get("/index.html").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
     async fn health_reports_degraded_without_a_database() {
-        let response = router(dead_pool(), None)
+        let response = router(dead_pool(), false, None)
             .oneshot(Request::get("/health").body(Body::empty()).unwrap())
             .await
             .unwrap();
@@ -215,7 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_routes_return_404() {
-        let response = router(dead_pool(), None)
+        let response = router(dead_pool(), false, None)
             .oneshot(Request::get("/nope").body(Body::empty()).unwrap())
             .await
             .unwrap();

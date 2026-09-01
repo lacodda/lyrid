@@ -655,7 +655,10 @@ mod tests {
     }
 
     fn app() -> Router {
-        routes().with_state(AppState { pool: dead_pool() })
+        routes().with_state(AppState {
+            pool: dead_pool(),
+            secure_cookie: false,
+        })
     }
 
     #[test]
