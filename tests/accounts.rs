@@ -45,6 +45,30 @@ async fn pool() -> PgPool {
     pool
 }
 
+/// A layout for a camera to be saved in, with a metric of its own.
+///
+/// Everything it needs is created here rather than looked up. An earlier
+/// version read `SELECT id FROM similarity_metric LIMIT 1`, which passed on a
+/// development database holding an imported canon and failed on CI's empty
+/// one — a test that depended on data nobody had promised it.
+async fn make_layout(tx: &mut Transaction<'_, Postgres>, key: &str) -> i16 {
+    let (metric,): (i16,) = sqlx::query_as("INSERT INTO similarity_metric (key, description) VALUES ($1, 'test') RETURNING id")
+        .bind(format!("metric-for-{key}"))
+        .fetch_one(&mut **tx)
+        .await
+        .expect("a similarity metric should be creatable");
+    let (layout,): (i16,) = sqlx::query_as(
+        "INSERT INTO sky_layout (key, metric_id, description, seed, stars)
+         VALUES ($1, $2, 'test', 1, 0) RETURNING id",
+    )
+    .bind(key)
+    .bind(metric)
+    .fetch_one(&mut **tx)
+    .await
+    .expect("a layout should be creatable");
+    layout
+}
+
 /// One account with a profile, inside the caller's transaction.
 async fn make_user(tx: &mut Transaction<'_, Postgres>, email: &str, mode: &str) -> i32 {
     let (id,): (i32,) = sqlx::query_as("INSERT INTO app_user (email, password_hash) VALUES ($1, 'x') RETURNING id")
@@ -212,15 +236,7 @@ async fn a_camera_saved_in_the_current_layout_is_kept() {
     let mut tx = pool.begin().await.unwrap();
 
     let id = make_user(&mut tx, "settled@example.com", "create").await;
-    let (metric,): (i16,) = sqlx::query_as("SELECT id FROM similarity_metric LIMIT 1").fetch_one(&mut *tx).await.unwrap();
-    let (layout,): (i16,) = sqlx::query_as(
-        "INSERT INTO sky_layout (key, metric_id, description, seed, stars)
-         VALUES ('newest-layout', $1, 'test', 1, 0) RETURNING id",
-    )
-    .bind(metric)
-    .fetch_one(&mut *tx)
-    .await
-    .unwrap();
+    let layout = make_layout(&mut tx, "newest-layout").await;
 
     sqlx::query("UPDATE user_profile SET camera_x = 1, camera_y = 2, camera_scale = 3, layout_id = $2 WHERE user_id = $1")
         .bind(id)
@@ -243,13 +259,7 @@ async fn losing_a_layout_costs_the_camera_and_nothing_else() {
     let mut tx = pool.begin().await.unwrap();
 
     let id = make_user(&mut tx, "traveller@example.com", "create").await;
-    let (metric,): (i16,) = sqlx::query_as("SELECT id FROM similarity_metric LIMIT 1").fetch_one(&mut *tx).await.unwrap();
-    let (layout,): (i16,) =
-        sqlx::query_as("INSERT INTO sky_layout (key, metric_id, description, seed, stars) VALUES ('test-layout', $1, 'test', 1, 0) RETURNING id")
-            .bind(metric)
-            .fetch_one(&mut *tx)
-            .await
-            .unwrap();
+    let layout = make_layout(&mut tx, "test-layout").await;
 
     sqlx::query("UPDATE user_profile SET camera_x = 1, camera_y = 2, camera_scale = 3, layout_id = $2 WHERE user_id = $1")
         .bind(id)

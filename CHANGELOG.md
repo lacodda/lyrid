@@ -6,9 +6,11 @@ All notable changes to this project are documented in this file.
 
 ### Bug Fixes
 - Stop the account suite deadlocking against itself
+- Create the layout a camera needs instead of finding one
 
 ### Documentation
 - Describe accounts, sessions and the cookie flag
+- Generate for v0.10.0
 
 ### Features
 - Give the sky accounts, sessions and a profile
