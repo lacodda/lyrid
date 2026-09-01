@@ -26,10 +26,43 @@ jobs:
         run: cargo fmt --check
       - name: Lint
         run: cargo clippy --all-targets -- -D warnings
+      # The suites that need PostgreSQL are excluded here and run in their
+      # own job below: service containers are Linux-only, and this matrix
+      # includes Windows.
       - name: Test
-        run: cargo test
+        run: cargo test --bins --test release_consistency
       - name: Build
         run: cargo build --release
+
+  # The account rules live in the schema and in SQL -- constraints, cascades,
+  # and the expression deciding whether a saved camera still means anything.
+  # None of that can be checked without a database, and the first defect in it
+  # was found by hand rather than by a test.
+  database:
+    name: database
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: lyrid
+          POSTGRES_PASSWORD: lyrid
+          POSTGRES_DB: lyrid
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lyrid -d lyrid"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      LYRID_TEST_DATABASE_URL: postgres://lyrid:lyrid@localhost:5432/lyrid
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test against a real database
+        run: cargo test --test accounts
 
   # rust-version is a promise to anyone building this. Without a job that
   # actually builds on it, the number silently rots the first time a newer API
