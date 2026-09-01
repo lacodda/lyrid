@@ -2,11 +2,29 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.10.0] - 2026-09-01
+
+### Bug Fixes
+- Stop the account suite deadlocking against itself
+
+### Documentation
+- Describe accounts, sessions and the cookie flag
+
+### Features
+- Give the sky accounts, sessions and a profile
+- Sign in, and let the sky remember you
+
+### Testing
+- Check the rules that only exist in the database
+
 ## [0.9.1] - 2026-08-30
 
 ### Bug Fixes
 - Stop the placeholder tile from emptying the sky
 - Stack the bottom-left controls instead of overlapping them
+
+### Documentation
+- Generate for v0.9.1
 
 ### Features
 - Mark the star whose card is open
