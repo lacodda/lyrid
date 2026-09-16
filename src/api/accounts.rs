@@ -555,7 +555,7 @@ async fn confirm(State(state): State<AppState>, Json(body): Json<TokenBody>) -> 
         // different facts, and none of them is the visitor's business: a link
         // that says "this token was already used" is a link that confirms a
         // guess.
-        return bad_request("that link is not valid any more -- ask for a new one");
+        return bad_request("that link is not valid any more - ask for a new one");
     };
 
     // Written unconditionally rather than only when NULL: confirming an
@@ -700,7 +700,7 @@ async fn reset_password(State(state): State<AppState>, Json(body): Json<ResetBod
     };
 
     let Some(user_id) = spent else {
-        return bad_request("that link is not valid any more -- ask for a new one");
+        return bad_request("that link is not valid any more - ask for a new one");
     };
 
     if let Err(error) = change_password(&state.pool, user_id, &hash).await {

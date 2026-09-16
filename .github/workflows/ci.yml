@@ -30,7 +30,7 @@ jobs:
       # own job below: service containers are Linux-only, and this matrix
       # includes Windows.
       - name: Test
-        run: cargo test --bins --test release_consistency
+        run: cargo test --bins --test release_consistency --test brand_assets
       - name: Build
         run: cargo build --release
 

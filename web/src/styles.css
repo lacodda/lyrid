@@ -560,7 +560,13 @@ body,
   line-height: 1;
 }
 
-.account__on {
+/* The selected tab.
+   Written as `.account .account__on` rather than `.account__on`: `.account
+   button` above is a class plus an element and outranks a lone class, so the
+   plain form lost every property to it and the chosen tab looked exactly like
+   the one beside it. Measured on screen, not assumed -- the computed colour
+   was the muted grey of an unselected button. */
+.account .account__on {
   color: var(--lyrid-text);
   border-color: var(--lyrid-azure-dim);
 }

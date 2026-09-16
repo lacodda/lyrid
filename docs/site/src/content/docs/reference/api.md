@@ -176,6 +176,46 @@ Measured on the full canon: of the **206,636 artists with a place in the sky**,
 better-known names lead the list — it is not a strength of influence, which
 Wikidata does not record.
 
+## Usage metrics
+
+`POST /api/metrics/{mechanic}` counts one use of a mechanic. It takes no body
+and answers `204`.
+
+```
+POST /api/metrics/sky_opened
+204 No Content
+```
+
+The mechanic is one of a closed list the server holds, not free text from the
+client:
+
+```
+sky_opened      card_opened     listen_opened
+view_shared     charter_read    data_requested
+```
+
+A name outside the list answers `404`. The list is what stops a client
+writing something that identifies a person — a search term, an artist id —
+into the table; a check that only polite clients honour is not a promise.
+
+**Storage is a counter incremented in place, keyed by `(mechanic, day)`, not a
+row per event.** There is nothing to join to an account, no order to read a
+session out of, and nothing that becomes personal later when a clever enough
+query is written against it. A table of events with the user id left out is
+still a table of events.
+
+The accepted consequence: these numbers can answer "how many times was the
+radio opened today" and can never answer "did the people who opened the radio
+come back". That second question is the one the [privacy
+charter](/lyrid/reference/accounts/#the-privacy-charter-export-and-delete)
+does not let this service ask.
+
+A counter that fails to write is logged and still answers `204` — a counter
+is not worth failing a page over, and the visitor is here to look at the sky,
+not to retry a beacon. For the same reason, [deleting an
+account](/lyrid/reference/accounts/#the-privacy-charter-export-and-delete)
+leaves the counters untouched: they hold no row about that person to remove.
+
 ## What is deliberately absent
 
 - **No endpoint returns the sky.** Positions are in tiles; an API that served
