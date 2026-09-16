@@ -12,7 +12,14 @@
 //! - **The mode is chosen once and never changes** (Vision, principle 5).
 //!   There is no route that writes it after creation, and the column has no
 //!   UPDATE path: a rule the client alone enforces is a rule until the first
-//!   `curl`.
+//!   `curl`. What changed in v0.11 is only *when* the choice happens: nothing
+//!   is asked at the door, every account starts creative, and the choice
+//!   arrives with the fog (v0.22) offered once. "Once and never" is unchanged;
+//!   it simply has not started yet.
+//! - **Everything an account holds can be taken back or destroyed.** The
+//!   charter is not a page of prose with an email address at the bottom: the
+//!   export and the deletion are routes, they are one press each, and the
+//!   deletion is immediate and total rather than a flag on a row.
 //! - **Anonymous browsing keeps working.** The sky, the card and the search
 //!   never ask who is asking. An account adds memory; it does not become the
 //!   price of admission (S4, and the reason the public preview is a version
@@ -24,6 +31,8 @@ use axum::response::{IntoResponse, Response};
 use axum::{Json, Router, routing::get, routing::post};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::app::AppState;
 use crate::auth;
@@ -33,16 +42,23 @@ pub fn routes() -> Router<AppState> {
         .route("/api/auth/register", post(register))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
-        .route("/api/me", get(me).patch(update_profile))
+        .route("/api/auth/confirm", post(confirm))
+        .route("/api/auth/confirm/resend", post(resend_confirmation))
+        .route("/api/auth/forgot", post(forgot_password))
+        .route("/api/auth/reset", post(reset_password))
+        .route("/api/me", get(me).patch(update_profile).delete(delete_account))
+        .route("/api/me/export", get(export_account))
 }
 
 /// What a client sends to create an account.
+///
+/// No mode: it is not asked for at the door any more (decision of
+/// 2026-09-11), and leaving the field out of the struct is what makes that
+/// true -- a client that sends one is sending something nothing will read.
 #[derive(Deserialize)]
 struct Registration {
     email: String,
     password: String,
-    /// Chosen here and never again.
-    mode: String,
 }
 
 #[derive(Deserialize)]
@@ -87,6 +103,12 @@ struct Me {
     /// Absent when there is nothing saved, or when what is saved belongs to a
     /// layout the sky no longer shows.
     camera: Option<Camera>,
+    /// Whether the address has been confirmed.
+    ///
+    /// Shown rather than enforced: an unconfirmed account works in every way
+    /// except being able to reset its password, and the interface says so
+    /// where that matters instead of barring the door.
+    email_confirmed: bool,
 }
 
 /// A session that has been checked against the database.
@@ -145,16 +167,25 @@ async fn register(State(state): State<AppState>, Json(body): Json<Registration>)
     if let Err(error) = auth::check_credentials(&email, &body.password) {
         return bad_request(&error.to_string());
     }
-    if let Err(error) = auth::check_mode(&body.mode) {
-        return bad_request(&error.to_string());
-    }
 
     let Ok(hash) = auth::hash_password(&body.password) else {
         return server_error("the account could not be created");
     };
 
-    match create_account(&state.pool, &email, &hash, &body.mode, state.secure_cookie).await {
-        Ok(Some((me, cookie))) => ([(header::SET_COOKIE, cookie)], Json(me)).into_response(),
+    match create_account(&state.pool, &email, &hash, state.secure_cookie).await {
+        Ok(Some((me, cookie, token))) => {
+            // Sent after the transaction has committed, and its failure does
+            // not undo the account. A letter that could not be sent is a
+            // letter to send again -- there is a button for it -- while an
+            // account rolled back because of a mail server leaves someone
+            // who typed a password correctly with nothing at all.
+            let link = format!("{}/confirm?token={token}", state.public_url);
+            let (subject, letter) = crate::mail::confirmation(&link);
+            if let Err(error) = state.mailer.send(&email, subject, &letter).await {
+                tracing::error!(%error, "the confirmation letter could not be sent");
+            }
+            ([(header::SET_COOKIE, cookie)], Json(me)).into_response()
+        }
         // The address is taken. Said plainly: registration is where a service
         // tells you this anyway -- an account you cannot create and cannot be
         // told why is a dead end, and the address is already discoverable by
@@ -171,11 +202,20 @@ async fn register(State(state): State<AppState>, Json(body): Json<Registration>)
     }
 }
 
-/// Creates the account, its profile and its first session in one transaction.
+/// Creates the account, its profile, its first session and its confirmation
+/// token in one transaction.
 ///
 /// One transaction because an account without a profile is an account with no
-/// mode, and the mode is the one thing that cannot be set later.
-async fn create_account(pool: &PgPool, email: &str, hash: &str, mode: &str, secure: bool) -> sqlx::Result<Option<(Me, String)>> {
+/// mode, and the mode is the one thing that cannot be set later. The
+/// confirmation token joins it for the same reason: an account whose token
+/// insert failed is an account that can never be confirmed and can never be
+/// told why.
+///
+/// Returns the confirmation token so the caller can put it in a letter --
+/// *after* the commit. Sending inside the transaction would hold a database
+/// transaction open across a network round trip to a mail server, which is
+/// how one slow SMTP host becomes a connection pool with nothing left in it.
+async fn create_account(pool: &PgPool, email: &str, hash: &str, secure: bool) -> sqlx::Result<Option<(Me, String, String)>> {
     let mut tx = pool.begin().await?;
 
     // ON CONFLICT rather than a prior SELECT: two registrations of the same
@@ -191,31 +231,45 @@ async fn create_account(pool: &PgPool, email: &str, hash: &str, mode: &str, secu
         return Ok(None);
     };
 
-    sqlx::query("INSERT INTO user_profile (user_id, mode) VALUES ($1, $2)")
+    // The mode is not passed in: nothing asks for one any more, and the
+    // column's default is what decides it. Naming the column here would put a
+    // second answer beside the migration's.
+    sqlx::query("INSERT INTO user_profile (user_id) VALUES ($1)")
         .bind(user_id)
-        .bind(mode)
         .execute(&mut *tx)
         .await?;
 
-    let token = auth::session_token();
+    let session = auth::session_token();
     sqlx::query("INSERT INTO user_session (token, user_id, expires_at) VALUES ($1, $2, now() + ($3 || ' days')::interval)")
-        .bind(&token)
+        .bind(&session)
         .bind(user_id)
         .bind(auth::SESSION_DAYS.to_string())
         .execute(&mut *tx)
         .await?;
+
+    let confirmation = auth::link_token();
+    sqlx::query(
+        "INSERT INTO user_token (token, user_id, purpose, expires_at)
+         VALUES ($1, $2, 'confirm', now() + ($3 || ' hours')::interval)",
+    )
+    .bind(&confirmation)
+    .bind(user_id)
+    .bind(auth::CONFIRM_HOURS.to_string())
+    .execute(&mut *tx)
+    .await?;
 
     tx.commit().await?;
 
     let me = Me {
         id: user_id,
         email: email.to_string(),
-        mode: mode.to_string(),
+        mode: auth::DEFAULT_MODE.to_string(),
         halo_shape: None,
         halo_colour: None,
         camera: None,
+        email_confirmed: false,
     };
-    Ok(Some((me, auth::set_cookie(&token, secure))))
+    Ok(Some((me, auth::set_cookie(&session, secure), confirmation)))
 }
 
 async fn login(State(state): State<AppState>, Json(body): Json<Login>) -> Response {
@@ -325,12 +379,13 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
     // Dropped by the query rather than by a second one: the profile itself
     // must come back either way, and a WHERE clause on the layout would hide
     // the whole account behind a camera it no longer needs.
-    let Some((id, email, mode, halo_shape, halo_colour, x, y, scale)) =
-        sqlx::query_as::<_, (i32, String, String, Option<String>, Option<String>, Option<f32>, Option<f32>, Option<f32>)>(
+    let Some((id, email, mode, halo_shape, halo_colour, x, y, scale, confirmed)) =
+        sqlx::query_as::<_, (i32, String, String, Option<String>, Option<String>, Option<f32>, Option<f32>, Option<f32>, bool)>(
             "SELECT u.id, u.email, p.mode, p.halo_shape, p.halo_colour,
                     CASE WHEN current.keep THEN p.camera_x END,
                     CASE WHEN current.keep THEN p.camera_y END,
-                    CASE WHEN current.keep THEN p.camera_scale END
+                    CASE WHEN current.keep THEN p.camera_scale END,
+                    u.email_confirmed_at IS NOT NULL
              FROM app_user u
              JOIN user_profile p ON p.user_id = u.id
              CROSS JOIN LATERAL (
@@ -365,6 +420,7 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
         halo_shape,
         halo_colour,
         camera,
+        email_confirmed: confirmed,
     }))
 }
 
@@ -412,6 +468,415 @@ async fn update_profile(State(state): State<AppState>, headers: HeaderMap, Json(
         Err(error) => {
             tracing::error!(%error, "failed to save a profile");
             server_error("the profile could not be saved")
+        }
+    }
+}
+
+/// A one-time token, as it arrives back from a link in a letter.
+#[derive(Deserialize)]
+struct TokenBody {
+    token: String,
+}
+
+/// An address, for the forms that only have one.
+#[derive(Deserialize)]
+struct EmailBody {
+    email: String,
+}
+
+/// A new password, and the token that earns the right to set it.
+#[derive(Deserialize)]
+struct ResetBody {
+    token: String,
+    password: String,
+}
+
+/// Spends a one-time token and says which account it belonged to.
+///
+/// The whole check is one statement on purpose. A read followed by a write
+/// lets two clicks of the same link both pass the read, and "the link works
+/// once" becomes "the link works once, usually". `used_at IS NULL` inside the
+/// UPDATE makes the database decide, and it can only decide once.
+async fn spend_token(pool: &PgPool, token: &str, purpose: &str) -> sqlx::Result<Option<i32>> {
+    let row = sqlx::query_as::<_, (i32,)>(
+        "UPDATE user_token SET used_at = now()
+         WHERE token = $1 AND purpose = $2 AND used_at IS NULL AND expires_at > now()
+         RETURNING user_id",
+    )
+    .bind(token)
+    .bind(purpose)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(user_id,)| user_id))
+}
+
+/// Issues a fresh token, retiring the account's older ones of the same kind.
+///
+/// Retiring the old ones is what makes "ask again" mean something: two live
+/// reset links for one account is two ways in, and the one the person did not
+/// ask for is the one still sitting in an old letter.
+async fn issue_token(pool: &PgPool, user_id: i32, purpose: &str, hours: i64) -> sqlx::Result<String> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("UPDATE user_token SET used_at = now() WHERE user_id = $1 AND purpose = $2 AND used_at IS NULL")
+        .bind(user_id)
+        .bind(purpose)
+        .execute(&mut *tx)
+        .await?;
+
+    let token = auth::link_token();
+    sqlx::query(
+        "INSERT INTO user_token (token, user_id, purpose, expires_at)
+         VALUES ($1, $2, $3, now() + ($4 || ' hours')::interval)",
+    )
+    .bind(&token)
+    .bind(user_id)
+    .bind(purpose)
+    .bind(hours.to_string())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(token)
+}
+
+/// Confirms an address from the link in the letter.
+async fn confirm(State(state): State<AppState>, Json(body): Json<TokenBody>) -> Response {
+    let spent = match spend_token(&state.pool, &body.token, "confirm").await {
+        Ok(spent) => spent,
+        Err(error) => {
+            tracing::error!(%error, "failed to spend a confirmation token");
+            return server_error("the link could not be checked");
+        }
+    };
+
+    let Some(user_id) = spent else {
+        // One answer for expired, already used and never existed. They are
+        // different facts, and none of them is the visitor's business: a link
+        // that says "this token was already used" is a link that confirms a
+        // guess.
+        return bad_request("that link is not valid any more -- ask for a new one");
+    };
+
+    // Written unconditionally rather than only when NULL: confirming an
+    // already-confirmed address is not an error worth a branch, and the token
+    // was already spent above.
+    if let Err(error) = sqlx::query("UPDATE app_user SET email_confirmed_at = now() WHERE id = $1 AND email_confirmed_at IS NULL")
+        .bind(user_id)
+        .execute(&state.pool)
+        .await
+    {
+        tracing::error!(%error, "failed to confirm an address");
+        return server_error("the address could not be confirmed");
+    }
+
+    (StatusCode::OK, Json(serde_json::json!({ "status": "confirmed" }))).into_response()
+}
+
+/// Sends the confirmation letter again, to whoever is signed in.
+///
+/// Behind the session rather than behind an address in a form: the address is
+/// already known, and a form taking one would let anyone post letters to
+/// anyone from this server.
+async fn resend_confirmation(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let session = match current_session(&state.pool, &headers).await {
+        Ok(Some(session)) => session,
+        Ok(None) => return unauthorised(),
+        Err(error) => {
+            tracing::error!(%error, "failed to read a session");
+            return server_error("the session could not be read");
+        }
+    };
+
+    let account = sqlx::query_as::<_, (String, bool)>("SELECT email, email_confirmed_at IS NOT NULL FROM app_user WHERE id = $1")
+        .bind(session.user_id)
+        .fetch_optional(&state.pool)
+        .await;
+
+    let (email, already_confirmed) = match account {
+        Ok(Some(account)) => account,
+        Ok(None) => return unauthorised(),
+        Err(error) => {
+            tracing::error!(%error, "failed to read an account");
+            return server_error("the account could not be read");
+        }
+    };
+
+    if already_confirmed {
+        return (StatusCode::OK, Json(serde_json::json!({ "status": "already confirmed" }))).into_response();
+    }
+
+    let token = match issue_token(&state.pool, session.user_id, "confirm", auth::CONFIRM_HOURS).await {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::error!(%error, "failed to issue a confirmation token");
+            return server_error("the letter could not be sent");
+        }
+    };
+
+    let link = format!("{}/confirm?token={token}", state.public_url);
+    let (subject, letter) = crate::mail::confirmation(&link);
+    if let Err(error) = state.mailer.send(&email, subject, &letter).await {
+        // Said out loud here, unlike at registration: this request *is* the
+        // letter. Reporting success would leave someone waiting for mail that
+        // was never sent.
+        tracing::error!(%error, "the confirmation letter could not be sent");
+        return server_error("the letter could not be sent");
+    }
+
+    (StatusCode::OK, Json(serde_json::json!({ "status": "sent" }))).into_response()
+}
+
+/// Starts a password reset.
+///
+/// **Answers the same way whether or not the address is known.** The form is
+/// open to anyone, so an answer that differed would turn it into a way of
+/// asking whether a given person has an account here.
+async fn forgot_password(State(state): State<AppState>, Json(body): Json<EmailBody>) -> Response {
+    let sent = || (StatusCode::OK, Json(serde_json::json!({ "status": "sent if we know the address" }))).into_response();
+
+    let email = auth::normalise_email(&body.email);
+    if !auth::looks_like_email(&email) {
+        return sent();
+    }
+
+    // Only a confirmed address gets a reset letter. An unconfirmed one was
+    // never proved to belong to whoever typed it, and mailing a way into an
+    // account to an address nobody verified is the hole confirmation exists to
+    // close.
+    let found = sqlx::query_as::<_, (i32,)>("SELECT id FROM app_user WHERE email = $1 AND email_confirmed_at IS NOT NULL")
+        .bind(&email)
+        .fetch_optional(&state.pool)
+        .await;
+
+    let found = match found {
+        Ok(found) => found,
+        Err(error) => {
+            tracing::error!(%error, "failed to read an account for a reset");
+            return server_error("the request could not be handled");
+        }
+    };
+
+    let Some((user_id,)) = found else {
+        return sent();
+    };
+
+    match issue_token(&state.pool, user_id, "reset", auth::RESET_HOURS).await {
+        Ok(token) => {
+            let link = format!("{}/reset?token={token}", state.public_url);
+            let (subject, letter) = crate::mail::reset(&link);
+            if let Err(error) = state.mailer.send(&email, subject, &letter).await {
+                // Logged, not reported: the answer cannot depend on whether
+                // the address exists, and "we could not send it" is an answer
+                // only an existing address could get.
+                tracing::error!(%error, "the reset letter could not be sent");
+            }
+        }
+        Err(error) => tracing::error!(%error, "failed to issue a reset token"),
+    }
+
+    sent()
+}
+
+/// Finishes a password reset: sets the new password and ends every session.
+async fn reset_password(State(state): State<AppState>, Json(body): Json<ResetBody>) -> Response {
+    // The password is checked before the token is spent. A token burnt on a
+    // password the server was going to refuse anyway leaves the person with a
+    // dead link and a typo.
+    if let Err(error) = auth::check_password(&body.password) {
+        return bad_request(&error.to_string());
+    }
+
+    let Ok(hash) = auth::hash_password(&body.password) else {
+        return server_error("the password could not be changed");
+    };
+
+    let spent = match spend_token(&state.pool, &body.token, "reset").await {
+        Ok(spent) => spent,
+        Err(error) => {
+            tracing::error!(%error, "failed to spend a reset token");
+            return server_error("the link could not be checked");
+        }
+    };
+
+    let Some(user_id) = spent else {
+        return bad_request("that link is not valid any more -- ask for a new one");
+    };
+
+    if let Err(error) = change_password(&state.pool, user_id, &hash).await {
+        tracing::error!(%error, "failed to change a password");
+        return server_error("the password could not be changed");
+    }
+
+    // The cookie is cleared as well. Whoever is at this browser has just
+    // proved they can read the account's mail, but they have not signed in --
+    // and the next screen is the login form, which is where a reset should
+    // leave someone.
+    (
+        [(header::SET_COOKIE, auth::clear_cookie(state.secure_cookie))],
+        Json(serde_json::json!({ "status": "changed" })),
+    )
+        .into_response()
+}
+
+/// Sets a new password and ends every session the account has open.
+///
+/// Both, in one transaction. A reset is what someone does when they think
+/// their password is known to somebody else, and leaving that somebody else's
+/// session alive is answering the wrong half of the problem.
+async fn change_password(pool: &PgPool, user_id: i32, hash: &str) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("UPDATE app_user SET password_hash = $2 WHERE id = $1")
+        .bind(user_id)
+        .bind(hash)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM user_session WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    // A reset also retires any other live reset links: asking twice and
+    // clicking the older letter should not be a second way in.
+    sqlx::query("UPDATE user_token SET used_at = now() WHERE user_id = $1 AND purpose = 'reset' AND used_at IS NULL")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Everything this service holds about the account, as one JSON document.
+///
+/// The charter's first promise made answerable: not a description of what is
+/// held, but the rows themselves.
+///
+/// Sessions are listed without their tokens. A token is a live credential, and
+/// an export is a file that gets mailed around and left in a downloads folder:
+/// handing over working keys to the account is not part of handing over the
+/// data about it.
+async fn export_account(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let session = match current_session(&state.pool, &headers).await {
+        Ok(Some(session)) => session,
+        Ok(None) => return unauthorised(),
+        Err(error) => {
+            tracing::error!(%error, "failed to read a session");
+            return server_error("the session could not be read");
+        }
+    };
+
+    match gather_export(&state.pool, session.user_id).await {
+        Ok(Some(document)) => (
+            StatusCode::OK,
+            // Named so a browser saves it as a file rather than showing it:
+            // the point is to hand it over, not to display it.
+            [(header::CONTENT_DISPOSITION, "attachment; filename=\"lyrid-account.json\"")],
+            Json(document),
+        )
+            .into_response(),
+        Ok(None) => unauthorised(),
+        Err(error) => {
+            tracing::error!(%error, "failed to export an account");
+            server_error("the account could not be exported")
+        }
+    }
+}
+
+async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde_json::Value>> {
+    let account = sqlx::query_as::<_, (i32, String, Option<OffsetDateTime>, OffsetDateTime)>(
+        "SELECT id, email, email_confirmed_at, created_at FROM app_user WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some((id, email, confirmed_at, created_at)) = account else {
+        return Ok(None);
+    };
+
+    let profile = sqlx::query_as::<_, (String, Option<String>, Option<String>, Option<f32>, Option<f32>, Option<f32>, Option<String>)>(
+        "SELECT p.mode, p.halo_shape, p.halo_colour, p.camera_x, p.camera_y, p.camera_scale, l.key
+         FROM user_profile p LEFT JOIN sky_layout l ON l.id = p.layout_id
+         WHERE p.user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let sessions =
+        sqlx::query_as::<_, (OffsetDateTime, OffsetDateTime)>("SELECT created_at, expires_at FROM user_session WHERE user_id = $1 ORDER BY created_at")
+            .bind(user_id)
+            .fetch_all(pool)
+            .await?;
+
+    Ok(Some(serde_json::json!({
+        "exported_at": stamp(OffsetDateTime::now_utc()),
+        "note": "Everything lyrid holds about this account. The sky itself is built from public data and belongs to nobody.",
+        "account": {
+            "id": id,
+            "email": email,
+            "email_confirmed_at": confirmed_at.map(stamp),
+            "created_at": stamp(created_at),
+        },
+        "profile": profile.map(|(mode, halo_shape, halo_colour, x, y, scale, layout)| serde_json::json!({
+            "mode": mode,
+            "halo_shape": halo_shape,
+            "halo_colour": halo_colour,
+            "camera": match (x, y, scale) {
+                (Some(x), Some(y), Some(scale)) => serde_json::json!({ "x": x, "y": y, "scale": scale, "layout": layout }),
+                _ => serde_json::Value::Null,
+            },
+        })),
+        "sessions": sessions
+            .into_iter()
+            .map(|(created, expires)| serde_json::json!({ "created_at": stamp(created), "expires_at": stamp(expires) }))
+            .collect::<Vec<_>>(),
+    })))
+}
+
+/// A timestamp as RFC 3339, which is what a person's other tools can read.
+///
+/// A formatting failure falls back to the type's own rendering rather than to
+/// null: a moment printed oddly is still the moment, and an export that
+/// silently drops a date is worse than one that prints it unusually.
+fn stamp(at: OffsetDateTime) -> String {
+    at.format(&Rfc3339).unwrap_or_else(|_| at.to_string())
+}
+
+/// Destroys the account and everything hanging off it.
+///
+/// One DELETE, because the schema was built for this: every personal table
+/// references `app_user` with `ON DELETE CASCADE` (migrations 0008 and 0009),
+/// so the row going away takes the profile, the sessions and the tokens with
+/// it. Not a flag, not a queue, not a "we will remove it within 30 days" --
+/// the charter promises one press, and a promise kept by a background job is
+/// a promise the user cannot check.
+///
+/// The usage counters are untouched and that is correct: they hold no row
+/// about this person to delete, which is the property the aggregate shape was
+/// chosen for.
+async fn delete_account(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let session = match current_session(&state.pool, &headers).await {
+        Ok(Some(session)) => session,
+        Ok(None) => return unauthorised(),
+        Err(error) => {
+            tracing::error!(%error, "failed to read a session");
+            return server_error("the session could not be read");
+        }
+    };
+
+    match sqlx::query("DELETE FROM app_user WHERE id = $1")
+        .bind(session.user_id)
+        .execute(&state.pool)
+        .await
+    {
+        Ok(_) => (
+            [(header::SET_COOKIE, auth::clear_cookie(state.secure_cookie))],
+            Json(serde_json::json!({ "status": "deleted" })),
+        )
+            .into_response(),
+        Err(error) => {
+            tracing::error!(%error, "failed to delete an account");
+            server_error("the account could not be deleted")
         }
     }
 }
@@ -472,6 +937,8 @@ mod tests {
         routes().with_state(AppState {
             pool: dead_pool(),
             secure_cookie: false,
+            public_url: "http://localhost:8080".to_string(),
+            mailer: crate::mail::Mailer::Log,
         })
     }
 
@@ -493,9 +960,7 @@ mod tests {
             .oneshot(
                 Request::post("/api/auth/register")
                     .header("content-type", "application/json")
-                    .body(json(
-                        &serde_json::json!({"email": "not an address", "password": "a long enough passphrase", "mode": "create"}),
-                    ))
+                    .body(json(&serde_json::json!({"email": "not an address", "password": "a long enough passphrase"})))
                     .unwrap(),
             )
             .await
@@ -510,7 +975,7 @@ mod tests {
             .oneshot(
                 Request::post("/api/auth/register")
                     .header("content-type", "application/json")
-                    .body(json(&serde_json::json!({"email": "ada@example.com", "password": "short", "mode": "create"})))
+                    .body(json(&serde_json::json!({"email": "ada@example.com", "password": "short"})))
                     .unwrap(),
             )
             .await
@@ -519,24 +984,21 @@ mod tests {
         assert!(error_of(response).await.contains("password"));
     }
 
-    #[tokio::test]
-    async fn an_unknown_mode_is_refused_before_the_database() {
-        // The set of modes is closed, and the column has a check constraint
-        // saying so -- but a request that reaches it has already cost a
-        // password hash and a round trip.
-        let response = app()
-            .oneshot(
-                Request::post("/api/auth/register")
-                    .header("content-type", "application/json")
-                    .body(json(
-                        &serde_json::json!({"email": "ada@example.com", "password": "a long enough passphrase", "mode": "administrator"}),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert!(error_of(response).await.contains("mode"));
+    #[test]
+    fn a_registration_carrying_a_mode_carries_nothing() {
+        // The door does not ask for a mode any more (decision of 2026-09-11),
+        // and the struct is what makes that true: a client sending one --
+        // including an old build of this SPA, or someone with curl hoping to
+        // pick the mode that is not built yet -- is sending a field nothing
+        // reads. The column's default decides.
+        let registration: Registration =
+            serde_json::from_value(serde_json::json!({"email": "ada@example.com", "password": "a long enough passphrase", "mode": "explore"})).unwrap();
+        assert_eq!(registration.email, "ada@example.com");
+        assert_eq!(registration.password, "a long enough passphrase");
+        // And a registration with no mode at all parses just as well, which is
+        // what the SPA now sends.
+        let plain: Registration = serde_json::from_value(serde_json::json!({"email": "ada@example.com", "password": "a long enough passphrase"})).unwrap();
+        assert_eq!(plain.email, registration.email);
     }
 
     #[test]

@@ -658,6 +658,8 @@ mod tests {
         routes().with_state(AppState {
             pool: dead_pool(),
             secure_cookie: false,
+            public_url: "http://localhost:8080".to_string(),
+            mailer: crate::mail::Mailer::Log,
         })
     }
 

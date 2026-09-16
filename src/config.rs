@@ -6,6 +6,9 @@ use anyhow::{Context, Result};
 /// Default bind address when `LYRID_ADDR` is not set.
 const DEFAULT_ADDR: &str = "0.0.0.0:8080";
 
+/// Default sender for the two letters this service sends.
+const DEFAULT_MAIL_FROM: &str = "lyrid <no-reply@localhost>";
+
 /// Runtime configuration, read from the environment.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -26,6 +29,21 @@ pub struct Config {
     /// Set on a stand, where this process is the only thing listening — which
     /// is the difference the stand exists to expose.
     pub static_dir: Option<PathBuf>,
+    /// Where this service is reached from outside (`LYRID_PUBLIC_URL`).
+    ///
+    /// Needed because the links in a letter are read in a mail client, not in
+    /// the browser that made the request: there is no page to be relative to.
+    /// The bind address cannot stand in for it -- a stand binds `0.0.0.0` and
+    /// is reached by a name, and behind a reverse proxy the two share nothing
+    /// at all.
+    pub public_url: String,
+    /// SMTP connection URL, credentials included (`LYRID_SMTP_URL`).
+    ///
+    /// Unset on a stand with no route to the internet, where letters are
+    /// logged rather than sent -- a supported configuration, not a fallback.
+    pub smtp_url: Option<String>,
+    /// Who the letters come from (`LYRID_MAIL_FROM`).
+    pub mail_from: String,
 }
 
 impl Config {
@@ -43,11 +61,29 @@ impl Config {
         // file must not silently switch on a flag that makes every login fail
         // over plain HTTP.
         let secure_cookie = lookup("LYRID_SECURE_COOKIE").is_some_and(|value| value.trim().eq_ignore_ascii_case("true"));
+
+        // Trailing slashes are trimmed here rather than at every join: a link
+        // built from a URL someone typed with a slash must not come out with
+        // two, because a doubled slash is a different path to most routers
+        // and a 404 in a letter is unfixable from the recipient's side.
+        let public_url = lookup("LYRID_PUBLIC_URL")
+            .map(|url| url.trim().trim_end_matches('/').to_string())
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(|| format!("http://{addr}"));
+        let smtp_url = lookup("LYRID_SMTP_URL").map(|url| url.trim().to_string()).filter(|url| !url.is_empty());
+        let mail_from = lookup("LYRID_MAIL_FROM")
+            .map(|from| from.trim().to_string())
+            .filter(|from| !from.is_empty())
+            .unwrap_or_else(|| DEFAULT_MAIL_FROM.to_string());
+
         Ok(Self {
             addr,
             database_url,
             secure_cookie,
             static_dir,
+            public_url,
+            smtp_url,
+            mail_from,
         })
     }
 }
@@ -125,6 +161,47 @@ mod tests {
         assert!(!on("0"));
         assert!(!on(""), "an empty value is not a yes");
         assert!(!on("yes"), "only the documented word counts");
+    }
+
+    #[test]
+    fn the_public_url_falls_back_to_the_bind_address() {
+        // Right in development, where the two are the same thing. Wrong on a
+        // stand -- which is why the variable exists and why a deployment sets
+        // it.
+        let config = Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid"), ("LYRID_ADDR", "127.0.0.1:8080")])).unwrap();
+        assert_eq!(config.public_url, "http://127.0.0.1:8080");
+    }
+
+    #[test]
+    fn a_trailing_slash_in_the_public_url_does_not_double_up() {
+        // The links in a letter are built by joining a path onto this. A
+        // doubled slash is a different path to most routers, and a 404 inside
+        // a letter cannot be fixed by whoever received it.
+        let with = |value: &str| {
+            Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid"), ("LYRID_PUBLIC_URL", value)]))
+                .unwrap()
+                .public_url
+        };
+        assert_eq!(with("https://lyrid.example/"), "https://lyrid.example");
+        assert_eq!(with("https://lyrid.example///"), "https://lyrid.example");
+        assert_eq!(with("  https://lyrid.example  "), "https://lyrid.example");
+    }
+
+    #[test]
+    fn no_smtp_url_is_a_configuration_and_not_a_mistake() {
+        // The home stand has no route to the internet. Letters are logged
+        // there, and that has to be reachable without setting anything.
+        let config = Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid")])).unwrap();
+        assert!(config.smtp_url.is_none());
+        assert_eq!(config.mail_from, DEFAULT_MAIL_FROM);
+    }
+
+    #[test]
+    fn an_empty_smtp_url_reads_as_unset() {
+        // A compose file that declares the variable and leaves it blank means
+        // "no server", not "a server called empty string".
+        let config = Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid"), ("LYRID_SMTP_URL", "   ")])).unwrap();
+        assert!(config.smtp_url.is_none());
     }
 
     #[test]

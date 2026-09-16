@@ -5,7 +5,7 @@
 //! a session cookie is written -- and rules tested through a request handler
 //! are rules tested through everything else too.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
@@ -23,8 +23,32 @@ pub const SESSION_DAYS: i64 = 30;
 /// less than length.
 pub const MIN_PASSWORD: usize = 10;
 
-/// The two modes, chosen once and never changed (Vision, principle 5).
-pub const MODES: [&str; 2] = ["explore", "create"];
+/// The mode every account starts in, and for now the only one (decision of
+/// 2026-09-11).
+///
+/// The two modes of Vision principle 5 are 'explore' and 'create', and the set
+/// is held closed by the check constraint on `user_profile.mode` -- which is
+/// where it can actually be enforced. There is deliberately no list and no
+/// validator here: no route takes a mode from a client, so a validator would
+/// be code kept warm for a screen that does not exist. Both come back with the
+/// fog (v0.22), next to the thing that reads them.
+///
+/// The creative mode is the one that is built: everything open, no currency,
+/// no fog. Asking at the door which of two games you want to play, when only
+/// one of them exists, is asking someone to decide the shape of a thing they
+/// have not seen. ADR 0012's "once and never" is unchanged -- it begins when
+/// the fog arrives (v0.22) and the choice is offered, once, to the profiles
+/// that predate it.
+pub const DEFAULT_MODE: &str = "create";
+
+/// How long a confirmation link lasts. Generous: it is read in a mail client,
+/// possibly on another device, possibly tomorrow morning.
+pub const CONFIRM_HOURS: i64 = 24;
+
+/// How long a password reset link lasts. Short, because it is the one link
+/// that opens an account, and because someone asking for it is at their
+/// keyboard now.
+pub const RESET_HOURS: i64 = 1;
 
 /// Hashes a password for storage.
 ///
@@ -52,6 +76,23 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
 /// A fresh session token: 256 bits from the operating system's generator,
 /// hex-encoded so it survives a cookie header unescaped.
 pub fn session_token() -> String {
+    secret()
+}
+
+/// A fresh one-time token for a link in a letter.
+///
+/// The same generator as a session token, and deliberately so: a link that
+/// opens an account is exactly as valuable as the cookie it produces, and
+/// giving it a shorter secret because it is "only" a link is the reasoning
+/// that makes reset links guessable. What differs is how long it lives and
+/// that it is spent on first use, not how hard it is to guess.
+pub fn link_token() -> String {
+    secret()
+}
+
+/// 256 bits from the operating system's generator, hex-encoded so it survives
+/// a cookie header and a URL unescaped.
+fn secret() -> String {
     use std::fmt::Write as _;
 
     let bytes: [u8; 32] = rand::random();
@@ -116,8 +157,8 @@ pub fn normalise_email(email: &str) -> String {
 /// Not a validator of RFC 5322 -- that grammar admits addresses no mail
 /// system will deliver to, and rejecting a real address is worse than
 /// accepting an undeliverable one. This checks the shape a person recognises
-/// and leaves deliverability to the confirmation mail that arrives with the
-/// privacy charter (v0.11).
+/// and leaves deliverability to the confirmation letter, which is the only
+/// thing that can actually answer the question.
 pub fn looks_like_email(email: &str) -> bool {
     let Some((local, domain)) = email.split_once('@') else {
         return false;
@@ -139,16 +180,20 @@ pub fn check_credentials(email: &str, password: &str) -> Result<()> {
     }
     // Counted in characters rather than bytes: a passphrase in Cyrillic is
     // twice the bytes of one in ASCII, and a floor that varies by alphabet is
-    // not a floor.
+    // not a floor. Shared with the reset route so the two cannot drift apart.
+    check_password(password)
+}
+
+/// The password half of `check_credentials`, on its own.
+///
+/// A reset sets a password without an address beside it, and it must hold
+/// that password to the same floor the door does -- otherwise "forgot my
+/// password" is the way around the rule.
+pub fn check_password(password: &str) -> Result<()> {
     if password.chars().count() < MIN_PASSWORD {
         return Err(anyhow!("a password needs at least {MIN_PASSWORD} characters"));
     }
     Ok(())
-}
-
-/// Validates a mode as it arrives from a client.
-pub fn check_mode(mode: &str) -> Result<()> {
-    MODES.contains(&mode).then_some(()).with_context(|| format!("unknown mode: {mode}"))
 }
 
 #[cfg(test)]
@@ -185,6 +230,63 @@ mod tests {
         assert!(!verify_password("", ""));
         assert!(!verify_password("anything", "not a phc string"));
         assert!(!verify_password("anything", "$argon2id$"));
+    }
+
+    #[test]
+    fn a_link_token_is_as_strong_as_a_session_token() {
+        // A reset link opens the account. Treating it as "only a link" and
+        // giving it a shorter secret is how reset links become guessable.
+        let token = link_token();
+        assert_eq!(token.len(), 64, "256 bits, hex-encoded");
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(token, link_token());
+    }
+
+    #[test]
+    fn a_link_token_needs_no_escaping_in_a_url() {
+        // It travels in a query string in a letter, where a mail client may
+        // or may not re-encode what it finds. Hex has nothing to re-encode.
+        assert!(link_token().chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+
+    #[test]
+    fn a_reset_holds_a_password_to_the_same_floor_as_the_door() {
+        // Otherwise "forgot my password" is the documented way around the
+        // rule.
+        assert!(check_password("short").is_err());
+        assert!(check_password("a long enough passphrase").is_ok());
+        // And the two really are one rule, not two that agree today.
+        let short = "x".repeat(MIN_PASSWORD - 1);
+        assert_eq!(
+            check_credentials("ada@example.com", &short).unwrap_err().to_string(),
+            check_password(&short).unwrap_err().to_string()
+        );
+    }
+
+    #[test]
+    fn the_default_mode_is_one_the_schema_accepts() {
+        // The set of modes lives in a check constraint, and this constant is
+        // what every registration lands on. A value outside the constraint
+        // would make every registration fail at the database -- so the
+        // migration is read rather than a second list being kept here to
+        // agree with it.
+        let migration = include_str!("../migrations/0008_accounts.sql");
+        let constraint = migration
+            .lines()
+            .find(|line| line.contains("CHECK (mode IN"))
+            .expect("migration 0008 declares the set of modes");
+        assert!(
+            constraint.contains(&format!("'{DEFAULT_MODE}'")),
+            "the default mode {DEFAULT_MODE} is not in {constraint}"
+        );
+    }
+
+    #[test]
+    fn a_reset_link_dies_sooner_than_a_confirmation_link() {
+        // Different jobs: a confirmation is read whenever mail is read, a
+        // reset is asked for by someone sitting at the keyboard now. The one
+        // that opens an account is the one that should not wait around.
+        const { assert!(RESET_HOURS < CONFIRM_HOURS) };
     }
 
     #[test]
@@ -277,13 +379,5 @@ mod tests {
         assert!(check_credentials("ada@example.com", "012345678").is_err());
         assert!(check_credentials("ada@example.com", "short").is_err());
         assert!(check_credentials("not an address", "a long enough passphrase").is_err());
-    }
-
-    #[test]
-    fn only_the_two_modes_exist() {
-        assert!(check_mode("explore").is_ok());
-        assert!(check_mode("create").is_ok());
-        assert!(check_mode("creative").is_err());
-        assert!(check_mode("").is_err());
     }
 }

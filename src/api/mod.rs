@@ -5,3 +5,4 @@
 
 pub mod accounts;
 pub mod artists;
+pub mod metrics;

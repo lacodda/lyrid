@@ -284,3 +284,256 @@ async fn losing_a_layout_costs_the_camera_and_nothing_else() {
     assert!(orphaned.is_none(), "the profile still points at a layout that is gone");
     tx.rollback().await.unwrap();
 }
+
+/// A token of one kind for one account, inside the caller's transaction.
+async fn make_token(tx: &mut Transaction<'_, Postgres>, user_id: i32, purpose: &str, hours: i64) -> String {
+    let token = format!("{purpose}-{user_id}-{hours}-{}", rand_suffix());
+    sqlx::query(
+        "INSERT INTO user_token (token, user_id, purpose, expires_at)
+         VALUES ($1, $2, $3, now() + ($4 || ' hours')::interval)",
+    )
+    .bind(&token)
+    .bind(user_id)
+    .bind(purpose)
+    .bind(hours.to_string())
+    .execute(&mut **tx)
+    .await
+    .expect("a token should be creatable");
+    token
+}
+
+/// Enough uniqueness for a primary key inside one transaction.
+fn rand_suffix() -> String {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed).to_string()
+}
+
+/// Spending a token, exactly as `accounts::spend_token` does it.
+///
+/// The statement is repeated here rather than the handler being called,
+/// because what is under test is the statement: whether the database can be
+/// made to hand the same token out twice. A test that called the handler
+/// would be testing the same SQL through more layers.
+async fn spend(tx: &mut Transaction<'_, Postgres>, token: &str, purpose: &str) -> Option<i32> {
+    sqlx::query_as::<_, (i32,)>(
+        "UPDATE user_token SET used_at = now()
+         WHERE token = $1 AND purpose = $2 AND used_at IS NULL AND expires_at > now()
+         RETURNING user_id",
+    )
+    .bind(token)
+    .bind(purpose)
+    .fetch_optional(&mut **tx)
+    .await
+    .expect("spending a token should not fail")
+    .map(|(id,)| id)
+}
+
+#[tokio::test]
+async fn a_new_profile_lands_in_the_creative_mode_without_being_told() {
+    // The door stopped asking (decision of 2026-09-11), so the column's
+    // default is the only thing left deciding. If it were dropped, every
+    // registration would fail on the NOT NULL rather than quietly pick wrong
+    // -- but a default that changed value would be silent, which is what this
+    // pins.
+    let pool = pool().await;
+    let mut tx = pool.begin().await.unwrap();
+
+    let (id,): (i32,) = sqlx::query_as("INSERT INTO app_user (email, password_hash) VALUES ('fresh@example.com', 'x') RETURNING id")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    // Exactly the insert `create_account` performs: no mode named.
+    sqlx::query("INSERT INTO user_profile (user_id) VALUES ($1)")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+    let (mode,): (String,) = sqlx::query_as("SELECT mode FROM user_profile WHERE user_id = $1")
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(mode, "create", "a profile made without a mode must land in the mode that is actually built");
+
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_link_works_once_even_when_clicked_twice() {
+    // The rule the whole design of `spend_token` exists for. A read followed
+    // by a write would let both clicks pass the read; this asserts the
+    // database refuses the second one on its own.
+    let pool = pool().await;
+    let mut tx = pool.begin().await.unwrap();
+
+    let user = make_user(&mut tx, "twice@example.com", "create").await;
+    let token = make_token(&mut tx, user, "reset", 1).await;
+
+    assert_eq!(spend(&mut tx, &token, "reset").await, Some(user), "the first click should work");
+    assert_eq!(spend(&mut tx, &token, "reset").await, None, "the second click must not");
+
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn an_expired_link_is_refused() {
+    let pool = pool().await;
+    let mut tx = pool.begin().await.unwrap();
+
+    let user = make_user(&mut tx, "stale@example.com", "create").await;
+    // Issued an hour ago with a one-hour life: expired by exactly the margin
+    // the reset route promises.
+    let token = make_token(&mut tx, user, "reset", -1).await;
+
+    assert_eq!(spend(&mut tx, &token, "reset").await, None);
+
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_confirmation_link_cannot_be_spent_as_a_reset() {
+    // Both kinds live in one table, which is only safe if the purpose is part
+    // of the check. Without it, the link in a welcome letter -- the one that
+    // is deliberately long-lived and harmless -- would set a password.
+    let pool = pool().await;
+    let mut tx = pool.begin().await.unwrap();
+
+    let user = make_user(&mut tx, "crossed@example.com", "create").await;
+    let confirmation = make_token(&mut tx, user, "confirm", 24).await;
+
+    assert_eq!(
+        spend(&mut tx, &confirmation, "reset").await,
+        None,
+        "a confirmation link must not open a password reset"
+    );
+    assert_eq!(
+        spend(&mut tx, &confirmation, "confirm").await,
+        Some(user),
+        "and it must still work as what it is"
+    );
+
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn only_tokens_of_the_two_purposes_can_be_stored() {
+    let pool = pool().await;
+    let mut tx = pool.begin().await.unwrap();
+
+    let user = make_user(&mut tx, "purpose@example.com", "create").await;
+    let refused = sqlx::query("INSERT INTO user_token (token, user_id, purpose, expires_at) VALUES ('x', $1, 'admin', now() + interval '1 hour')")
+        .bind(user)
+        .execute(&mut *tx)
+        .await;
+    assert!(refused.is_err(), "the set of purposes is closed by a constraint, not by the callers");
+
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn deleting_an_account_takes_its_tokens_with_it() {
+    // The charter promises deletion is total and immediate. A live reset link
+    // outliving the account it opened would be the one row that made that
+    // false -- and it would still be pointing at a user id Postgres is free
+    // to hand to somebody else.
+    let pool = pool().await;
+    let mut tx = pool.begin().await.unwrap();
+
+    let user = make_user(&mut tx, "gone@example.com", "create").await;
+    make_token(&mut tx, user, "reset", 1).await;
+    make_token(&mut tx, user, "confirm", 24).await;
+
+    sqlx::query("DELETE FROM app_user WHERE id = $1").bind(user).execute(&mut *tx).await.unwrap();
+
+    let (left,): (i64,) = sqlx::query_as("SELECT count(*) FROM user_token WHERE user_id = $1")
+        .bind(user)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "a deleted account left {left} live link(s) into itself");
+
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn the_backfill_in_migration_0009_is_the_statement_it_claims_to_be() {
+    // The migration has already run by the time any test connects, so the
+    // rows it fixed are gone from view. What can still be checked is that the
+    // statement does what the comment above it says -- run against a row in
+    // the state the migration found.
+    //
+    // Without this, the owner's own accounts -- made on a stand with no mail
+    // server -- would be left unable to reset a password: inventing a problem
+    // in order to have solved it correctly.
+    let pool = pool().await;
+    let mut tx = pool.begin().await.unwrap();
+
+    let (id,): (i32,) = sqlx::query_as("INSERT INTO app_user (email, password_hash) VALUES ('legacy@example.com', 'x') RETURNING id")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    // Back to the state migration 0009 found every existing row in.
+    sqlx::query("UPDATE app_user SET email_confirmed_at = NULL WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+    // The migration's own statement, verbatim.
+    sqlx::query("UPDATE app_user SET email_confirmed_at = created_at WHERE email_confirmed_at IS NULL")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+    let (confirmed,): (bool,) = sqlx::query_as("SELECT email_confirmed_at IS NOT NULL FROM app_user WHERE id = $1")
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert!(confirmed, "an account predating confirmation was left unable to reset its password");
+
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_usage_counter_counts_and_never_names() {
+    // The charter's shape, asserted against the schema rather than against
+    // the handler: incrementing twice must leave one row with two uses, not
+    // two rows. If a column were ever added that could hold a user, this
+    // would still pass -- so the columns themselves are read below.
+    let pool = pool().await;
+    let mut tx = pool.begin().await.unwrap();
+
+    for _ in 0..2 {
+        sqlx::query(
+            "INSERT INTO mechanic_use (mechanic, day, uses) VALUES ('sky_opened', current_date, 1)
+             ON CONFLICT (mechanic, day) DO UPDATE SET uses = mechanic_use.uses + 1",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+
+    let (rows,): (i64,) = sqlx::query_as("SELECT count(*) FROM mechanic_use WHERE mechanic = 'sky_opened' AND day = current_date")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1, "a counter incremented twice became {rows} rows: that is a log, not an aggregate");
+
+    // And there is nowhere in the table for a person to be recorded. This is
+    // the check that survives someone adding a column "just for debugging".
+    let columns: Vec<(String,)> = sqlx::query_as("SELECT column_name FROM information_schema.columns WHERE table_name = 'mechanic_use'")
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+    let names: Vec<String> = columns.into_iter().map(|(name,)| name).collect();
+    assert_eq!(
+        names.iter().map(String::as_str).collect::<std::collections::BTreeSet<_>>(),
+        ["day", "mechanic", "uses"].into_iter().collect::<std::collections::BTreeSet<_>>(),
+        "mechanic_use grew a column: anything beyond (mechanic, day, uses) can carry something about a person"
+    );
+
+    tx.rollback().await.unwrap();
+}

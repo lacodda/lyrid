@@ -4,6 +4,7 @@ mod auth;
 mod config;
 mod import;
 mod layout;
+mod mail;
 mod slice;
 
 use anyhow::{Context, Result};
@@ -129,6 +130,14 @@ async fn connect(config: &config::Config) -> Result<PgPool> {
 }
 
 async fn serve(config: &config::Config) -> Result<()> {
+    // Built before the pool: a malformed SMTP URL should stop the server at
+    // boot, in front of whoever deployed it, rather than on the first
+    // registration in front of a user.
+    let mailer = mail::Mailer::from_url(config.smtp_url.as_deref(), config.mail_from.clone())?;
+    if matches!(mailer, mail::Mailer::Log) {
+        tracing::warn!("no LYRID_SMTP_URL: confirmation and password-reset letters will be written to this log instead of sent");
+    }
+
     let pool = connect(config).await?;
 
     let listener = TcpListener::bind(config.addr)
@@ -136,7 +145,14 @@ async fn serve(config: &config::Config) -> Result<()> {
         .with_context(|| format!("failed to bind {}", config.addr))?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), addr = %config.addr, "lyrid listening");
 
-    axum::serve(listener, app::router(pool, config.secure_cookie, config.static_dir.as_deref()))
+    let state = app::AppState {
+        pool,
+        secure_cookie: config.secure_cookie,
+        public_url: config.public_url.clone(),
+        mailer,
+    };
+
+    axum::serve(listener, app::router(state, config.static_dir.as_deref()))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("server error")?;
