@@ -128,7 +128,7 @@ fn every_icon_in_the_ico_is_cut_for_its_own_size() {
     // The levels really differ. If every entry came from one master, the bytes
     // per pixel would follow one curve; they do not, because the 48 px image
     // carries detail the 16 px one does not have.
-    let at = |want: u32| sizes.iter().find(|(width, _)| *width == want).map(|(_, bytes)| *bytes).unwrap_or(0);
+    let at = |want: u32| sizes.iter().find(|(width, _)| *width == want).map_or(0, |(_, bytes)| *bytes);
     assert!(
         at(48) > at(32),
         "the 48 px image is not richer than the 32 px one, so both came from the same master"
