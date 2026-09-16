@@ -53,10 +53,7 @@ fn the_header_mark_is_cut_for_the_size_it_is_drawn_at() {
     // should be. The stylesheet is read rather than assumed, so changing the
     // size without changing the file fails here instead of on screen.
     let css = String::from_utf8(read("web/src/styles.css")).expect("the stylesheet is UTF-8");
-    let rule = css
-        .split(".app__mark {")
-        .nth(1)
-        .expect("the stylesheet still styles the header mark");
+    let rule = css.split(".app__mark {").nth(1).expect("the stylesheet still styles the header mark");
     let width = rule
         .lines()
         .find_map(|line| line.trim().strip_prefix("width:"))
