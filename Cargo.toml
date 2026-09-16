@@ -45,3 +45,8 @@ unsafe_code = "forbid"
 [lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+
+# Line-table debug info keeps backtraces readable while cutting the .pdb weight
+# that dominates target/debug. Full debug info is a one-line revert when needed.
+[profile.dev]
+debug = 1
