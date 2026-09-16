@@ -17,6 +17,16 @@
 //! times was the radio opened today" and can never answer "did the people who
 //! opened the radio come back". The second question is the one the charter
 //! sold.
+//!
+//! A second consequence, stated rather than left to be discovered: **anyone
+//! can inflate a counter.** The route takes no session, because requiring one
+//! would mean the counters only described people with accounts — and because
+//! identifying the caller is the thing this module exists not to do. So these
+//! are a rough sense of what gets used, not a figure to report or to decide
+//! anything irreversible on. Rate limiting would narrow it and is not worth a
+//! bucket-per-address store here; if these numbers ever need to be trusted
+//! that far, the honest fix is to say so and change the design, not to quietly
+//! start keeping more.
 
 use axum::extract::State;
 use axum::http::StatusCode;
