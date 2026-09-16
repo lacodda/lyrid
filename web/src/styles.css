@@ -537,15 +537,6 @@ body,
   color: var(--lyrid-text);
 }
 
-.account__mode {
-  padding: 0.1rem 0.4rem;
-  border: 1px solid var(--lyrid-azure-dim);
-  border-radius: 999px;
-  color: var(--lyrid-azure);
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-}
-
 .account__form {
   flex-direction: column;
   align-items: stretch;
@@ -596,51 +587,261 @@ body,
 
 /* The mode is chosen once and never again, so the choice is shown with what
    each one means rather than as a bare pair of words. */
-.account__modes {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  margin: 0;
-  padding: 0.5rem;
-  border: 1px solid var(--lyrid-edge);
-  border-radius: 8px;
-}
-
-.account__modes legend {
-  padding: 0 0.35rem;
-  color: var(--lyrid-muted);
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-}
-
-.account__modes label {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.15rem 0.5rem;
-  cursor: pointer;
-}
-
-.account__modes input {
-  grid-row: span 2;
-  align-self: start;
-  margin-top: 0.2rem;
-  accent-color: var(--lyrid-azure);
-}
-
-.account__mode-name {
-  color: var(--lyrid-text);
-  font-size: 0.85rem;
-}
-
-.account__mode-blurb {
-  color: var(--lyrid-muted);
-  font-size: 0.75rem;
-  line-height: 1.4;
-}
-
 .account__error {
   margin: 0;
   color: var(--lyrid-warn);
   font-size: 0.78rem;
   line-height: 1.4;
+}
+
+/* A quiet button: a link in everything but markup. Used for the asides that
+   are worth reaching and not worth competing with the sky. */
+.account__quiet {
+  padding: 0.2rem 0 !important;
+  border: none !important;
+  background: none !important;
+  backdrop-filter: none !important;
+  color: var(--lyrid-muted) !important;
+  font-size: 0.72rem !important;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.account__quiet:hover:not(:disabled) {
+  color: var(--lyrid-azure) !important;
+}
+
+.account__asides {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.account__hint,
+.account__note {
+  margin: 0;
+  color: var(--lyrid-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.account__note {
+  color: var(--lyrid-azure);
+}
+
+/* The one cost of an unconfirmed address, stated where it is paid. Stacked
+   rather than inline: it is a sentence, and a sentence squeezed into a row of
+   controls is a sentence nobody reads. */
+.account__unconfirmed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-width: 16rem;
+  color: var(--lyrid-warn);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+/* A page that is not the map.
+   The sky does not scroll and never reflows; these do both, so they replace it
+   rather than floating over it. */
+.page {
+  height: 100%;
+  overflow-y: auto;
+  background: var(--lyrid-void);
+}
+
+.page__body {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+  line-height: 1.6;
+}
+
+.page__narrow {
+  max-width: 28rem;
+  text-align: left;
+}
+
+.page__head {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.page h1 {
+  margin: 0 0 0.25rem;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.page h2 {
+  margin: 2rem 0 0.5rem;
+  color: var(--lyrid-azure);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.page p {
+  margin: 0 0 0.85rem;
+  color: var(--lyrid-text);
+}
+
+.page__lede {
+  color: var(--lyrid-muted) !important;
+  font-size: 1.05rem;
+}
+
+.page__plain {
+  color: var(--lyrid-muted) !important;
+}
+
+.page__list {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--lyrid-muted);
+}
+
+.page__list li {
+  margin-bottom: 0.6rem;
+}
+
+.page__list strong {
+  color: var(--lyrid-text);
+  font-weight: 600;
+}
+
+.page button {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--lyrid-edge);
+  border-radius: 8px;
+  background: var(--lyrid-glass);
+  color: var(--lyrid-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.page button:hover:not(:disabled) {
+  color: var(--lyrid-text);
+  border-color: var(--lyrid-azure-dim);
+}
+
+.page button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.page__close {
+  flex-shrink: 0;
+}
+
+.page__controls {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--lyrid-edge);
+}
+
+.page__buttons {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+/* Destruction looks like destruction. Not red until it is armed: the first
+   press is a question, and a button that shouts before it has been asked
+   teaches people to ignore the shouting. */
+.page__danger:hover:not(:disabled) {
+  color: var(--lyrid-warn) !important;
+  border-color: var(--lyrid-warn) !important;
+}
+
+.page__warn {
+  margin-top: 0.75rem !important;
+  color: var(--lyrid-warn) !important;
+  font-size: 0.85rem;
+}
+
+.page__narrow form {
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+/* One star, in someone else's page.
+   Sized to the frame it is given rather than to the window: an embed does not
+   know how much room it has, and a fixed height would be cropped or floating
+   in space depending on whose page it landed in. */
+.embed {
+  display: flex;
+  height: 100%;
+  padding: 0.75rem;
+  align-items: stretch;
+  background: var(--lyrid-void);
+}
+
+.embed__link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  width: 100%;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--lyrid-edge);
+  border-radius: 10px;
+  background: var(--lyrid-glass);
+  color: inherit;
+  text-decoration: none;
+}
+
+.embed__link:hover {
+  border-color: var(--lyrid-azure-dim);
+}
+
+.embed__name {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.embed__comment {
+  margin: 0;
+  color: var(--lyrid-muted);
+  font-size: 0.8rem;
+}
+
+.embed__facts,
+.embed__genres {
+  margin: 0;
+  color: var(--lyrid-muted);
+  font-size: 0.75rem;
+}
+
+.embed__genres {
+  color: var(--lyrid-azure);
+}
+
+.embed__more {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  margin: auto 0 0;
+  padding-top: 0.6rem;
+  color: var(--lyrid-muted);
+  font-size: 0.72rem;
+}
+
+.embed__mark {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.embed__empty {
+  margin: auto;
+  color: var(--lyrid-muted);
+  font-size: 0.8rem;
 }

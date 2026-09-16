@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 
+import { count } from '@/metrics'
 import { fetchArtist, type Artist, type Link, type Neighbour, type Origin } from '@/api'
 
 interface Props {
@@ -182,7 +183,13 @@ function Player({ uploads }: { uploads: string }) {
   const [playing, setPlaying] = useState(false)
   if (!playing) {
     return (
-      <button className="card__play" onClick={() => setPlaying(true)}>
+      <button
+        className="card__play"
+        onClick={() => {
+          count('listen_opened')
+          setPlaying(true)
+        }}
+      >
         ▶ play this artist's channel
       </button>
     )

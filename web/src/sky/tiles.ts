@@ -121,6 +121,23 @@ export function tileAction(tile: Tile | undefined, wanted: number, shown: number
   return wanted === shown ? { do: 'wait' } : { do: 'upload' }
 }
 
+/**
+ * The levels worth fetching before they are asked for.
+ *
+ * Zooming is the one move whose next step is predictable: from level 3 you go
+ * to 2 or to 4, never to 7. Fetching both while the person is still looking at
+ * 3 turns the next zoom from a wait into nothing at all — and the level they
+ * do not take is a few hundred kilobytes that the browser cache keeps for the
+ * visit after this one.
+ *
+ * Only the immediate neighbours. Two steps out is four more levels for a move
+ * that needs two deliberate gestures to reach, which is bandwidth spent on a
+ * guess rather than on a likelihood.
+ */
+export function neighbouringLevels(sky: Sky, level: number): number[] {
+  return [level - 1, level + 1].filter(candidate => candidate >= 0 && candidate <= sky.max_level)
+}
+
 export function levelFor(sky: Sky, visibleSpan: number): number {
   const span = sky.max_x - sky.min_x
   const fraction = Math.max(visibleSpan / span, 1e-6)

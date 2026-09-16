@@ -3,12 +3,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Sky, type SkyState, type View } from '@/sky/Sky'
 import { StarCard } from '@/sky/StarCard'
 import { Search } from '@/sky/Search'
-import { readLocation, writeLocation } from '@/sky/location'
+import { readLocation, readPage, writeLocation, type Page } from '@/sky/location'
 import { HaloPicker, HALO_COLOURS, HALO_DEFAULT } from '@/sky/HaloPicker'
 import { HALO_SHAPES, type HaloShape } from '@/sky/renderer'
 import { fetchArtist } from '@/api'
 import { AccountPanel } from '@/AccountPanel'
 import { fetchMe, saveProfile, worthSaving, type Me } from '@/account'
+import { Charter } from '@/Charter'
+import { Embed } from '@/Embed'
+import { ConfirmPage, ResetPage } from '@/LetterPage'
+import { count } from '@/metrics'
 import type { Star } from '@/sky/renderer'
 
 /**
@@ -25,7 +29,13 @@ import type { Star } from '@/sky/renderer'
  *
  * An account adds memory to all of that and takes nothing away: a visitor who
  * never signs in gets the same sky, with their marker remembered per browser
- * as it always was.
+ * as it always was. That is the whole of the public preview — there is no
+ * anonymous mode to build, because nothing here was ever behind the account.
+ *
+ * Three addresses are not the map: `/charter`, and the two a link in a letter
+ * lands on. They render instead of the sky rather than over it, so a person
+ * arriving from their mail client is not made to wait for a WebGL canvas they
+ * did not come for.
  */
 export function App() {
   const [state, setState] = useState<SkyState | null>(null)
@@ -38,12 +48,30 @@ export function App() {
   // useState rather than a ref, because this value is read while rendering.
   const [opened] = useState(readLocation)
 
+  // Which standalone page is showing, if any. Seeded from the address so a
+  // link in a letter lands on the right one, and closable back to the sky.
+  const [page, setPage] = useState<Page>(() => readPage(window.location.pathname, window.location.search))
+
+  // Leaving a page puts the address back on the map, so the next thing that
+  // writes the location does not fight with a stale `/confirm?token=...`.
+  const leavePage = useCallback(() => {
+    setPage(null)
+    window.history.replaceState(null, '', '/')
+  }, [])
+
+  const openCharter = useCallback(() => {
+    count('charter_read')
+    setPage({ kind: 'charter' })
+    window.history.replaceState(null, '', '/charter')
+  }, [])
+
   // Stable callbacks: the render loop lives outside React, and a new function
   // every render would tear the canvas down and build it again.
   const onState = useCallback((next: SkyState) => setState(next), [])
 
   const onPick = useCallback((star: Star | null) => {
     setPicked(star)
+    if (star) count('card_opened')
     // A star picked on the map is already on screen; flying to it would yank
     // the view out from under the click.
   }, [])
@@ -51,6 +79,7 @@ export function App() {
   // A star chosen by name or arrived at by link has to be found first.
   const goTo = useCallback((star: Star) => {
     setPicked(star)
+    count('card_opened')
     setTarget({ x: star.x, y: star.y, scale: 8 })
   }, [])
 
@@ -111,6 +140,12 @@ export function App() {
     }
   }, [opened])
 
+  // One count for the visit, not one per render: a mechanic opened twice in a
+  // session is two uses, but a component re-rendering is not.
+  useEffect(() => {
+    count('sky_opened')
+  }, [])
+
   // Who is signed in. Asked of the server rather than read from storage: the
   // session cookie is HttpOnly, so this page cannot see it, and a local flag
   // would only be a guess about a cookie that may have expired.
@@ -155,11 +190,15 @@ export function App() {
   // camera positions is worse than no Back button at all.
   useEffect(() => {
     if (!state) return
+    // A standalone page owns the address while it is up; letting the map
+    // write over it would replace `/charter` with `/` on the first frame the
+    // sky renders behind it.
+    if (page) return
     const next = writeLocation({ artistId: picked?.artistId ?? null, view: state.view })
     if (next !== window.location.pathname + window.location.hash) {
       window.history.replaceState(null, '', next)
     }
-  }, [state, picked])
+  }, [state, picked, page])
 
   // Where the sky was left, saved for next time. The camera changes on every
   // frame, so this asks whether the view has really moved before spending a
@@ -176,6 +215,21 @@ export function App() {
       // tries again.
     })
   }, [me, state])
+
+  // Checked first, and before anything else renders: an embed is a rectangle
+  // in someone else's page and must not boot a sky behind it.
+  if (page?.kind === 'embed') {
+    return <Embed artistId={page.artistId} />
+  }
+  if (page?.kind === 'charter') {
+    return <Charter me={me} onSignedOut={() => adopt(null)} onClose={leavePage} />
+  }
+  if (page?.kind === 'confirm') {
+    return <ConfirmPage token={page.token} onClose={leavePage} />
+  }
+  if (page?.kind === 'reset') {
+    return <ResetPage token={page.token} onClose={leavePage} />
+  }
 
   return (
     <main className="app">
@@ -208,9 +262,9 @@ export function App() {
         // the reason the account panel joins the stack rather than claiming
         // a corner of its own. The top-right is the search box and the card.
         <div className="app__corner">
-          <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} />
+          <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} onCharter={openCharter} />
           <HaloPicker shape={shape} colour={colour} onShape={chooseShape} onColour={chooseColour} />
-          <Share capture={captureRef} />
+          <Share capture={captureRef} artistId={picked?.artistId ?? null} />
           <p className="app__status">
             {state.stars.toLocaleString('en')} stars · level {state.level} · v{__APP_VERSION__}
           </p>
@@ -227,15 +281,20 @@ export function App() {
  * so the same string is offered as one press. The poster is the frame as
  * drawn, at the resolution it is drawn: what is on screen is what is saved.
  */
-function Share({ capture }: { capture: { current: (() => Promise<Blob | null>) | null } }) {
-  const [copied, setCopied] = useState(false)
+function Share({ capture, artistId }: { capture: { current: (() => Promise<Blob | null>) | null }; artistId: number | null }) {
+  const [copied, setCopied] = useState<'link' | 'embed' | null>(null)
+
+  const flash = (what: 'link' | 'embed') => {
+    setCopied(what)
+    window.setTimeout(() => setCopied(null), 1500)
+  }
 
   const copyLink = () => {
     const url = window.location.href
     void navigator.clipboard.writeText(url).then(
       () => {
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), 1500)
+        count('view_shared')
+        flash('link')
       },
       () => {
         // Clipboard access can be refused outright; the address bar still
@@ -249,6 +308,7 @@ function Share({ capture }: { capture: { current: (() => Promise<Blob | null>) |
     if (!take) return
     void take().then(blob => {
       if (!blob) return
+      count('view_shared')
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
@@ -260,10 +320,29 @@ function Share({ capture }: { capture: { current: (() => Promise<Blob | null>) |
     })
   }
 
+  // The embed is offered only with a star open. A widget of the whole sky
+  // would be a WebGL canvas in someone else's page, which is what the embed
+  // deliberately is not.
+  const copyEmbed = () => {
+    if (artistId === null) return
+    const src = `${window.location.origin}/embed/star/${String(artistId)}`
+    const code = `<iframe src="${src}" width="320" height="180" style="border:0" loading="lazy" title="lyrid"></iframe>`
+    void navigator.clipboard.writeText(code).then(
+      () => {
+        count('view_shared')
+        flash('embed')
+      },
+      () => {
+        // Clipboard access can be refused outright; nothing to apologise for.
+      }
+    )
+  }
+
   return (
     <div className="app__share">
-      <button onClick={copyLink}>{copied ? 'link copied' : 'copy link'}</button>
+      <button onClick={copyLink}>{copied === 'link' ? 'link copied' : 'copy link'}</button>
       <button onClick={savePoster}>save poster</button>
+      {artistId !== null && <button onClick={copyEmbed}>{copied === 'embed' ? 'embed copied' : 'copy embed'}</button>}
     </div>
   )
 }

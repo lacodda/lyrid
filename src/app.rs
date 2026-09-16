@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     extract::State,
-    http::{StatusCode, header},
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 use sqlx::PgPool;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 
 #[derive(Clone)]
@@ -34,6 +35,10 @@ pub struct AppState {
 /// difference between those two arrangements is exactly what a stand exists
 /// to expose.
 pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
+    // Taken before the state moves into the router: the SPA handler needs it
+    // to make the preview image absolute.
+    let public_url = state.public_url.clone();
+
     let api = Router::new()
         .route("/health", get(health))
         .merge(crate::api::artists::routes())
@@ -50,7 +55,35 @@ pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
     // back to index.html would hand the renderer an HTML page where it
     // expects a binary header -- the trap that broke the first zoom in
     // development, where the dev server does exactly that.
+    //
+    // A tile never changes. Rebuilding the sky writes a new layout and a whole
+    // new pyramid; there is no such thing as an edited tile, only a replaced
+    // sky. So the browser is told it may keep them, and a second visit draws
+    // from its own disk rather than asking again.
+    //
+    // A day, and not `immutable`: both would be promises about the URL, and
+    // these URLs are reused by the next pyramid. A day makes the second visit
+    // instant and still lets a rebuilt sky reach everyone by the following one.
     let tiles = ServeDir::new(root.join("tiles"));
+    let tiles = tower::ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=86400"),
+        ))
+        .service(tiles);
+
+    // `sky.json` is deliberately not cached with them. It is the one file that
+    // says which pyramid this is and how deep it goes, so a stale copy sends a
+    // fresh browser looking for levels that no longer exist -- the whole sky
+    // broken by one held file. It is small, and it is read once per visit.
+    //
+    // `ServeFile` rather than another `ServeDir`: a route service is handed
+    // the whole path, not the remainder after the prefix, so a directory
+    // rooted at `tiles/` would go looking for `tiles/tiles/sky.json`.
+    let manifest = ServeFile::new(root.join("tiles/sky.json"));
+    let manifest = tower::ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static("no-cache")))
+        .service(manifest);
 
     // Everything else is the SPA: real files when they exist, index.html
     // otherwise, so a deep link into the map loads the app rather than a 404.
@@ -62,23 +95,60 @@ pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
     // broken. Routing the miss through the router's fallback instead gives
     // the handler's own 200.
     let index = root.join("index.html");
-    let files = ServeDir::new(root);
-    let spa = get(move || serve_index(index.clone()));
+    let spa = get({
+        let base = public_url.clone();
+        move || serve_index(index.clone(), base.clone())
+    });
 
-    api.nest_service("/tiles", tiles)
+    // `/` goes through the same handler as any other client route rather than
+    // to `ServeDir`'s directory index. The two would serve the same file with
+    // different headers -- and only one of them turns the preview image into
+    // an absolute URL, so the root would be the one address whose link unfurls
+    // into nothing.
+    let files = ServeDir::new(root).append_index_html_on_directories(false);
+
+    api.route_service("/tiles/sky.json", manifest)
+        .nest_service("/tiles", tiles)
         .fallback_service(files.fallback(spa))
         .layer(TraceLayer::new_for_http())
 }
 
 /// The SPA's entry point, answered with 200 for any client-side route.
-async fn serve_index(path: PathBuf) -> Response {
-    match tokio::fs::read(&path).await {
-        Ok(bytes) => ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], bytes).into_response(),
+///
+/// The preview image is made absolute on the way out. A chat or a timeline
+/// fetches `og:image` on its own, from its own servers, with no page to
+/// resolve a relative path against -- so `/social-preview.png` in the built
+/// file becomes `https://…/social-preview.png` here. Done at serve time rather
+/// than at build time because only the running server knows what it is reached
+/// by: the same bundle is a stand on a home network and a public host.
+async fn serve_index(path: PathBuf, public_url: String) -> Response {
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) => bytes,
         Err(error) => {
             tracing::error!(%error, path = %path.display(), "the SPA entry point could not be read");
-            (StatusCode::INTERNAL_SERVER_ERROR, "the application could not be loaded").into_response()
+            return (StatusCode::INTERNAL_SERVER_ERROR, "the application could not be loaded").into_response();
         }
-    }
+    };
+
+    let body = match String::from_utf8(bytes) {
+        Ok(html) => absolute_previews(&html, &public_url).into_bytes(),
+        // Not valid UTF-8, which index.html always is: served as it is rather
+        // than refused, because a page that renders is better than a 500 over
+        // a preview tag.
+        Err(error) => error.into_bytes(),
+    };
+
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], body).into_response()
+}
+
+/// Rewrites root-relative preview URLs to absolute ones.
+///
+/// Only `content="/…"` inside a meta tag, and only the leading slash: a
+/// blunter replacement would also rewrite the script and stylesheet the page
+/// actually loads, which work perfectly well relative and would break the
+/// moment the server is behind a path prefix.
+fn absolute_previews(html: &str, public_url: &str) -> String {
+    html.replace(r#"content="/"#, &format!(r#"content="{public_url}/"#))
 }
 
 /// Liveness + readiness in one place: the process answers, and the database
@@ -183,6 +253,92 @@ mod tests {
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(&body[..4], b"LYST", "the tile came back altered");
+    }
+
+    #[tokio::test]
+    async fn the_preview_image_is_absolute_by_the_time_it_leaves() {
+        // A chat fetches og:image from its own servers, with no page to
+        // resolve a relative path against: a root-relative URL unfurls into
+        // nothing at all. The rewrite happens here rather than at build time
+        // because the same bundle is a stand and a public host.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            r#"<!doctype html><meta property="og:image" content="/social-preview.png" /><script src="/assets/app.js"></script>"#,
+        )
+        .unwrap();
+
+        let response = router(state(), Some(dir.path()))
+            .oneshot(Request::get("/star/54").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let html = String::from_utf8_lossy(&body);
+
+        assert!(html.contains(r#"content="http://localhost:8080/social-preview.png""#), "{html}");
+        // And nothing else was touched: the script is loaded by the page
+        // itself, where relative is correct and absolute would break behind a
+        // path prefix.
+        assert!(html.contains(r#"src="/assets/app.js""#), "the rewrite reached beyond the preview tags: {html}");
+    }
+
+    #[tokio::test]
+    async fn the_root_goes_through_the_same_handler_as_any_other_route() {
+        // ServeDir would happily serve index.html for `/` from disk, skipping
+        // the rewrite -- leaving the root the one address whose link unfurls
+        // into nothing, which is also the address people actually share.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            r#"<!doctype html><meta property="og:image" content="/social-preview.png" />"#,
+        )
+        .unwrap();
+
+        let response = router(state(), Some(dir.path()))
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let html = String::from_utf8_lossy(&body);
+        assert!(
+            html.contains(r#"content="http://localhost:8080/social-preview.png""#),
+            "the root skipped the rewrite: {html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tile_may_be_kept_by_the_browser() {
+        // A tile never changes -- a rebuilt sky is a new pyramid, not an
+        // edited one -- so the second visit should draw from disk rather than
+        // ask again.
+        let dir = static_root();
+        let app = router(state(), Some(dir.path()));
+
+        let response = app.oneshot(Request::get("/tiles/0/0/0.bin").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let cache = response.headers().get(header::CACHE_CONTROL).unwrap().to_str().unwrap();
+        assert!(cache.contains("max-age=86400"), "a tile was not cacheable: {cache}");
+    }
+
+    #[tokio::test]
+    async fn the_sky_manifest_is_never_kept() {
+        // The trap this guards: sky.json sits inside /tiles, so it inherits
+        // the tiles' caching unless something takes it out. A held copy of it
+        // points a fresh browser at levels a rebuilt pyramid no longer has --
+        // the whole sky broken by one cached file, for a day, with nothing on
+        // screen to explain it.
+        let dir = static_root();
+        let app = router(state(), Some(dir.path()));
+
+        let response = app.oneshot(Request::get("/tiles/sky.json").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let cache = response.headers().get(header::CACHE_CONTROL).unwrap().to_str().unwrap();
+        assert!(!cache.contains("max-age=86400"), "sky.json inherited the tiles' caching: {cache}");
+        assert!(cache.contains("no-cache"), "{cache}");
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(body.starts_with(b"{"), "the manifest route served something else");
     }
 
     #[tokio::test]

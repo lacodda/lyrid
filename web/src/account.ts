@@ -9,10 +9,15 @@
  * by asking `/api/me` rather than by consulting a local flag.
  */
 
-/** The two modes, chosen once when the account is made and never again. */
-export const MODES = ['create', 'explore'] as const
-
-export type Mode = (typeof MODES)[number]
+/**
+ * The two modes.
+ *
+ * Nothing chooses between them yet: only the creative one is built, so the
+ * door does not ask (decision of 2026-09-11) and every account starts there.
+ * The type stays because the server still reports which mode a profile is in,
+ * and the choice returns with the fog (v0.22).
+ */
+export type Mode = 'create' | 'explore'
 
 /** Where the sky was left. */
 export interface Camera {
@@ -30,6 +35,14 @@ export interface Me {
   halo_colour: string | null
   /** Absent when nothing is saved, or when the sky has been rebuilt since. */
   camera: Camera | null
+  /**
+   * Whether the address has been confirmed.
+   *
+   * Nothing is withheld while it is false -- the account works -- except a
+   * password reset, which needs a deliverable address to send to. The panel
+   * says so there rather than nagging about it everywhere.
+   */
+  email_confirmed: boolean
 }
 
 /** What may be saved back. Deliberately without a mode. */
@@ -53,8 +66,8 @@ export async function fetchMe(signal?: AbortSignal): Promise<Me | null> {
   return (await response.json()) as Me
 }
 
-export async function register(email: string, password: string, mode: Mode): Promise<Me> {
-  return send('/api/auth/register', { email, password, mode })
+export async function register(email: string, password: string): Promise<Me> {
+  return send('/api/auth/register', { email, password })
 }
 
 export async function logIn(email: string, password: string): Promise<Me> {
@@ -63,6 +76,62 @@ export async function logIn(email: string, password: string): Promise<Me> {
 
 export async function logOut(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
+}
+
+/** Confirms an address from the link in the letter. */
+export async function confirmEmail(token: string): Promise<void> {
+  await post('/api/auth/confirm', { token })
+}
+
+/** Asks for the confirmation letter again. Needs a session. */
+export async function resendConfirmation(): Promise<void> {
+  await post('/api/auth/confirm/resend', {})
+}
+
+/**
+ * Starts a password reset.
+ *
+ * Resolves the same way whether or not the address is known -- the server
+ * answers identically on purpose, so this cannot be used to ask whether
+ * someone has an account here, and neither can the interface built on it.
+ */
+export async function forgotPassword(email: string): Promise<void> {
+  await post('/api/auth/forgot', { email })
+}
+
+/** Finishes a password reset. Every session of that account ends with it. */
+export async function resetPassword(token: string, password: string): Promise<void> {
+  await post('/api/auth/reset', { token, password })
+}
+
+/**
+ * Everything the service holds about this account, as a file.
+ *
+ * Downloaded in the page rather than by pointing the browser at the route: the
+ * request has to carry the session cookie and the answer has to be saved, and
+ * a plain link would do the first but not reliably the second.
+ */
+export async function exportAccount(): Promise<Blob> {
+  const response = await fetch('/api/me/export', { credentials: 'same-origin' })
+  if (!response.ok) throw new Error(await messageOf(response))
+  return response.blob()
+}
+
+/** Destroys the account. Immediate, total, and not undoable. */
+export async function deleteAccount(): Promise<void> {
+  const response = await fetch('/api/me', { method: 'DELETE', credentials: 'same-origin' })
+  if (!response.ok) throw new Error(await messageOf(response))
+}
+
+/** A POST that carries a small JSON body and returns nothing worth reading. */
+async function post(path: string, body: Record<string, string>): Promise<void> {
+  const response = await fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) throw new Error(await messageOf(response))
 }
 
 /**

@@ -17,6 +17,12 @@
  * session history with hundreds of entries nobody wants to press Back through.
  * A fragment is also never sent to the server, which is the honest description
  * of what it is — a client-side bookmark.
+ *
+ * Three paths are not the map at all — `/charter`, `/confirm` and `/reset`.
+ * They are pages, and `readPage` tells them apart from a star. Two of them
+ * carry a token in the query string rather than in the fragment, because a
+ * fragment never reaches the server and these are links printed in a letter:
+ * a mail client that rewrites them must leave something the page can read.
  */
 
 import type { View } from './Sky'
@@ -35,6 +41,39 @@ export function readLocation(): Location {
     artistId: readArtistId(window.location.pathname),
     view: readView(window.location.hash),
   }
+}
+
+/** A page that is not the map. */
+export type Page =
+  | { kind: 'charter' }
+  | { kind: 'confirm'; token: string }
+  | { kind: 'reset'; token: string }
+  | { kind: 'embed'; artistId: number }
+  | null
+
+/**
+ * Which standalone page the address asks for, if any.
+ *
+ * A missing token is not the same as a wrong one: `/confirm` with nothing
+ * after it is a link that was truncated somewhere between the letter and the
+ * browser, and the page says so rather than posting an empty token and
+ * showing the server's refusal as though the link had expired.
+ */
+export function readPage(pathname: string, search: string): Page {
+  const path = pathname.replace(/\/$/, '')
+  if (path === '/charter') return { kind: 'charter' }
+
+  // An embed is a star seen through someone else's page. It reuses the star
+  // reader so `/embed/star/54` and `/star/54` cannot disagree about what a
+  // valid id looks like.
+  if (path.startsWith('/embed')) {
+    const artistId = readArtistId(path.slice('/embed'.length))
+    return artistId === null ? null : { kind: 'embed', artistId }
+  }
+
+  if (path !== '/confirm' && path !== '/reset') return null
+  const token = new URLSearchParams(search).get('token') ?? ''
+  return { kind: path === '/confirm' ? 'confirm' : 'reset', token }
 }
 
 /** `/star/54` -> 54; anything else -> null. */

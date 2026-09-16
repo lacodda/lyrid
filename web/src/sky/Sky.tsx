@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { advance } from './flight'
 import { SkyRenderer, type Camera, type Halo, type Star } from './renderer'
-import { fetchLevel, fetchSky, levelFor, tileAction, type Sky as SkyMeta, type Tile } from './tiles'
+import { fetchLevel, fetchSky, levelFor, neighbouringLevels, tileAction, type Sky as SkyMeta, type Tile } from './tiles'
 
 /** What the sky is doing, for the caller to show around it. */
 export interface SkyState {
@@ -149,10 +149,36 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
               // lands the previous level keeps drawing, so zooming never shows
               // an empty sky.
               levels.current.set(wanted, { packed: new Float32Array(0), stars: [] })
-              void fetchLevel(wanted, '/tiles', abort.signal).then(loaded => levels.current.set(wanted, loaded))
+              void fetchLevel(wanted, '/tiles', abort.signal).then(
+                loaded => levels.current.set(wanted, loaded),
+                () => {
+                  // Without this the placeholder stays forever and the level
+                  // is never asked for again: one dropped connection would
+                  // cost that zoom for the rest of the visit.
+                  levels.current.delete(wanted)
+                }
+              )
             } else if (action.do === 'upload' && tile) {
               renderer.upload(tile.packed)
               shownLevel.current = wanted
+              // The level is on screen and the loop has nothing to wait for:
+              // a good moment to fetch the two levels a zoom could go to
+              // next. Done here rather than every frame so it happens once
+              // per level change, and the placeholder keeps it to one
+              // request each.
+              for (const near of neighbouringLevels(sky, wanted)) {
+                if (levels.current.has(near)) continue
+                levels.current.set(near, { packed: new Float32Array(0), stars: [] })
+                void fetchLevel(near, '/tiles', abort.signal).then(
+                  loaded => levels.current.set(near, loaded),
+                  () => {
+                    // A prefetch that fails is not a failure: the level is
+                    // fetched again, for real, if the person zooms to it. The
+                    // placeholder is dropped so that request can happen.
+                    levels.current.delete(near)
+                  }
+                )
+              }
             }
 
             const wantsCapture = pendingCapture.current
