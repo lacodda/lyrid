@@ -34,6 +34,17 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-lyrid}
       RUST_LOG: ${RUST_LOG:-lyrid=info,tower_http=info}
+      # How this stand is reached from outside. It cannot be inferred: the
+      # server binds 0.0.0.0 inside a container and is reached by a host name
+      # on a different port. The links in letters and the preview image a
+      # shared link unfurls into are both built from this.
+      LYRID_PUBLIC_URL: ${LYRID_PUBLIC_URL:-http://pi:8083}
+      # Unset on the home stand, which has no route to the internet: the two
+      # letters go to `docker compose logs server` instead of being sent, link
+      # and all. A supported configuration, not a fallback -- and the reason
+      # the stand's log is not something to share.
+      LYRID_SMTP_URL: ${LYRID_SMTP_URL:-}
+      LYRID_MAIL_FROM: ${LYRID_MAIL_FROM:-lyrid <no-reply@pi>}
     ports:
       - "${LYRID_PORT:-8083}:8080"
     volumes:
