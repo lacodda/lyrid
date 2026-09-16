@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.11.0] - 2026-09-16
+
+### Documentation
+- Describe the letters, the charter and what is counted
+
+### Features
+- Confirm an address, and give back a lost password
+- Open the doors, and say what is kept
+
 ## [0.10.0] - 2026-09-01
 
 ### Bug Fixes
