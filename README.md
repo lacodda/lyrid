@@ -2,9 +2,13 @@
   <img src="https://raw.githubusercontent.com/lacodda/lyrid/main/assets/banner.svg" alt="lyrid — a music universe" width="720">
 </p>
 
-# lyrid
-
 > A music universe: a canonical sky of artists and genres you explore through real listening.
+
+<p align="center">
+  <a href="https://github.com/lacodda/lyrid/releases/latest"><img src="https://img.shields.io/github/v/release/lacodda/lyrid?style=flat-square" alt="Release"></a>
+  <a href="https://github.com/lacodda/lyrid/actions"><img src="https://img.shields.io/github/actions/workflow/status/lacodda/lyrid/ci.yml?style=flat-square" alt="CI"></a>
+  <a href="https://github.com/lacodda/lyrid/blob/main/LICENSE"><img src="https://img.shields.io/github/license/lacodda/lyrid?style=flat-square" alt="License"></a>
+</p>
 
 **lyrid** turns the music world into a night sky. Every artist is a star, every genre a nebula, similarity forms the routes between them — one canonical map for everyone, with a personal fog of war over it. You light up your own sky by actually listening: previews are scans, full listens are landings, and your scrobbles fuel the journey.
 
@@ -31,4 +35,4 @@ Pre-alpha, and the sky is on screen: 206,636 artists laid out and rendered in We
 
 ## License
 
-[MIT](https://github.com/lacodda/lyrid/blob/main/LICENSE)
+MIT (c) [Kirill Lakhtachev](https://lacodda.com)
