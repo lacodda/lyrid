@@ -1,0 +1,164 @@
+{
+  "app": {
+    "tagline": "a music universe",
+    "status": "{{stars}} stars · level {{level}} · v{{version}}"
+  },
+  "sky": {
+    "label": "The canonical sky: artists as stars, laid out by who is listened to alongside whom. The list of nearest stars beside it is the way through this by keyboard.",
+    "loading": "reading the sky…",
+    "failed": "the sky could not be loaded",
+    "rendererFailed": "the renderer could not start",
+    "nearby": {
+      "heading": "Nearest stars",
+      "hint": "The sky is drawn on a canvas. These are the stars nearest the middle of the view, as a list that can be read and reached by keyboard.",
+      "empty": "No stars in view. Zoom out or pan to find some.",
+      "pick": "{{name}}, {{distance}} from the centre of the view",
+      "distance": "{{value}} away"
+    }
+  },
+  "search": {
+    "placeholder": "find a star",
+    "label": "find a star",
+    "hits": "{{count}} match",
+    "hits_other": "{{count}} matches",
+    "clear": "clear the search"
+  },
+  "halo": {
+    "label": "halo",
+    "colour": {
+      "azure": "azure",
+      "gold": "gold",
+      "rose": "rose",
+      "mint": "mint",
+      "violet": "violet",
+      "white": "white"
+    },
+    "shape": {
+      "ripple": "ripple",
+      "star": "star",
+      "sixfold": "sixfold",
+      "turning": "turning",
+      "both": "both",
+      "glow": "glow"
+    }
+  },
+  "share": {
+    "copyLink": "copy link",
+    "linkCopied": "link copied",
+    "savePoster": "save poster",
+    "copyEmbed": "copy embed",
+    "embedCopied": "embed copied"
+  },
+  "card": {
+    "close": "close",
+    "reading": "reading…",
+    "failed": "could not read this star",
+    "credit": "From <1>{{title}}</1> on Wikipedia, licensed {{licence}}",
+    "more": "more ({{count}} more paragraph)",
+    "more_other": "more ({{count}} more paragraphs)",
+    "less": "less",
+    "labels": "labels",
+    "releases": "releases",
+    "listen": "listen",
+    "play": "▶ play this artist's channel",
+    "channel": "the artist's channel",
+    "shapedBy": "shaped by",
+    "wentOnToShape": "went on to shape",
+    "alongside": "listened to alongside",
+    "bornIn": "born in {{place}}",
+    "formedIn": "formed in {{place}}",
+    "since": "since {{year}}",
+    "years": "{{begin}}–{{end}}"
+  },
+  "embed": {
+    "missing": "That star is not in this sky.",
+    "loading": "One moment.",
+    "more": "see it in the sky"
+  },
+  "account": {
+    "signIn": "sign in",
+    "signOut": "sign out",
+    "newAccount": "new account",
+    "createAccount": "create account",
+    "charterLink": "what lyrid keeps",
+    "close": "close",
+    "email": "email",
+    "password": "password",
+    "newPassword": "new password",
+    "working": "one moment",
+    "failed": "something went wrong",
+    "forgot": "forgot your password?",
+    "backToSignIn": "back to signing in",
+    "sendWayBack": "send me a way back",
+    "forgotHint": "We will send a way back in to that address, if we know it.",
+    "forgotSent": "If we know that address, a way back in is on its way to it.",
+    "unconfirmed": "Address not confirmed — we cannot send you a password reset until it is.",
+    "resend": "send it again",
+    "resent": "letter sent",
+    "resendFailed": "could not send — try later",
+    "showPassword": "show password",
+    "hidePassword": "hide password"
+  },
+  "letter": {
+    "noToken": "That link is missing its token — it was probably cut short on the way here. Copy the whole link out of the letter.",
+    "toTheSky": "to the sky",
+    "confirm": {
+      "title": "Confirming your address",
+      "working": "One moment.",
+      "done": "Your address is confirmed. If you ever lose your password, we can send you a way back in.",
+      "failed": "that link could not be used"
+    },
+    "reset": {
+      "title": "Choose a new password",
+      "submit": "change it",
+      "doneTitle": "Password changed",
+      "done": "Your password is changed, and every browser signed into this account has been signed out. Sign in again with the new one.",
+      "failed": "that link could not be used"
+    }
+  },
+  "charter": {
+    "title": "What lyrid keeps",
+    "back": "back to the sky",
+    "lede": "The sky is public and works without an account. An account exists to remember three things across your machines, and this page is the whole list — not a summary of one.",
+    "noAccount": {
+      "heading": "If you have no account",
+      "body": "Nothing about you is stored on the server. Your marker's shape and colour live in your own browser, and the view you are looking at lives in the address bar. Neither reaches us."
+    },
+    "withAccount": {
+      "heading": "If you do",
+      "address": "Your address.",
+      "addressBody": "To sign you in, and to send you a way back if you lose your password. Two letters, ever: one to confirm the address, one to reset a password. No announcements, no newsletter.",
+      "place": "Where you left the sky, and how you like your marked star drawn.",
+      "placeBody": "The reason an account is worth having.",
+      "sessions": "Your open sessions.",
+      "sessionsBody": "A random token per browser, so signing out actually ends the session rather than waiting for it to expire."
+    },
+    "counted": {
+      "heading": "What is counted, and what is not",
+      "body": "How often each part of lyrid gets used is counted — how many times the radio was opened on a given day, not who opened it. The counters are numbers that go up. There is no row per event, so there is nothing to join back to a person, and no clever query later can turn these into a history of what you looked at.",
+      "never": "What lyrid does not do: build a profile of your taste, sell or share anything with anyone, run third-party analytics or advertising, or track you across other sites."
+    },
+    "whose": {
+      "heading": "Whose sky is it",
+      "body": "The map itself is built from open data — MusicBrainz, ListenBrainz, Discogs, Wikidata and Wikipedia — and belongs to nobody. Your account holds no part of it."
+    },
+    "controls": {
+      "heading": "Your data, in your hands",
+      "signedOut": "Sign in to take your data back or destroy it.",
+      "export": "download everything",
+      "exportFailed": "the file could not be made",
+      "delete": "delete my account",
+      "deleteFailed": "the account could not be deleted",
+      "confirmTitle": "Delete this account?",
+      "confirmBody": "This removes the account, the profile and every session, right now. It cannot be undone and there is no copy to restore from — download your data first if you want it.",
+      "confirmAction": "delete it all",
+      "cancel": "keep it"
+    }
+  },
+  "language": {
+    "label": "language",
+    "system": "system",
+    "en": "English",
+    "ru": "Русский"
+  }
+}

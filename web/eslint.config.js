@@ -17,7 +17,9 @@ export default tseslint.config(
     },
   },
   {
-    files: ['*.config.{js,ts}'],
+    // The config itself and the build-time tools run under Node, not in a
+    // browser: `process`, `console` and `URL` are theirs.
+    files: ['*.config.{js,ts}', 'tools/**/*.mjs'],
     languageOptions: { globals: globals.node },
   },
 )
