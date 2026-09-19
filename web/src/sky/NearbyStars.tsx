@@ -70,10 +70,22 @@ export function NearbyStars({ visible, onPick, className }: Props) {
 
   return (
     <section className={cn(panelVariants(), 'glass flex w-56 flex-col gap-1 p-2', className)} aria-labelledby="nearby-heading">
-      <SectionLabel id="nearby-heading">{t('sky.nearby.heading')}</SectionLabel>
+      {/* `text-dim` over dowel's own `text-faint`. SectionLabel is faint by
+          design, which measures 3.16:1 on the glass -- AA wants 4.5:1. The
+          primitive is not wrong: it is checked against the opaque surfaces the
+          rest of the line puts it on, and this surface is deliberately not
+          one of those. Overridden here rather than in the primitive, and
+          filed as a wish so the system can decide what faint means on glass. */}
+      <SectionLabel id="nearby-heading" className="text-dim">
+        {t('sky.nearby.heading')}
+      </SectionLabel>
       {/* Said once, to whoever reaches the list and wonders what it is for.
-          Small rather than hidden: see the note at the top of this file. */}
-      <p className="m-0 text-2xs text-faint">{t('sky.nearby.hint')}</p>
+          Small rather than hidden: see the note at the top of this file.
+          `dim`, not `faint`: measured at 3.16:1 over the glass, where AA wants
+          4.5:1. `faint` is for decoration, and this is the sentence that
+          explains the one feature on the screen that exists for readability --
+          it has no business being the hardest thing here to read. */}
+      <p className="m-0 text-2xs text-dim">{t('sky.nearby.hint')}</p>
 
       {stars.length === 0 ? (
         <p className="m-0 text-2xs text-dim">{t('sky.nearby.empty')}</p>
