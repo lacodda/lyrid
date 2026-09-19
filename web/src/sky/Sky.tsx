@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { advance } from './flight'
 import { SkyRenderer, type Camera, type Halo, type Star } from './renderer'
@@ -11,6 +12,24 @@ export interface SkyState {
   scale: number
   /** Where the camera is now, so the caller can put it in the address. */
   view: View
+  /**
+   * What the canvas is showing, in layout coordinates.
+   *
+   * Handed out rather than left to the caller to work out. The projection from
+   * a camera and a scale to a rectangle needs the canvas size in device
+   * pixels, which only this component has; a consumer computing it from `view`
+   * alone would be guessing at the viewport, and would be wrong on every
+   * display whose device pixel ratio is not one.
+   */
+  visible: Bounds
+}
+
+/** A rectangle of the layout. */
+export interface Bounds {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
 }
 
 /** Where the camera should be: a place in the sky and how close. */
@@ -52,7 +71,23 @@ interface Props {
  * reconciliation than in drawing.
  */
 export function Sky({ onState, onPick, target, initial, marked, onCapture }: Props) {
+  const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  // `t` in a ref, not in the effect's dependencies. The effect below builds the
+  // WebGL context and starts the render loop; restarting it because the
+  // interface language changed would tear the canvas down and rebuild it, which
+  // is a black flash and a lost camera for a word nobody is reading at that
+  // moment. What the effect needs `t` for is the two failure messages, and
+  // those are written when they happen, in whatever language is showing then.
+  //
+  // Kept current in an effect rather than assigned while rendering: a ref
+  // written during render is read by the render that wrote it, which is the one
+  // ordering React does not promise.
+  const translate = useRef(t)
+  useEffect(() => {
+    translate.current = t
+  }, [t])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -97,7 +132,7 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
     } catch (cause) {
       // Reported after the effect rather than during it: a browser without
       // WebGL2 is a state to show, not a render to cascade.
-      const message = cause instanceof Error ? cause.message : 'the renderer could not start'
+      const message = cause instanceof Error ? cause.message : translate.current('sky.rendererFailed')
       queueMicrotask(() => {
         setError(message)
         setLoading(false)
@@ -206,6 +241,7 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
               level: shownLevel.current,
               scale: camera.current.scale,
               view: { ...camera.current },
+              visible: visibleBounds(camera.current, canvas.width, canvas.height),
             })
           }
           frame = requestAnimationFrame(loop)
@@ -220,7 +256,7 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
         )
       } catch (cause) {
         if (abort.signal.aborted) return
-        setError(cause instanceof Error ? cause.message : 'the sky could not be loaded')
+        setError(cause instanceof Error ? cause.message : translate.current('sky.failed'))
         setLoading(false)
       }
     }
@@ -293,19 +329,50 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
   }, [])
 
   return (
-    <div className="sky">
+    <div className="absolute inset-0">
       <canvas
         ref={canvasRef}
-        className="sky__canvas"
+        className="absolute inset-0 block size-full cursor-grab touch-none active:cursor-grabbing"
+        // The canvas has no children and cannot be reached by keyboard, so it
+        // says what it is and points at the list that can be. The list is the
+        // keyboard path; this is the sentence that says so out loud rather
+        // than leaving a screen reader with an unlabelled rectangle.
+        role="img"
+        aria-label={t('sky.label')}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onWheel={onWheel}
       />
-      {loading && !error && <p className="sky__notice">reading the sky…</p>}
-      {error && <p className="sky__notice sky__notice--error">{error}</p>}
+      {loading && !error && (
+        <p className="pointer-events-none absolute inset-0 m-0 grid place-content-center text-dim">{t('sky.loading')}</p>
+      )}
+      {error && (
+        <p role="alert" className="pointer-events-none absolute inset-0 mx-auto grid max-w-lg place-content-center px-8 text-center text-warn">
+          {error}
+        </p>
+      )}
     </div>
   )
+}
+
+/**
+ * The rectangle of the layout the canvas currently shows.
+ *
+ * The same projection the shader uses, in reverse: the camera is the middle of
+ * the canvas, and a device pixel is `1 / scale` of a layout unit. `y` grows
+ * upward here and downward in the canvas, which is why the vertical pair is
+ * built the same way as the horizontal one rather than flipped.
+ */
+export function visibleBounds(camera: Camera, width: number, height: number): Bounds {
+  const halfWidth = width / 2 / camera.scale
+  const halfHeight = height / 2 / camera.scale
+  return {
+    minX: camera.x - halfWidth,
+    minY: camera.y - halfHeight,
+    maxX: camera.x + halfWidth,
+    maxY: camera.y + halfHeight,
+  }
 }
 
 /** The closest star within `radius` world units, or null. */

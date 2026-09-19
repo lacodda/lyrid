@@ -22,7 +22,10 @@ use sqlx::PgPool;
 use crate::app::AppState;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/api/artists/{id}", get(artist)).route("/api/search", get(search))
+    Router::new()
+        .route("/api/artists/{id}", get(artist))
+        .route("/api/search", get(search))
+        .route("/api/nearby", get(nearby))
 }
 
 /// One artist, as a card shows them.
@@ -635,6 +638,98 @@ async fn run_search(pool: &PgPool, term: &str) -> sqlx::Result<Vec<Hit>> {
     Ok(rows.into_iter().map(|(id, name, comment, x, y)| Hit { id, name, comment, x, y }).collect())
 }
 
+#[derive(Deserialize)]
+struct NearbyQuery {
+    /// The visible rectangle in layout coordinates.
+    min_x: f32,
+    min_y: f32,
+    max_x: f32,
+    max_y: f32,
+}
+
+/// A star in view: enough to name it in a list and to open its card.
+#[derive(Serialize)]
+struct Nearby {
+    id: i32,
+    name: String,
+    comment: Option<String>,
+    x: f32,
+    y: f32,
+}
+
+/// The stars in a rectangle, most prominent first.
+///
+/// This exists for the list beside the canvas, which is how the sky is read by
+/// a keyboard and by a screen reader. It is a question the *server* has to
+/// answer rather than the client: the tiles the canvas draws from carry ids and
+/// positions but no names, and at a wide zoom they are a thinned sample rather
+/// than everything in view — so a client-side list would be a list of the stars
+/// that happened to survive thinning, named by one request each.
+///
+/// Ordered by prominence and not by distance from the middle. A reader asking
+/// "what am I looking at" wants the names worth knowing in this patch of sky,
+/// and the nearest star to the exact centre of an arbitrary pan is nobody in
+/// particular.
+async fn nearby(State(state): State<AppState>, Query(query): Query<NearbyQuery>) -> Response {
+    // A rectangle given the wrong way round is a client bug, not an empty
+    // patch of sky: answering `[]` would send whoever wrote it looking for
+    // missing stars. The bounds are normalised instead, which is the one
+    // reading that cannot be wrong.
+    let (min_x, max_x) = minmax(query.min_x, query.max_x);
+    let (min_y, max_y) = minmax(query.min_y, query.max_y);
+
+    match run_nearby(&state.pool, min_x, min_y, max_x, max_y).await {
+        Ok(stars) => (StatusCode::OK, Json(stars)).into_response(),
+        Err(error) => {
+            tracing::error!(%error, "nearby failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "the sky could not be read" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+fn minmax(a: f32, b: f32) -> (f32, f32) {
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+/// How many names the list carries.
+///
+/// Twelve, the same as the search box. A list long enough to need scrolling is
+/// a second map rather than a way of reading this one, and a reader who wants
+/// more moves the view.
+const NEARBY_LIMIT: i64 = 12;
+
+async fn run_nearby(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f32) -> sqlx::Result<Vec<Nearby>> {
+    // The newest layout, pinned the way the card's own position query pins it:
+    // positions belong to a layout, and a query that joined every layout would
+    // return one star several times over as soon as a second layout exists.
+    let rows = sqlx::query_as::<_, (i32, String, Option<String>, f32, f32)>(
+        "SELECT a.id, a.name, a.comment, p.x, p.y
+         FROM artist_position p
+         JOIN sky_layout l ON l.id = p.layout_id
+         JOIN artist a ON a.id = p.artist_id
+         LEFT JOIN artist_prominence pr
+             ON pr.artist_id = p.artist_id AND pr.metric_id = l.metric_id
+         WHERE l.id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
+           AND p.x BETWEEN $1 AND $3
+           AND p.y BETWEEN $2 AND $4
+         ORDER BY COALESCE(pr.weight, 0) DESC, a.name
+         LIMIT $5",
+    )
+    .bind(min_x)
+    .bind(min_y)
+    .bind(max_x)
+    .bind(max_y)
+    .bind(NEARBY_LIMIT)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.into_iter().map(|(id, name, comment, x, y)| Nearby { id, name, comment, x, y }).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use axum::body::Body;
@@ -762,5 +857,43 @@ mod tests {
     async fn a_non_numeric_artist_id_does_not_reach_the_database() {
         let response = app().oneshot(Request::get("/api/artists/nirvana").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn a_rectangle_given_backwards_is_normalised_rather_than_answered_empty() {
+        // `BETWEEN 5 AND -5` matches nothing in Postgres, so a viewport sent
+        // the wrong way round would report an empty patch of sky -- which
+        // reads as "no stars here" rather than as "you asked wrongly", and
+        // sends whoever wrote the client looking for missing data.
+        assert_eq!(minmax(-5.0, 5.0), (-5.0, 5.0));
+        assert_eq!(minmax(5.0, -5.0), (-5.0, 5.0));
+        // A degenerate rectangle is left alone: a viewport of zero width is a
+        // client that has not measured its canvas yet, and it asks again.
+        assert_eq!(minmax(3.0, 3.0), (3.0, 3.0));
+    }
+
+    #[tokio::test]
+    async fn a_viewport_missing_a_bound_is_a_bad_request_rather_than_a_guess() {
+        // All four bounds or none: defaulting a missing edge to zero would
+        // answer a rectangle nobody asked about, and the answer would look
+        // plausible.
+        let response = app()
+            .oneshot(Request::get("/api/nearby?min_x=0&min_y=0&max_x=1").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_database_makes_the_nearby_list_a_server_error() {
+        let response = app()
+            .oneshot(Request::get("/api/nearby?min_x=-1&min_y=-1&max_x=1&max_y=1").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(body.get("error").is_some(), "an error response should say so: {body}");
     }
 }

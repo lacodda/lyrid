@@ -123,3 +123,35 @@ export async function searchArtists(term: string, signal?: AbortSignal): Promise
   if (!response.ok) throw new Error('the canon could not be searched')
   return (await response.json()) as Hit[]
 }
+
+/**
+ * A star in view: enough to name it in a list and to open its card.
+ *
+ * Distinct from `Hit` although the fields nearly match: a hit has a place only
+ * sometimes (a search can find an artist the layout left out), and a star in
+ * view has one by definition — it was found *by* its place. Merging the two
+ * would make the position optional for both and put a `?? 0` in the caller.
+ */
+export interface NearbyStar {
+  id: number
+  name: string
+  comment: string | null
+  x: number
+  y: number
+}
+
+/** The named stars inside a rectangle of the layout, most prominent first. */
+export async function fetchNearby(
+  bounds: { minX: number; minY: number; maxX: number; maxY: number },
+  signal?: AbortSignal
+): Promise<NearbyStar[]> {
+  const query = new URLSearchParams({
+    min_x: String(bounds.minX),
+    min_y: String(bounds.minY),
+    max_x: String(bounds.maxX),
+    max_y: String(bounds.maxY),
+  })
+  const response = await fetch(`/api/nearby?${query.toString()}`, { signal })
+  if (!response.ok) throw new Error('the sky could not be read')
+  return (await response.json()) as NearbyStar[]
+}

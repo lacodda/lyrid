@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { Sky, type SkyState, type View } from '@/sky/Sky'
+import { NearbyStars } from '@/sky/NearbyStars'
+import { LanguagePicker } from '@/LanguagePicker'
+import { Button } from '@/components/ui/button'
 import { StarCard } from '@/sky/StarCard'
 import { Search } from '@/sky/Search'
 import { readLocation, readPage, writeLocation, type Page } from '@/sky/location'
@@ -13,6 +17,7 @@ import { Charter } from '@/Charter'
 import { Embed } from '@/Embed'
 import { ConfirmPage, ResetPage } from '@/LetterPage'
 import { count } from '@/metrics'
+import { useLanguage } from '@/lib/language'
 import type { Star } from '@/sky/renderer'
 
 /**
@@ -38,6 +43,11 @@ import type { Star } from '@/sky/renderer'
  * did not come for.
  */
 export function App() {
+  const { t } = useTranslation()
+  // The language the numbers are formatted in, which is the resolved locale and
+  // not the stored choice: `system` is a choice, not a language a formatter
+  // understands.
+  const { resolved } = useLanguage()
   const [state, setState] = useState<SkyState | null>(null)
   const [picked, setPicked] = useState<Star | null>(null)
   const [target, setTarget] = useState<View | null>(null)
@@ -232,7 +242,7 @@ export function App() {
   }
 
   return (
-    <main className="app">
+    <main className="relative h-full overflow-hidden">
       <Sky
         onState={onState}
         onPick={onPick}
@@ -242,11 +252,11 @@ export function App() {
         onCapture={onCapture}
       />
 
-      <header className="app__header">
-        <img className="app__mark" src="/mark.svg" alt="" />
+      <header className="pointer-events-none absolute left-6 top-5 flex items-center gap-3">
+        <img className="size-9" src="/mark.svg" alt="" />
         <div>
-          <h1 className="app__title">lyrid</h1>
-          <p className="app__tagline">a music universe</p>
+          <h1 className="m-0 text-lg font-semibold tracking-wide text-text">lyrid</h1>
+          <p className="m-0 text-xs text-dim">{t('app.tagline')}</p>
         </div>
       </header>
 
@@ -261,13 +271,35 @@ export function App() {
         // anything else as the pieces grow -- the defect v0.9.1 fixed, and
         // the reason the account panel joins the stack rather than claiming
         // a corner of its own. The top-right is the search box and the card.
-        <div className="app__corner">
+        //
+        // Bounded to the window, which v0.12 had to add: the stack grew a
+        // tall piece and immediately reproduced that same defect in the other
+        // direction -- at 1280x720 with the sign-in form open it ran 32 px off
+        // the TOP of the screen and took the nearby list's heading with it.
+        // Pinning both edges turns "as tall as it likes" into "as tall as
+        // there is room for", and `justify-end` keeps it growing upward from
+        // the corner it belongs to. Pointer events are handed back per child
+        // so the full-height box does not swallow drags meant for the sky.
+        <div className="pointer-events-none absolute inset-y-4 left-6 flex flex-col items-start justify-end gap-2 [&>*]:pointer-events-auto">
+          {/* The keyboard's way into the sky, first in the stack because it is
+              the one piece here that is not optional: without it the canvas has
+              no reachable content at all. It is also the only piece that can
+              usefully be shorter, so it is the one that shrinks -- `min-h-0`
+              because a flex child will not shrink below its content otherwise. */}
+          <NearbyStars className="min-h-0" visible={state.visible} onPick={goTo} />
           <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} onCharter={openCharter} />
           <HaloPicker shape={shape} colour={colour} onShape={chooseShape} onColour={chooseColour} />
           <Share capture={captureRef} artistId={picked?.artistId ?? null} />
-          <p className="app__status">
-            {state.stars.toLocaleString('en')} stars · level {state.level} · v{__APP_VERSION__}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="pointer-events-none m-0 font-mono text-xs text-dim">
+              {t('app.status', {
+                stars: state.stars.toLocaleString(resolved),
+                level: state.level,
+                version: __APP_VERSION__,
+              })}
+            </p>
+            <LanguagePicker />
+          </div>
         </div>
       )}
     </main>
@@ -282,6 +314,7 @@ export function App() {
  * drawn, at the resolution it is drawn: what is on screen is what is saved.
  */
 function Share({ capture, artistId }: { capture: { current: (() => Promise<Blob | null>) | null }; artistId: number | null }) {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState<'link' | 'embed' | null>(null)
 
   const flash = (what: 'link' | 'embed') => {
@@ -339,10 +372,18 @@ function Share({ capture, artistId }: { capture: { current: (() => Promise<Blob 
   }
 
   return (
-    <div className="app__share">
-      <button onClick={copyLink}>{copied === 'link' ? 'link copied' : 'copy link'}</button>
-      <button onClick={savePoster}>save poster</button>
-      {artistId !== null && <button onClick={copyEmbed}>{copied === 'embed' ? 'embed copied' : 'copy embed'}</button>}
+    <div className="flex gap-2">
+      <Button size="sm" className="glass" onClick={copyLink}>
+        {copied === 'link' ? t('share.linkCopied') : t('share.copyLink')}
+      </Button>
+      <Button size="sm" className="glass" onClick={savePoster}>
+        {t('share.savePoster')}
+      </Button>
+      {artistId !== null && (
+        <Button size="sm" className="glass" onClick={copyEmbed}>
+          {copied === 'embed' ? t('share.embedCopied') : t('share.copyEmbed')}
+        </Button>
+      )}
     </div>
   )
 }
