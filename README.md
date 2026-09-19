@@ -27,7 +27,7 @@ The universe is assembled locally from open dumps and datasets — MusicBrainz, 
 
 ## Status
 
-Pre-alpha, and the sky is on screen: 206,636 artists laid out and rendered in WebGL2 at 60 FPS, running on a Raspberry Pi with accounts, email verification, password recovery and a pressable privacy charter (export and delete, both immediate). Only the creative mode is built; the fog of war comes next. See the [CHANGELOG](https://github.com/lacodda/lyrid/blob/main/CHANGELOG.md) for what landed in each version, and [How lyrid is put together](https://lacodda.github.io/lyrid/guides/architecture/) for the architecture.
+Pre-alpha, and the sky is on screen: 206,636 artists laid out and rendered in WebGL2 at 60 FPS, running on a Raspberry Pi with accounts, email verification, password recovery and a pressable privacy charter (export and delete, both immediate). The interface is built from the line's design system, speaks English and Russian, and the stars in view are listed as text beside the canvas — so the map is reachable by keyboard and by a screen reader. Only the creative mode is built; the fog of war comes next. See the [CHANGELOG](https://github.com/lacodda/lyrid/blob/main/CHANGELOG.md) for what landed in each version, and [How lyrid is put together](https://lacodda.github.io/lyrid/guides/architecture/) for the architecture.
 
 ## Documentation
 

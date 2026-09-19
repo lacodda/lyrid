@@ -3,9 +3,11 @@ title: HTTP API
 description: What the browser asks the server for — and what it deliberately does not.
 ---
 
-The API is thin on purpose. **Browsing the sky never touches it**: the map is
-static tile files, so panning and zooming produce no requests at all beyond
-fetching tiles. These endpoints serve what a click and a search box need.
+The API is thin on purpose. **Browsing the sky barely touches it**: the map is
+static tile files, so panning and zooming fetch tiles and nothing else — with
+one exception, the list of stars in view beside the canvas, which asks
+`/api/nearby` once per settled view because the tiles carry no names. Otherwise
+these endpoints serve what a click and a search box need.
 
 ## `GET /health`
 
@@ -45,6 +47,45 @@ first; after that the most woven-into-the-graph artist leads. Otherwise
 
 Only artists that **have a position** are returned: a result the map cannot
 fly to is a dead end.
+
+## `GET /api/nearby?min_x=…&min_y=…&max_x=…&max_y=…`
+
+The named stars inside a rectangle of the layout, most prominent first, twelve
+at most. All four bounds are required: defaulting a missing edge to zero would
+answer a rectangle nobody asked about, and the answer would look plausible.
+
+```json
+[
+  { "id": 54, "name": "Nirvana", "comment": "1980s–1990s US grunge band", "x": -59.2, "y": -69.5 },
+  { "id": 12389, "name": "Red Hot Chili Peppers", "comment": null, "x": -52.8, "y": -71.3 }
+]
+```
+
+This exists so the sky can be **read by a keyboard and by a screen reader**. A
+WebGL canvas is one element with no children: to anything that is not a pointer
+aimed at a few pixels of light, it is a blank rectangle. The SPA draws the
+answer to this as a list beside the canvas, and that list is the only reachable
+path to a star for a reader who is not using a mouse.
+
+It is a question the server has to answer rather than the client. The tiles the
+canvas draws from carry ids and positions but **no names**, and at a wide zoom
+they are a thinned sample rather than everything in view — so a list built in
+the browser would be the stars that happened to survive thinning, named by one
+request each.
+
+Two details of the ordering:
+
+**By prominence, not by distance from the middle.** A reader asking what they
+are looking at wants the names worth knowing in this patch of sky; the star
+nearest the exact centre of an arbitrary pan is nobody in particular.
+
+**Bounds given the wrong way round are normalised, not answered empty.**
+`BETWEEN 5 AND -5` matches nothing in Postgres, so a viewport sent backwards
+would report an empty patch of sky — which reads as "no stars here" rather
+than as "you asked wrongly".
+
+Positions belong to a layout, and this reads the newest one, the same way the
+card's own position query does.
 
 ## `GET /api/artists/{id}`
 

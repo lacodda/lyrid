@@ -36,7 +36,30 @@ the sky never touches the database.
 React and TypeScript, built by Vite. The sky is not a DOM tree — it is a
 WebGL2 scene with its own renderer, drawing all visible stars in a single
 instanced draw call. React handles everything around it: pages, panels,
-labels, and the accessible text overlay.
+labels, and the list that makes the canvas reachable.
+
+Everything that is not the canvas is built from [dowel](https://lacodda.github.io/dowel),
+the line's design system: its tokens are the vocabulary and its primitives are
+copied into `web/src/components/ui`. No colour is written down in a screen, so
+a screen is correct in whatever accent and theme the product turns out to have.
+Two tokens are lyrid's own — the `--void` behind the stars, and the `--glass`
+that floating chrome is made of, because an opaque panel over a map hides the
+map. Dark is pinned rather than followed: the product is a night sky, and a
+light theme over it would be white panels in space. See
+[ADR 0013](https://github.com/lacodda/lyrid/blob/main/docs/adr/0013-interface-on-dowel.md).
+
+The interface speaks English and Russian, through i18next. English is the
+source language and never a fallback: `web/tools/check-locales.mjs` runs in the
+lint gate and fails the build on a missing key rather than letting an English
+line reach a Russian screen. The canon is not in that layer — an artist's
+name or a Wikipedia extract arrives in whatever language its source wrote it.
+
+**Browsing the sky is almost free of the API.** Panning and zooming fetch tiles
+and nothing else, with one exception: the list of stars in view beside the
+canvas asks `/api/nearby` once per settled view, because the tiles carry no
+names. That list is the keyboard's and the screen reader's only path to a star
+— a canvas is one element with no children. See
+[ADR 0014](https://github.com/lacodda/lyrid/blob/main/docs/adr/0014-the-sky-as-a-list.md).
 
 During development Vite proxies `/health` and `/api` to the API, so the
 browser stays on one origin and no CORS handling exists on either side.
@@ -58,6 +81,8 @@ next to the code it constrains:
 - [0010 · A slice for a small stand](https://github.com/lacodda/lyrid/blob/main/docs/adr/0010-a-slice-for-a-small-stand.md)
 - [0011 · Listening from the canon, not from an API](https://github.com/lacodda/lyrid/blob/main/docs/adr/0011-listening-from-the-canon.md)
 - [0012 · Accounts with a password, sessions in the database](https://github.com/lacodda/lyrid/blob/main/docs/adr/0012-accounts-with-a-password.md)
+- [0013 · The interface is dowel, pinned dark, in two languages](https://github.com/lacodda/lyrid/blob/main/docs/adr/0013-interface-on-dowel.md)
+- [0014 · The sky is also a list, and the server answers what is in view](https://github.com/lacodda/lyrid/blob/main/docs/adr/0014-the-sky-as-a-list.md)
 
 ## Releases
 
