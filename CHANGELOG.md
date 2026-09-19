@@ -2,14 +2,37 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.12.0] - 2026-09-19
+
+### Build
+- Install the dowel registry and its theme
+
+### Documentation
+- Say out loud that anyone can inflate a counter
+- Make the readme a shopfront
+- Drop the duplicate heading, add the badges
+- Record how the interface is built and how the sky is read
+
+### Features
+- Give the interface a language, and two of them
+- Rewrite the screens in the line's vocabulary
+- Make the map reachable without a mouse
+
+### Testing
+- Let the local gate run the suites that need a database
+
 ## [0.11.0] - 2026-09-16
 
 ### Documentation
 - Describe the letters, the charter and what is counted
+- Generate for v0.11.0
 
 ### Features
 - Confirm an address, and give back a lost password
 - Open the doors, and say what is kept
+
+### style
+- Run rustfmt over the brand gate
 
 ## [0.10.0] - 2026-09-01
 
