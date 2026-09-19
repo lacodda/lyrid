@@ -1,6 +1,6 @@
 [package]
 name = "lyrid"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2024"
 rust-version = "1.94"
 description = "A music universe: a canonical sky of artists and genres you explore through real listening"
@@ -45,6 +45,10 @@ ureq = "3.4"
 uuid = { version = "1.26.0", features = ["serde"] }
 
 [dev-dependencies]
+# The integration suites read `.env` for their own database variable, so the
+# local gate checks the same suites CI does. An integration test sees only
+# dev-dependencies, which is why this is listed twice.
+dotenvy = "0.15.7"
 http-body-util = "0.1.5"
 tempfile = "3.27.0"
 

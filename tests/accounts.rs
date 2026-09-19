@@ -9,8 +9,9 @@
 //!
 //! These need a database. Without `LYRID_TEST_DATABASE_URL` they cannot run,
 //! and rather than passing quietly they **fail** — a suite that skips itself
-//! reports success for code nobody executed. CI sets the variable; a
-//! developer who wants the fast path runs `cargo test --bins`.
+//! reports success for code nobody executed. CI sets the variable, and `.env`
+//! sets it locally (`.env.example` carries the line); a developer who wants
+//! the fast path runs `cargo test --bins`.
 //!
 //! Each test works inside a transaction that is rolled back, so a run leaves
 //! the database exactly as it found it.
@@ -24,6 +25,16 @@ use sqlx::{PgPool, Postgres, Transaction};
 /// database by inheriting the variable already in `.env` is how a test suite
 /// ends up writing to something someone cares about.
 fn database_url() -> String {
+    // `.env` is read as well as the environment, so the local gate checks the
+    // same suites CI does without anyone remembering to export a variable
+    // first. Before this, `rigger gate lyrid` could only ever be red here --
+    // and a gate that cannot be green is a gate nobody reads.
+    //
+    // The variable is still its own name and not `DATABASE_URL`: what this
+    // avoids is inheriting a development database by accident, not reading a
+    // file. An absent `.env` is the normal case in CI and not an error.
+    let _ = dotenvy::dotenv();
+
     std::env::var("LYRID_TEST_DATABASE_URL").unwrap_or_else(|_| {
         panic!(
             "LYRID_TEST_DATABASE_URL is not set, so the account rules were not checked.\n\
