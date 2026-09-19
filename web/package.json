@@ -1,6 +1,6 @@
 {
   "name": "lyrid-web",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "A music universe: a canonical sky of artists and genres you explore through real listening.",
   "license": "MIT",
   "private": true,
@@ -9,13 +9,20 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "lint": "eslint . && tsc --noEmit",
+    "lint": "node tools/check-locales.mjs && eslint . && tsc --noEmit",
     "test": "vitest run",
     "prototype": "vite --open /prototype/sky.html"
   },
   "dependencies": {
+    "@base-ui/react": "^1.8.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "class-variance-authority": "^0.7.1",
+    "dowel-ui": "^0.28.1",
+    "i18next": "^26.4.2",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "react-i18next": "^17.0.14",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

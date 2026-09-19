@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwind from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
 import { writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -31,7 +32,7 @@ function benchmarkCollector(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), benchmarkCollector()],
+  plugins: [react(), tailwind(), benchmarkCollector()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
