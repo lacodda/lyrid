@@ -1,3 +1,8 @@
+import { useTranslation } from 'react-i18next'
+import { cn } from 'dowel-ui'
+
+import { Button } from '@/components/ui/button'
+import { SectionLabel } from '@/components/ui/panel'
 import { HALO_SHAPES, type HaloShape } from './renderer'
 
 /**
@@ -30,30 +35,42 @@ interface Props {
 }
 
 export function HaloPicker({ shape, colour, onShape, onColour }: Props) {
-  return (
-    <div className="halo-picker">
-      <span className="halo-picker__label">halo</span>
+  const { t } = useTranslation()
 
-      <div className="halo-picker__row">
+  return (
+    // Dashed on purpose: this is scratch, and the border says so. A solid
+    // panel would be a claim that the arrangement has been decided.
+    <div className="glass flex flex-col gap-1 border-dashed p-2">
+      <SectionLabel>{t('halo.label')}</SectionLabel>
+
+      <div className="flex flex-wrap gap-1">
         {HALO_SHAPES.map(option => (
-          <button
+          <Button
             key={option}
-            className={option === shape ? 'halo-picker__on' : ''}
+            size="sm"
+            variant={option === shape ? 'soft' : 'ghost'}
+            // The shapes are a closed set in the renderer, so their names are
+            // keys rather than free text.
             onClick={() => onShape(option)}
           >
-            {option}
-          </button>
+            {t(`halo.shape.${option}`)}
+          </Button>
         ))}
       </div>
 
-      <div className="halo-picker__row">
+      <div className="flex flex-wrap gap-1">
         {HALO_COLOURS.map(option => (
           <button
             key={option.name}
-            className={`halo-picker__swatch${sameColour(option.rgb, colour) ? ' halo-picker__on' : ''}`}
+            type="button"
+            className={cn(
+              'size-5 cursor-pointer rounded-full border border-line',
+              sameColour(option.rgb, colour) && 'border-accent ring-1 ring-accent'
+            )}
             style={{ background: css(option.rgb) }}
-            title={option.name}
-            aria-label={option.name}
+            title={t(`halo.colour.${option.name}`)}
+            aria-label={t(`halo.colour.${option.name}`)}
+            aria-pressed={sameColour(option.rgb, colour)}
             onClick={() => onColour(option.rgb)}
           />
         ))}

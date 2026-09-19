@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { cn } from 'dowel-ui'
 
 import { searchArtists, type Hit } from '@/api'
+import { panelVariants } from '@/components/ui/panel'
+import { SearchField } from '@/components/ui/search-field'
 import type { Star } from './renderer'
 
 interface Props {
@@ -15,6 +19,7 @@ interface Props {
  * with whichever comes first alphabetically.
  */
 export function Search({ onPick }: Props) {
+  const { t } = useTranslation()
   const [term, setTerm] = useState('')
   const [hits, setHits] = useState<Hit[]>([])
   const timer = useRef<number | undefined>(undefined)
@@ -41,33 +46,36 @@ export function Search({ onPick }: Props) {
   }, [term])
 
   return (
-    <div className="search">
-      <input
-        className="search__input"
+    <div className="absolute right-6 top-5 w-[min(22rem,calc(100vw-3rem))]">
+      <SearchField
+        className="glass"
         value={term}
-        onChange={event => {
-          setTerm(event.target.value)
-          if (event.target.value.trim().length < 2) setHits([])
+        onValueChange={next => {
+          setTerm(next)
+          if (next.trim().length < 2) setHits([])
         }}
-        placeholder="find a star"
-        aria-label="find a star"
+        placeholder={t('search.placeholder')}
+        aria-label={t('search.label')}
+        clearLabel={t('search.clear')}
+        shortcut={['Mod', 'K']}
         spellCheck={false}
       />
 
       {hits.length > 0 && (
-        <ul className="search__hits">
+        <ul className={cn(panelVariants(), 'glass mt-1.5 max-h-[60vh] list-none overflow-y-auto p-1')}>
           {hits.map(hit => (
             <li key={hit.id}>
               <button
-                className="search__hit"
+                type="button"
+                className="block w-full cursor-pointer rounded-sm px-2 py-1.5 text-left hover:bg-accent-soft focus-visible:bg-accent-soft focus-visible:outline-none"
                 onClick={() => {
                   onPick({ artistId: hit.id, x: hit.x ?? 0, y: hit.y ?? 0, brightness: 1 })
                   setTerm('')
                   setHits([])
                 }}
               >
-                <span className="search__hit-name">{hit.name}</span>
-                {hit.comment && <span className="search__hit-comment">{hit.comment}</span>}
+                <span className="block text-sm text-text">{hit.name}</span>
+                {hit.comment && <span className="block text-2xs text-dim">{hit.comment}</span>}
               </button>
             </li>
           ))}

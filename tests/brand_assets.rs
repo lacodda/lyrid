@@ -48,22 +48,33 @@ fn level_for(size: u32) -> &'static str {
 
 #[test]
 fn the_header_mark_is_cut_for_the_size_it_is_drawn_at() {
-    // The SPA header draws it at 2.25rem -- 36 px, the M band. It held the S
-    // tile until v0.11, which at that size is a filled hexagon where the mark
-    // should be. The stylesheet is read rather than assumed, so changing the
-    // size without changing the file fails here instead of on screen.
-    let css = String::from_utf8(read("web/src/styles.css")).expect("the stylesheet is UTF-8");
-    let rule = css.split(".app__mark {").nth(1).expect("the stylesheet still styles the header mark");
-    let width = rule
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("width:"))
-        .and_then(|value| value.trim().strip_suffix("rem;"))
-        .and_then(|value| value.trim().parse::<f32>().ok())
-        .expect("the header mark has a width in rem");
+    // The SPA header draws it at 36 px, the M band. It held the S tile until
+    // v0.11, which at that size is a filled hexagon where the mark should be.
+    // The size is read from where it is written rather than assumed, so
+    // changing it without changing the file fails here instead of on screen.
+    //
+    // Where it is written moved in v0.12: the header used to carry a CSS rule
+    // named `.app__mark`, and since the move to dowel it carries a Tailwind
+    // size utility on the element itself. The reading moved with it -- a gate
+    // left pointing at the stylesheet would have gone on passing against a
+    // rule that is no longer there. `size-N` is N/4 rem, which is the one
+    // thing about the scale this test has to know.
+    let markup = String::from_utf8(read("web/src/App.tsx")).expect("the shell is UTF-8");
+    let tag = markup
+        .split("src=\"/mark.svg\"")
+        .next()
+        .and_then(|before| before.rsplit("<img").next())
+        .expect("the shell still draws the header mark");
+    // Split on the quotes as well as the spaces: the utility arrives inside
+    // `className="size-9"`, which is one whitespace-delimited word.
+    let quarters = tag
+        .split(|c: char| c.is_whitespace() || c == '"')
+        .find_map(|word| word.strip_prefix("size-"))
+        .and_then(|value| value.parse::<u32>().ok())
+        .expect("the header mark has a size utility");
 
     // 1rem is 16 px unless the page says otherwise, and this page does not.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a mark is never a fraction of a pixel wide")]
-    let pixels = (width * 16.0).round() as u32;
+    let pixels = quarters * 16 / 4;
 
     assert_eq!(
         read("web/public/mark.svg"),

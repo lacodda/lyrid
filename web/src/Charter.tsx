@@ -1,7 +1,17 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { deleteAccount, exportAccount, type Me } from '@/account'
 import { count } from '@/metrics'
+import { Button } from '@/components/ui/button'
+import {
+  ConfirmDialog,
+  ConfirmDialogActions,
+  ConfirmDialogClose,
+  ConfirmDialogDescription,
+  ConfirmDialogPopup,
+  ConfirmDialogTitle,
+} from '@/components/ui/confirm-dialog'
 
 /**
  * The privacy charter: a promise, and the two buttons that make it checkable.
@@ -23,60 +33,44 @@ interface Props {
 }
 
 export function Charter({ me, onSignedOut, onClose }: Props) {
+  const { t } = useTranslation()
+
   return (
-    <main className="page">
-      <article className="page__body">
-        <header className="page__head">
-          <h1>What lyrid keeps</h1>
-          <button className="page__close" onClick={onClose}>
-            back to the sky
-          </button>
+    <main className="h-full overflow-y-auto bg-void">
+      <article className="prose mx-auto max-w-2xl px-6 py-10">
+        <header className="mb-6 flex items-baseline justify-between gap-4">
+          <h1 className="m-0">{t('charter.title')}</h1>
+          <Button size="sm" onClick={onClose}>
+            {t('charter.back')}
+          </Button>
         </header>
 
-        <p className="page__lede">
-          The sky is public and works without an account. An account exists to remember three things across your machines, and this page is
-          the whole list — not a summary of one.
-        </p>
+        <p className="text-base text-text">{t('charter.lede')}</p>
 
-        <h2>If you have no account</h2>
-        <p>
-          Nothing about you is stored on the server. Your marker's shape and colour live in your own browser, and the view you are looking
-          at lives in the address bar. Neither reaches us.
-        </p>
+        <h2>{t('charter.noAccount.heading')}</h2>
+        <p>{t('charter.noAccount.body')}</p>
 
-        <h2>If you do</h2>
-        <ul className="page__list">
+        <h2>{t('charter.withAccount.heading')}</h2>
+        <ul>
           <li>
-            <strong>Your address.</strong> To sign you in, and to send you a way back if you lose your password. Two letters, ever: one to
-            confirm the address, one to reset a password. No announcements, no newsletter.
+            <strong>{t('charter.withAccount.address')}</strong> {t('charter.withAccount.addressBody')}
           </li>
           <li>
-            <strong>Where you left the sky, and how you like your marked star drawn.</strong> The reason an account is worth having.
+            <strong>{t('charter.withAccount.place')}</strong> {t('charter.withAccount.placeBody')}
           </li>
           <li>
-            <strong>Your open sessions.</strong> A random token per browser, so signing out actually ends the session rather than waiting
-            for it to expire.
+            <strong>{t('charter.withAccount.sessions')}</strong> {t('charter.withAccount.sessionsBody')}
           </li>
         </ul>
 
-        <h2>What is counted, and what is not</h2>
-        <p>
-          How often each part of lyrid gets used is counted — how many times the radio was opened on a given day, not who opened it. The
-          counters are numbers that go up. There is no row per event, so there is nothing to join back to a person, and no clever query
-          later can turn these into a history of what you looked at.
-        </p>
-        <p className="page__plain">
-          What lyrid does not do: build a profile of your taste, sell or share anything with anyone, run third-party analytics or
-          advertising, or track you across other sites.
-        </p>
+        <h2>{t('charter.counted.heading')}</h2>
+        <p>{t('charter.counted.body')}</p>
+        <p>{t('charter.counted.never')}</p>
 
-        <h2>Whose sky is it</h2>
-        <p>
-          The map itself is built from open data — MusicBrainz, ListenBrainz, Discogs, Wikidata and Wikipedia — and belongs to nobody. Your
-          account holds no part of it.
-        </p>
+        <h2>{t('charter.whose.heading')}</h2>
+        <p>{t('charter.whose.body')}</p>
 
-        {me ? <Controls onSignedOut={onSignedOut} /> : <p className="page__plain">Sign in to take your data back or destroy it.</p>}
+        {me ? <Controls onSignedOut={onSignedOut} /> : <p>{t('charter.controls.signedOut')}</p>}
       </article>
     </main>
   )
@@ -84,12 +78,15 @@ export function Charter({ me, onSignedOut, onClose }: Props) {
 
 /** The promise, as two buttons. */
 function Controls({ onSignedOut }: { onSignedOut: () => void }) {
+  const { t } = useTranslation()
   const [busy, setBusy] = useState<'export' | 'delete' | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Deleting an account cannot be undone, so it is not one press. The second
-  // press is the confirmation -- and the button says what will happen rather
-  // than asking "are you sure?", which is a question nobody reads.
-  const [armed, setArmed] = useState(false)
+  // press used to be a button that changed its own label; it is a dialog now,
+  // which is what a choice that cannot be taken back is made of in this line -
+  // and, unlike the armed button, it announces itself to a screen reader as an
+  // interruption rather than as a label that quietly changed.
+  const [asking, setAsking] = useState(false)
 
   const save = () => {
     setBusy('export')
@@ -106,17 +103,14 @@ function Controls({ onSignedOut }: { onSignedOut: () => void }) {
         setBusy(null)
       },
       (failure: unknown) => {
-        setError(failure instanceof Error ? failure.message : 'the file could not be made')
+        setError(failure instanceof Error ? failure.message : t('charter.controls.exportFailed'))
         setBusy(null)
       }
     )
   }
 
   const destroy = () => {
-    if (!armed) {
-      setArmed(true)
-      return
-    }
+    setAsking(false)
     setBusy('delete')
     setError(null)
     count('data_requested')
@@ -124,34 +118,44 @@ function Controls({ onSignedOut }: { onSignedOut: () => void }) {
       () => {
         onSignedOut()
         setBusy(null)
-        setArmed(false)
       },
       (failure: unknown) => {
-        setError(failure instanceof Error ? failure.message : 'the account could not be deleted')
+        setError(failure instanceof Error ? failure.message : t('charter.controls.deleteFailed'))
         setBusy(null)
-        setArmed(false)
       }
     )
   }
 
   return (
-    <section className="page__controls">
-      <h2>Your data, in your hands</h2>
-      <div className="page__buttons">
-        <button onClick={save} disabled={busy !== null}>
-          {busy === 'export' ? 'one moment' : 'download everything'}
-        </button>
-        <button className="page__danger" onClick={destroy} disabled={busy !== null}>
-          {busy === 'delete' ? 'one moment' : armed ? 'press again to delete it all' : 'delete my account'}
-        </button>
+    <section className="mt-10 border-t border-line pt-6">
+      <h2 className="mt-0">{t('charter.controls.heading')}</h2>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={save} disabled={busy !== null}>
+          {busy === 'export' ? t('account.working') : t('charter.controls.export')}
+        </Button>
+        <Button variant="danger" onClick={() => setAsking(true)} disabled={busy !== null}>
+          {busy === 'delete' ? t('account.working') : t('charter.controls.delete')}
+        </Button>
       </div>
-      {armed && !busy && (
-        <p className="page__warn">
-          This removes the account, the profile and every session, right now. It cannot be undone and there is no copy to restore from —
-          download your data first if you want it.
+
+      <ConfirmDialog open={asking} onOpenChange={setAsking}>
+        <ConfirmDialogPopup>
+          <ConfirmDialogTitle>{t('charter.controls.confirmTitle')}</ConfirmDialogTitle>
+          <ConfirmDialogDescription>{t('charter.controls.confirmBody')}</ConfirmDialogDescription>
+          <ConfirmDialogActions>
+            <ConfirmDialogClose render={<Button>{t('charter.controls.cancel')}</Button>} />
+            <Button variant="danger" onClick={destroy}>
+              {t('charter.controls.confirmAction')}
+            </Button>
+          </ConfirmDialogActions>
+        </ConfirmDialogPopup>
+      </ConfirmDialog>
+
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-bad">
+          {error}
         </p>
       )}
-      {error && <p className="account__error">{error}</p>}
     </section>
   )
 }

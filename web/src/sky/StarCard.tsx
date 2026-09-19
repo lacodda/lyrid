@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
+import { Trans, useTranslation } from 'react-i18next'
+import { cn } from 'dowel-ui'
 
 import { count } from '@/metrics'
 import { fetchArtist, type Artist, type Link, type Neighbour, type Origin } from '@/api'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { panelVariants, SectionLabel } from '@/components/ui/panel'
+import { Spinner } from '@/components/ui/spinner'
 
 interface Props {
   artistId: number
@@ -22,6 +28,7 @@ interface Props {
  * empty section is the normal case, not a failure to render.
  */
 export function StarCard({ artistId, onClose }: Props) {
+  const { t } = useTranslation()
   const [artist, setArtist] = useState<Artist | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -33,52 +40,75 @@ export function StarCard({ artistId, onClose }: Props) {
       .then(setArtist)
       .catch((cause: unknown) => {
         if (abort.signal.aborted) return
-        setError(cause instanceof Error ? cause.message : 'could not read this star')
+        setError(cause instanceof Error ? cause.message : t('card.failed'))
       })
     return () => abort.abort()
-  }, [artistId])
+  }, [artistId, t])
+
+  // Computed unconditionally, before any branch: the facts are three strings
+  // from `t`, and calling for them inside the JSX below would put a hook after
+  // an early return.
+  const facts = artist ? factsOf(artist, t) : []
 
   return (
-    <aside className="card">
-      <button className="card__close" onClick={onClose} aria-label="close">
+    <aside
+      className={cn(
+        panelVariants(),
+        'glass absolute right-6 top-20 flex max-h-[calc(100vh-7rem)] w-[min(22rem,calc(100vw-3rem))] flex-col gap-2 overflow-y-auto p-4'
+      )}
+    >
+      <Button variant="icon" size="icon-sm" className="absolute right-2 top-2" onClick={onClose} aria-label={t('card.close')}>
         ×
-      </button>
+      </Button>
 
-      {!artist && !error && <p className="card__muted">reading…</p>}
-      {error && <p className="card__muted card__muted--error">{error}</p>}
+      {!artist && !error && (
+        <p className="flex items-center gap-2 text-xs text-dim">
+          <Spinner size="sm" label={t('card.reading')} />
+          {t('card.reading')}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="text-xs text-bad">
+          {error}
+        </p>
+      )}
 
       {artist && (
         <>
-          <h2 className="card__name">{artist.name}</h2>
-          {artist.comment && <p className="card__comment">{artist.comment}</p>}
+          <h2 className="m-0 pr-8 text-xl font-semibold tracking-tight text-text">{artist.name}</h2>
+          {artist.comment && <p className="m-0 text-xs text-dim">{artist.comment}</p>}
 
-          <p className="card__facts">{facts(artist).join(' · ')}</p>
+          <p className="m-0 text-xs text-dim">{facts.join(' · ')}</p>
 
           {artist.prose && (
-            <div className="card__prose">
+            <div className="flex flex-col gap-1.5">
               <Extract text={artist.prose.extract} />
               {/* The credit is not decoration and not optional: the extract
                   above is CC BY-SA, and this line is the condition on which it
                   may be shown at all. It renders with the words or not at
                   all, because the two arrive as one value. */}
-              <p className="card__credit">
-                From{' '}
-                <a href={artist.prose.source_url} target="_blank" rel="noreferrer">
-                  {artist.prose.source_title}
-                </a>{' '}
-                on Wikipedia, licensed {artist.prose.licence}
+              <p className="m-0 text-2xs text-faint">
+                <Trans
+                  i18nKey="card.credit"
+                  values={{ title: artist.prose.source_title, licence: artist.prose.licence }}
+                  components={[
+                    <a key="source" className="text-dim underline underline-offset-2" href={artist.prose.source_url} target="_blank" rel="noreferrer" />,
+                  ]}
+                />
               </p>
             </div>
           )}
 
           {artist.genres.length > 0 && (
-            <ul className="card__genres">
+            <ul className="m-0 flex list-none flex-wrap gap-1 p-0">
               {artist.genres.map(genre => (
-                <li key={`${genre.name}-${String(genre.is_style)}`} className="card__genre">
-                  {genre.name}
-                  {/* The weight is what makes the genre honest: how many of
-                      this artist's releases carry it. */}
-                  <span className="card__genre-count">{genre.releases}</span>
+                <li key={`${genre.name}-${String(genre.is_style)}`}>
+                  <Badge variant="soft" className="gap-1">
+                    {genre.name}
+                    {/* The weight is what makes the genre honest: how many of
+                        this artist's releases carry it. */}
+                    <span className="text-faint">{genre.releases}</span>
+                  </Badge>
                 </li>
               ))}
             </ul>
@@ -86,19 +116,19 @@ export function StarCard({ artistId, onClose }: Props) {
 
           {artist.labels.length > 0 && (
             <>
-              <h3 className="card__section">labels</h3>
-              <p className="card__labels">{artist.labels.join(' · ')}</p>
+              <SectionLabel>{t('card.labels')}</SectionLabel>
+              <p className="m-0 text-xs text-dim">{artist.labels.join(' · ')}</p>
             </>
           )}
 
           {artist.releases.length > 0 && (
             <>
-              <h3 className="card__section">releases</h3>
-              <ul className="card__releases">
+              <SectionLabel>{t('card.releases')}</SectionLabel>
+              <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
                 {artist.releases.map(release => (
-                  <li key={`${release.name}-${String(release.year)}`} className="card__release">
-                    <span className="card__release-name">{release.name}</span>
-                    <span className="card__release-year">{release.year ?? ''}</span>
+                  <li key={`${release.name}-${String(release.year)}`} className="flex items-baseline justify-between gap-2 text-xs">
+                    <span className="text-text">{release.name}</span>
+                    <span className="shrink-0 text-faint">{release.year ?? ''}</span>
                   </li>
                 ))}
               </ul>
@@ -109,9 +139,9 @@ export function StarCard({ artistId, onClose }: Props) {
 
           {/* Influence is directed, so the two lists are separate claims and
               never merged into one "related" pile. */}
-          <Names heading="shaped by" people={artist.influenced_by} />
-          <Names heading="went on to shape" people={artist.influenced} />
-          <Names heading="listened to alongside" people={artist.similar.slice(0, 6)} />
+          <Names heading={t('card.shapedBy')} people={artist.influenced_by} />
+          <Names heading={t('card.wentOnToShape')} people={artist.influenced} />
+          <Names heading={t('card.alongside')} people={artist.similar.slice(0, 6)} />
         </>
       )}
     </aside>
@@ -128,17 +158,18 @@ export function StarCard({ artistId, onClose }: Props) {
  * leads are written to have; the rest is there for whoever wants it.
  */
 function Extract({ text }: { text: string }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   // Paragraphs arrive separated by a blank line, as the parser joins them.
   const [first, ...rest] = text.split('\n\n')
-  if (rest.length === 0) return <p className="card__extract">{text}</p>
+  if (rest.length === 0) return <p className="m-0 text-xs leading-relaxed text-text">{text}</p>
 
   return (
     <>
-      <p className="card__extract">{expanded ? text : first}</p>
-      <button className="card__more" onClick={() => setExpanded(!expanded)}>
-        {expanded ? 'less' : `more (${String(rest.length)} more paragraph${rest.length > 1 ? 's' : ''})`}
-      </button>
+      <p className="m-0 text-xs leading-relaxed text-text">{expanded ? text : first}</p>
+      <Button size="sm" className="self-start" onClick={() => setExpanded(!expanded)}>
+        {expanded ? t('card.less') : t('card.more', { count: rest.length })}
+      </Button>
     </>
   )
 }
@@ -153,15 +184,16 @@ function Extract({ text }: { text: string }) {
  * a recording to one.
  */
 function Listen({ links, uploads }: { links: Link[]; uploads: string | null }) {
+  const { t } = useTranslation()
   if (links.length === 0) return null
   return (
     <>
-      <h3 className="card__section">listen</h3>
+      <SectionLabel>{t('card.listen')}</SectionLabel>
       {uploads && <Player uploads={uploads} />}
-      <ul className="card__links">
+      <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 text-xs">
         {links.map(link => (
           <li key={link.url}>
-            <a href={link.url} target="_blank" rel="noreferrer">
+            <a className="text-accent underline-offset-2 hover:underline" href={link.url} target="_blank" rel="noreferrer">
               {link.service}
             </a>
           </li>
@@ -180,25 +212,29 @@ function Listen({ links, uploads }: { links: Link[]; uploads: string | null }) {
  * YouTube at all.
  */
 function Player({ uploads }: { uploads: string }) {
+  const { t } = useTranslation()
   const [playing, setPlaying] = useState(false)
   if (!playing) {
     return (
-      <button
-        className="card__play"
+      <Button
+        variant="soft"
+        size="sm"
+        className="self-start"
         onClick={() => {
           count('listen_opened')
           setPlaying(true)
         }}
       >
-        ▶ play this artist's channel
-      </button>
+        {t('card.play')}
+      </Button>
     )
   }
   return (
-    <div className="card__player">
+    <div className="aspect-video w-full overflow-hidden rounded-md border border-line">
       <iframe
+        className="size-full border-0"
         src={`https://www.youtube-nocookie.com/embed/videoseries?list=${uploads}`}
-        title="the artist's channel"
+        title={t('card.channel')}
         allow="accelerometer; clipboard-write; encrypted-media; picture-in-picture"
         allowFullScreen
       />
@@ -210,8 +246,8 @@ function Names({ heading, people }: { heading: string; people: Neighbour[] }) {
   if (people.length === 0) return null
   return (
     <>
-      <h3 className="card__section">{heading}</h3>
-      <ul className="card__similar">
+      <SectionLabel>{heading}</SectionLabel>
+      <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-0.5 p-0 text-xs text-dim">
         {people.map(person => (
           <li key={person.id}>{person.name}</li>
         ))}
@@ -226,25 +262,31 @@ function Names({ heading, people }: { heading: string; people: Neighbour[] }) {
  * Origin comes from Wikidata and area from MusicBrainz, and they answer
  * different questions — a city against a country — so the more specific one
  * wins when both are known rather than both being printed.
+ *
+ * Takes `t` rather than calling `useTranslation` itself: the place and the
+ * years are sentences now, not fragments joined by hand — "born in Seattle"
+ * and "formed in Seattle" are different claims in every language, and which
+ * preposition goes where is the translator's business rather than this file's.
  */
-function facts(artist: Artist): string[] {
-  const line = [artist.kind, place(artist), years(artist)]
+function factsOf(artist: Artist, t: Translate): string[] {
+  const line = [artist.kind, place(artist, t), years(artist, t)]
   return line.filter((part): part is string => Boolean(part))
 }
 
-function place(artist: Artist): string | null {
+type Translate = ReturnType<typeof useTranslation>['t']
+
+function place(artist: Artist, t: Translate): string | null {
   const origin: Origin | null = artist.origin
   if (!origin?.place) return artist.area
   // "Formed in Seattle" and "born in Seattle" are different claims, and the
   // card says which one it is showing rather than flattening both to "from".
-  const verb = origin.is_birth ? 'born in' : 'formed in'
-  return `${verb} ${origin.place}`
+  return origin.is_birth ? t('card.bornIn', { place: origin.place }) : t('card.formedIn', { place: origin.place })
 }
 
-function years(artist: Artist): string {
+function years(artist: Artist, t: Translate): string {
   // MusicBrainz is curated and wins over Wikidata's inception year; the
   // crowdsourced value only fills a gap rather than overwriting a fact.
   const begin = artist.begin_year ?? artist.origin?.inception_year
   if (!begin) return ''
-  return artist.end_year ? `${String(begin)}–${String(artist.end_year)}` : `since ${String(begin)}`
+  return artist.end_year ? t('card.years', { begin, end: artist.end_year }) : t('card.since', { year: begin })
 }

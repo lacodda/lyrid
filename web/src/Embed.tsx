@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { fetchArtist, type Artist } from '@/api'
 
@@ -16,6 +17,7 @@ import { fetchArtist, type Artist } from '@/api'
  */
 
 export function Embed({ artistId }: { artistId: number }) {
+  const { t } = useTranslation()
   const [artist, setArtist] = useState<Artist | null>(null)
   const [failed, setFailed] = useState(false)
 
@@ -29,38 +31,35 @@ export function Embed({ artistId }: { artistId: number }) {
   }, [artistId])
 
   if (failed) {
-    return (
-      <main className="embed">
-        <p className="embed__empty">That star is not in this sky.</p>
-      </main>
-    )
+    return <Frame>{t('embed.missing')}</Frame>
   }
 
   if (!artist) {
-    return (
-      <main className="embed">
-        <p className="embed__empty">One moment.</p>
-      </main>
-    )
+    return <Frame>{t('embed.loading')}</Frame>
   }
 
   const years = [artist.begin_year, artist.end_year].filter(year => year !== null)
 
   return (
-    <main className="embed">
+    <main className="flex h-full items-stretch bg-void p-3">
       {/* `target="_blank"` because the whole element is inside someone else's
           page: navigating the frame would leave a dead rectangle where the
           widget was, and the reader with no way back. */}
-      <a className="embed__link" href={`/star/${String(artistId)}`} target="_blank" rel="noopener noreferrer">
-        <h1 className="embed__name">{artist.name}</h1>
-        {artist.comment && <p className="embed__comment">{artist.comment}</p>}
+      <a
+        className="glass flex w-full flex-col gap-0.5 px-4 py-3.5 text-text no-underline hover:border-accent"
+        href={`/star/${String(artistId)}`}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <h1 className="m-0 text-lg font-semibold tracking-tight">{artist.name}</h1>
+        {artist.comment && <p className="m-0 text-2xs text-dim">{artist.comment}</p>}
 
-        <p className="embed__facts">
+        <p className="m-0 text-2xs text-dim">
           {[artist.kind, artist.area, years.length > 0 ? years.join('–') : null].filter(Boolean).join(' · ')}
         </p>
 
         {artist.genres.length > 0 && (
-          <p className="embed__genres">
+          <p className="m-0 text-2xs text-accent">
             {artist.genres
               .slice(0, 4)
               .map(genre => genre.name)
@@ -68,11 +67,20 @@ export function Embed({ artistId }: { artistId: number }) {
           </p>
         )}
 
-        <p className="embed__more">
-          <img className="embed__mark" src="/favicon.svg" alt="" />
-          see it in the sky
+        <p className="mt-auto mb-0 flex items-center gap-1.5 pt-2.5 text-2xs text-dim">
+          <img className="size-3.5" src="/favicon.svg" alt="" />
+          {t('embed.more')}
         </p>
       </a>
+    </main>
+  )
+}
+
+/** The rectangle with one sentence in it: loading, or nothing to show. */
+function Frame({ children }: { children: React.ReactNode }) {
+  return (
+    <main className="flex h-full items-stretch bg-void p-3">
+      <p className="m-auto text-xs text-dim">{children}</p>
     </main>
   )
 }
