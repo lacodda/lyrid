@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.12.1] - 2026-09-19
+
+### Bug Fixes
+- Make the list that exists for readability readable
+
 ## [0.12.0] - 2026-09-19
 
 ### Build
@@ -12,6 +17,7 @@ All notable changes to this project are documented in this file.
 - Make the readme a shopfront
 - Drop the duplicate heading, add the badges
 - Record how the interface is built and how the sky is read
+- Generate for v0.12.0
 
 ### Features
 - Give the interface a language, and two of them
