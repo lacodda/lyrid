@@ -2,10 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.13.0] - 2026-09-23
+
+### Documentation
+- Record the instruments and the tile format they rest on
+
+### Features
+- Carry the year, cut on their own, and write names
+- Say why stars are near, compare two, name a region
+- Add the observer's instruments
+
 ## [0.12.1] - 2026-09-19
 
 ### Bug Fixes
 - Make the list that exists for readability readable
+
+### Documentation
+- Generate for v0.12.1
 
 ## [0.12.0] - 2026-09-19
 
