@@ -26,6 +26,29 @@ INFO lyrid::layout::build: tiles written tiles=… kilobytes=…
 Without `--tiles` the positions are stored and no files are cut, which is what
 you want while trying parameters.
 
+## Cutting tiles from a stored layout
+
+```sh
+lyrid tiles --out ./tiles
+```
+
+```
+INFO lyrid::layout::cut: cutting the tile pyramid tiles=63
+INFO lyrid::layout::cut: tiles written tiles=63 kilobytes=2774
+INFO lyrid::layout::cut: labels written labels=148
+```
+
+The layout takes minutes to hours; cutting takes seconds. They are separate
+commands because they change on different clocks — the pyramid changes whenever
+its *format* does, and re-running the forces to ship a format change would be
+absurd. `lyrid tiles` reads the newest stored layout (or `--layout KEY`) back
+from the database, and `lyrid layout --tiles` calls the same code once the
+positions are written, so the two can never cut different skies.
+
+Cut **after** `lyrid slice`, from the database the stand will hold. Tiles cut
+before slicing still carry every star of the full canon, and on a stand
+holding the slice those extra stars draw but open no card.
+
 ## What the layout does
 
 Stars repel each other; edges pull them together. Run that to a settled state
@@ -89,7 +112,8 @@ Same input, same flags, same sky. That is what makes `--key` meaningful.
 
 ```
 tiles/
-  sky.json        the world bounds and record size
+  sky.json        the world bounds, record size and the cut's stamp
+  labels.json     genre and style names, and where to write them
   0/0/0.bin       the whole sky, brightest stars only
   1/0/0.bin  …    four times as many tiles, four times as many stars
 ```
@@ -100,7 +124,7 @@ the star budget, so the bytes per tile stay roughly flat while zooming reveals
 more stars. A star admitted at one level is present at every deeper one, so
 nothing pops in and out as you pan.
 
-The format is deliberately plain — a 16-byte header, then 16-byte records:
+The format is deliberately plain — a 16-byte header, then 20-byte records:
 
 | Bytes | Field |
 | --- | --- |
@@ -108,6 +132,11 @@ The format is deliberately plain — a 16-byte header, then 16-byte records:
 | 4–7 | `x`, `f32` |
 | 8–11 | `y`, `f32` |
 | 12–15 | `brightness`, `f32` in 0..1 |
+| 16–17 | `begin_year`, `i16`, `0` when unknown |
+| 18–19 | reserved |
+
+The [tile format](/lyrid/reference/tile-format/) has the details, including
+`labels.json`.
 
 The client uploads these straight into a GPU buffer, so JSON or protobuf would
 be parsing work per frame for no benefit.

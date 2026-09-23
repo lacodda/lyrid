@@ -29,9 +29,15 @@ tag to rewrite a database with what it already holds.
 On the machine that holds the canon:
 
 ```sh
-lyrid layout --tiles tiles      # positions and the tile pyramid
+lyrid layout                    # positions
 lyrid slice --keep 100000       # the brightest 100,000 artists
+lyrid tiles --out tiles         # the pyramid and the names, from the slice
 ```
+
+The order matters. Tiles cut before the slice carry every star of the full
+canon, and a stand holding only the slice draws those extra stars but opens no
+card for them — which is how the stand ran until v0.13. Cutting after the slice
+means every star on screen is one the stand's database can answer for.
 
 Then dump what is left. Neither this machine nor the stand has a PostgreSQL
 client installed — `pg_dump` lives inside the database container:

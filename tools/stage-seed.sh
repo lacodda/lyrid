@@ -104,7 +104,7 @@ fi
 if [ "$do_tiles" = yes ]; then
     [ -d "$tiles" ] || {
         echo "stage-seed: no tile directory at $tiles" >&2
-        echo "  build one first:  lyrid layout --tiles $tiles" >&2
+        echo "  cut one first:  lyrid tiles --out $tiles" >&2
         exit 1
     }
     [ -f "$tiles/sky.json" ] || {
@@ -121,6 +121,13 @@ if [ "$do_tiles" = yes ]; then
     #
     # --no-same-owner because the tar carries this machine's uid, which means
     # nothing on the stand.
+    #
+    # The old cut is emptied first. Unpacking over it would leave every file
+    # the new cut does not write -- a level the new pyramid stops short of, a
+    # tile of a region now empty -- and the stand would serve two skies at
+    # once. Emptied from inside the container for the same ownership reason.
+    remote "docker compose -f docker-compose.prod.yml exec -T \
+        server sh -c 'find /app/static/tiles -mindepth 1 -delete'"
     tar -C "$tiles" -cf - . | remote "docker compose -f docker-compose.prod.yml exec -T \
         server tar -C /app/static/tiles -xf - --no-same-owner"
 

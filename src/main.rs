@@ -33,6 +33,9 @@ enum Command {
     /// Project the similarity graph into sky coordinates and cut the tile
     /// pyramid. Requires the similarity import to have run first.
     Layout(layout::build::Args),
+    /// Cut a stored layout into the tile pyramid and the names written on it,
+    /// without laying the sky out again.
+    Tiles(layout::cut::Args),
     /// Cut the canon down to the brightest artists, for a stand too small to
     /// hold all of it. Requires the layout to have run first.
     Slice(slice::Args),
@@ -112,6 +115,10 @@ async fn main() -> Result<()> {
         Some(Command::Layout(args)) => {
             let pool = connect(&config).await?;
             layout::build::run(&pool, &args).await
+        }
+        Some(Command::Tiles(args)) => {
+            let pool = connect(&config).await?;
+            layout::cut::run(&pool, &args).await
         }
     }
 }

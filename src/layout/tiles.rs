@@ -19,16 +19,22 @@
 
 use std::io::Write;
 
-/// Bytes per star in a tile: two coordinates, brightness, and the id.
+/// Bytes per star in a tile: the id, two coordinates, brightness, and the year.
 ///
 /// The id is what a click turns into an artist, so it cannot be dropped; at
 /// four bytes it also matches the `MusicBrainz` integer id the canon uses.
-pub const RECORD: usize = 16;
+///
+/// The year arrived in format 2, for the time machine: a slider that lights
+/// stars in the year their act began has to know that year for every star on
+/// screen, and asking the server for it would be the map touching the
+/// database. Two bytes of it, and two reserved so records stay four-byte
+/// aligned for the GPU upload.
+pub const RECORD: usize = 20;
 
 /// Magic and version, so a stale tile from an older layout is refused rather
 /// than drawn as garbage.
 const MAGIC: &[u8; 4] = b"LYST";
-const VERSION: u16 = 1;
+const VERSION: u16 = 2;
 
 /// The header of every tile: 16 bytes, then the records.
 pub const HEADER: usize = 16;
@@ -43,6 +49,10 @@ pub struct Star {
     /// How brightly to draw it, already normalised to 0..1 so the client does
     /// no scaling.
     pub brightness: f32,
+    /// The year the act began, or 0 when the canon does not know it. Zero
+    /// rather than an option because the record is fixed-size, and no act in
+    /// the canon began in year 0.
+    pub begin_year: i16,
 }
 
 /// The square of world space a tile covers.
@@ -223,6 +233,8 @@ pub fn write(tile: &Tile, out: &mut impl Write) -> std::io::Result<()> {
         out.write_all(&star.x.to_le_bytes())?;
         out.write_all(&star.y.to_le_bytes())?;
         out.write_all(&star.brightness.to_le_bytes())?;
+        out.write_all(&star.begin_year.to_le_bytes())?;
+        out.write_all(&[0u8; 2])?; // reserved, keeps the next record aligned
     }
     Ok(())
 }
@@ -248,6 +260,7 @@ mod tests {
             x,
             y,
             brightness,
+            begin_year: 0,
         }
     }
 
@@ -374,7 +387,10 @@ mod tests {
         // shows up as stars in the wrong place rather than as an error.
         let tile = Tile {
             id: TileId { level: 1, col: 0, row: 0 },
-            stars: vec![star(-7, 1.25, -3.5, 0.5)],
+            stars: vec![Star {
+                begin_year: 1969,
+                ..star(-7, 1.25, -3.5, 0.5)
+            }],
         };
         let mut out = Vec::new();
         write(&tile, &mut out).unwrap();
@@ -386,6 +402,21 @@ mod tests {
         assert_eq!(f32::from_le_bytes(out[at + 4..at + 8].try_into().unwrap()), 1.25);
         assert_eq!(f32::from_le_bytes(out[at + 8..at + 12].try_into().unwrap()), -3.5);
         assert_eq!(f32::from_le_bytes(out[at + 12..at + 16].try_into().unwrap()), 0.5);
+        assert_eq!(i16::from_le_bytes(out[at + 16..at + 18].try_into().unwrap()), 1969);
+        assert_eq!(&out[at + 18..at + 20], &[0, 0], "the reserved bytes are zero");
+    }
+
+    #[test]
+    fn the_header_says_format_two() {
+        // A client that still reads 16-byte records must refuse these rather
+        // than draw every star after the first one in the wrong place.
+        let tile = Tile {
+            id: TileId { level: 0, col: 0, row: 0 },
+            stars: vec![star(1, 0.0, 0.0, 1.0)],
+        };
+        let mut out = Vec::new();
+        write(&tile, &mut out).unwrap();
+        assert_eq!(u16::from_le_bytes(out[4..6].try_into().unwrap()), 2);
     }
 
     #[test]

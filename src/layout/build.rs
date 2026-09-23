@@ -11,8 +11,9 @@ use anyhow::{Context, Result, bail};
 use clap::Args as ClapArgs;
 use sqlx::PgPool;
 
+use super::cut;
 use super::force::{self, Graph, Params};
-use super::tiles::{self, Bounds, Plan, Star};
+use super::tiles::Plan;
 
 /// How many rows to send to Postgres at once.
 const BATCH: usize = 8192;
@@ -102,14 +103,14 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
     let layout_id = write_layout(pool, metric_id, &key, &description, args.seed, graph.len()).await?;
     write_positions(pool, layout_id, &graph, &positions).await?;
 
+    // Cut from what was just stored rather than from memory, so this and
+    // `lyrid tiles` are one code path and cannot write different skies.
     if let Some(directory) = &args.tiles {
-        let stars = stars_for_tiles(pool, layout_id, &graph, &positions).await?;
-        let bounds = Bounds::of(&positions.xs, &positions.ys);
         let plan = Plan {
             max_level: args.max_level,
             level0_stars: args.level0_stars,
         };
-        write_tiles(directory, &stars, &bounds, &plan)?;
+        cut::cut(pool, layout_id, directory, &plan).await?;
     }
 
     tracing::info!(layout = %key, stars = graph.len(), "layout complete");
@@ -209,84 +210,5 @@ async fn write_positions(pool: &PgPool, layout_id: i16, graph: &Graph, positions
         written += i64::try_from(chunk.len()).unwrap_or(i64::MAX);
     }
     tracing::info!(rows = written, "positions written");
-    Ok(())
-}
-
-/// Stars for the tile pyramid, brightest first.
-///
-/// Brightness comes from `artist_prominence` — connectivity, which ADR 0004
-/// settled on because no listen counts exist as a dump. It is normalised here
-/// so the client uploads a 0..1 value and does no scaling per frame.
-async fn stars_for_tiles(pool: &PgPool, layout_id: i16, graph: &Graph, positions: &force::Positions) -> Result<Vec<Star>> {
-    let rows: Vec<(i32, f32)> = sqlx::query_as(
-        "SELECT p.artist_id, COALESCE(pr.weight, 0)
-         FROM artist_position p
-         LEFT JOIN sky_layout l ON l.id = p.layout_id
-         LEFT JOIN artist_prominence pr ON pr.artist_id = p.artist_id AND pr.metric_id = l.metric_id
-         WHERE p.layout_id = $1",
-    )
-    .bind(layout_id)
-    .fetch_all(pool)
-    .await
-    .context("failed to read star brightness")?;
-
-    let weights: std::collections::HashMap<i32, f32> = rows.into_iter().collect();
-    // Normalised against the brightest star rather than against a constant:
-    // the scale of connectivity depends on the metric, and a fixed divisor
-    // would wash out one graph and clip another.
-    let max_weight = weights.values().copied().fold(0f32, f32::max).max(f32::MIN_POSITIVE);
-
-    let mut stars: Vec<Star> = (0..graph.len())
-        .map(|i| {
-            let artist_id = graph.artist_ids[i];
-            Star {
-                artist_id,
-                x: positions.xs[i],
-                y: positions.ys[i],
-                // Square root, so the long tail of faint stars stays visible
-                // rather than collapsing to zero: connectivity is heavily
-                // skewed, and a linear scale would show only the hubs.
-                brightness: (weights.get(&artist_id).copied().unwrap_or(0.0) / max_weight).sqrt(),
-            }
-        })
-        .collect();
-
-    // Brightest first: the pyramid is a "brightest wins" filter, and sorting
-    // once here saves sorting per level.
-    stars.sort_by(|a, b| b.brightness.total_cmp(&a.brightness).then(a.artist_id.cmp(&b.artist_id)));
-    Ok(stars)
-}
-
-/// Cuts and writes the pyramid.
-fn write_tiles(directory: &std::path::Path, stars: &[Star], bounds: &Bounds, plan: &Plan) -> Result<()> {
-    let tiles = tiles::build(stars, bounds, plan);
-    tracing::info!(tiles = tiles.len(), "cutting the tile pyramid");
-
-    let mut bytes = 0u64;
-    for tile in &tiles {
-        let path = directory.join(tiles::path(tile.id));
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| format!("cannot create {}", parent.display()))?;
-        }
-        let mut file = std::io::BufWriter::new(std::fs::File::create(&path).with_context(|| format!("cannot write {}", path.display()))?);
-        tiles::write(tile, &mut file)?;
-        bytes += (tiles::HEADER + tile.stars.len() * tiles::RECORD) as u64;
-    }
-
-    // The bounds belong with the tiles: without them a client cannot turn a
-    // screen position into a tile, and they are a property of this layout
-    // rather than of the product.
-    let meta = format!(
-        "{{\"min_x\":{},\"min_y\":{},\"max_x\":{},\"max_y\":{},\"max_level\":{},\"record_bytes\":{}}}",
-        bounds.min_x,
-        bounds.min_y,
-        bounds.max_x,
-        bounds.max_y,
-        tiles.iter().map(|t| t.id.level).max().unwrap_or(0),
-        tiles::RECORD
-    );
-    std::fs::write(directory.join("sky.json"), meta).context("cannot write the tile metadata")?;
-
-    tracing::info!(tiles = tiles.len(), kilobytes = bytes / 1024, "tiles written");
     Ok(())
 }
