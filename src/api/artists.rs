@@ -19,6 +19,7 @@ use axum::{Json, Router, routing::get};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
+use crate::api::relations::{Why, why_many};
 use crate::app::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -26,6 +27,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/artists/{id}", get(artist))
         .route("/api/search", get(search))
         .route("/api/nearby", get(nearby))
+        .route("/api/stars", get(stars))
+        .route("/api/region", get(region))
 }
 
 /// One artist, as a card shows them.
@@ -45,8 +48,9 @@ struct Artist {
     position: Option<Position>,
     /// Genres by weight, strongest first.
     genres: Vec<Genre>,
-    /// Nearest neighbours in the similarity graph.
-    similar: Vec<Neighbour>,
+    /// Nearest neighbours in the similarity graph, each with the reasons the
+    /// canon can give for the edge.
+    similar: Vec<Alongside>,
     /// Where the act comes from, as Wikidata records it.
     origin: Option<Origin>,
     /// Labels the act has been signed to.
@@ -144,6 +148,19 @@ struct Neighbour {
     score: f32,
 }
 
+/// A neighbour in the similarity graph, and why it is one.
+///
+/// Its own type rather than a field on `Neighbour`: an influence list is
+/// already its own reason, and an empty `why` on every influence would be a
+/// promise the card never keeps.
+#[derive(Serialize)]
+struct Alongside {
+    id: i32,
+    name: String,
+    score: f32,
+    why: Why,
+}
+
 async fn artist(State(state): State<AppState>, Path(id): Path<i32>) -> Response {
     match load_artist(&state.pool, id).await {
         Ok(Some(artist)) => (StatusCode::OK, Json(artist)).into_response(),
@@ -214,28 +231,7 @@ async fn load_artist(pool: &PgPool, id: i32) -> sqlx::Result<Option<Artist>> {
     .map(|(name, is_style, releases)| Genre { name, is_style, releases })
     .collect();
 
-    // Similarity is stored once per unordered pair, so neighbours come from
-    // both columns.
-    //
-    // The metric is pinned for the same reason as in `influences`: an edge is
-    // keyed by (metric_id, source_id, target_id), and a second metric would
-    // otherwise put the same neighbour in the list once per metric, on scores
-    // that are not comparable across metrics anyway.
-    let similar = sqlx::query_as::<_, (i32, String, f32)>(
-        "SELECT other.id, other.name, e.score
-         FROM artist_similarity e
-         JOIN artist other ON other.id = CASE WHEN e.source_id = $1 THEN e.target_id ELSE e.source_id END
-         WHERE (e.source_id = $1 OR e.target_id = $1)
-           AND e.metric_id = (SELECT max(id) FROM similarity_metric)
-         ORDER BY e.score DESC
-         LIMIT 10",
-    )
-    .bind(id)
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|(id, name, score)| Neighbour { id, name, score })
-    .collect();
+    let similar = alongside(pool, id).await?;
 
     let listen = listen(pool, id).await?;
     let youtube_uploads = listen
@@ -277,6 +273,45 @@ async fn load_artist(pool: &PgPool, id: i32) -> sqlx::Result<Option<Artist>> {
         listen,
         youtube_uploads,
     }))
+}
+
+/// The nearest neighbours, each with the reasons the canon gives for the edge.
+async fn alongside(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Alongside>> {
+    // Similarity is stored once per unordered pair, so neighbours come from
+    // both columns.
+    //
+    // The metric is pinned for the same reason as in `influences`: an edge is
+    // keyed by (metric_id, source_id, target_id), and a second metric would
+    // otherwise put the same neighbour in the list once per metric, on scores
+    // that are not comparable across metrics anyway.
+    let neighbours = sqlx::query_as::<_, (i32, String, f32)>(
+        "SELECT other.id, other.name, e.score
+         FROM artist_similarity e
+         JOIN artist other ON other.id = CASE WHEN e.source_id = $1 THEN e.target_id ELSE e.source_id END
+         WHERE (e.source_id = $1 OR e.target_id = $1)
+           AND e.metric_id = (SELECT max(id) FROM similarity_metric)
+         ORDER BY e.score DESC
+         LIMIT 10",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    let ids: Vec<i32> = neighbours.iter().map(|n| n.0).collect();
+    let mut reasons = why_many(&mut *pool.acquire().await?, id, &ids).await?;
+    Ok(neighbours
+        .into_iter()
+        .map(|(other, name, score)| Alongside {
+            id: other,
+            name,
+            score,
+            // The edge is the co-listening reason, so it is filled from the
+            // score already in hand rather than asked for a second time.
+            why: Why {
+                co_listening: Some(score),
+                ..reasons.remove(&other).unwrap_or_default()
+            },
+        })
+        .collect())
 }
 
 /// Where the act comes from, resolved from Wikidata item ids into words.
@@ -579,7 +614,7 @@ struct SearchQuery {
 }
 
 /// A search hit: enough to list it and to fly to it.
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct Hit {
     id: i32,
     name: String,
@@ -636,6 +671,80 @@ async fn run_search(pool: &PgPool, term: &str) -> sqlx::Result<Vec<Hit>> {
     .await?;
 
     Ok(rows.into_iter().map(|(id, name, comment, x, y)| Hit { id, name, comment, x, y }).collect())
+}
+
+#[derive(Deserialize)]
+struct StarsQuery {
+    /// Comma-separated artist ids, in the order they are wanted back.
+    ids: String,
+}
+
+/// How many stars one request may name.
+///
+/// The same bound a route in the address has: this endpoint exists so a route
+/// of stars can be drawn without opening a card per stop, and a route is a
+/// walk through the sky, not an export of it.
+pub const MAX_STARS: usize = 50;
+
+/// A few named stars, with their places: what a route needs to draw itself.
+///
+/// Returned in the order asked, because a route's order is its meaning; an id
+/// the canon does not know is left out rather than failing the rest, since one
+/// stale stop should not erase a route someone sent.
+async fn stars(State(state): State<AppState>, Query(query): Query<StarsQuery>) -> Response {
+    let Some(ids) = parse_ids(&query.ids) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": format!("ids must be 1 to {MAX_STARS} numbers separated by commas") })),
+        )
+            .into_response();
+    };
+
+    match run_stars(&state.pool, &ids).await {
+        Ok(stars) => (StatusCode::OK, Json(stars)).into_response(),
+        Err(error) => {
+            tracing::error!(%error, "reading stars failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "the canon could not be read" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// `"54,962,120"` -> the ids, or `None` when the list is empty, too long, or
+/// holds anything that is not a positive id.
+///
+/// All or nothing: a list with one garbled entry is a garbled address, and
+/// answering the part that parsed would draw a route with a stop silently
+/// missing. Repeats are kept -- a route may come back to where it started.
+fn parse_ids(raw: &str) -> Option<Vec<i32>> {
+    let ids: Vec<i32> = raw
+        .split(',')
+        .map(|part| part.trim().parse::<i32>().ok().filter(|id| *id > 0))
+        .collect::<Option<_>>()?;
+    (!ids.is_empty() && ids.len() <= MAX_STARS).then_some(ids)
+}
+
+async fn run_stars(pool: &PgPool, ids: &[i32]) -> sqlx::Result<Vec<Hit>> {
+    let rows = sqlx::query_as::<_, (i32, String, Option<String>, Option<f32>, Option<f32>)>(
+        "SELECT a.id, a.name, a.comment, p.x, p.y
+         FROM artist a
+         LEFT JOIN artist_position p
+             ON p.artist_id = a.id
+            AND p.layout_id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
+         WHERE a.id = ANY($1)",
+    )
+    .bind(ids)
+    .fetch_all(pool)
+    .await?;
+
+    let by_id: std::collections::HashMap<i32, Hit> = rows
+        .into_iter()
+        .map(|(id, name, comment, x, y)| (id, Hit { id, name, comment, x, y }))
+        .collect();
+    Ok(ids.iter().filter_map(|id| by_id.get(id)).cloned().collect())
 }
 
 #[derive(Deserialize)]
@@ -728,6 +837,83 @@ async fn run_nearby(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f3
     .await?;
 
     Ok(rows.into_iter().map(|(id, name, comment, x, y)| Nearby { id, name, comment, x, y }).collect())
+}
+
+/// What the middle of the view is: its commonest main style and genre.
+#[derive(Serialize)]
+struct Region {
+    style: Option<String>,
+    genre: Option<String>,
+}
+
+/// How many of the most prominent stars in the rectangle are asked what they
+/// are. Enough for a majority to mean something, few enough that a view of the
+/// whole canon is not a count over millions of rows.
+const REGION_SAMPLE: i64 = 300;
+
+/// Where the camera is, in the canon's words.
+///
+/// The compass's "where am I". Answered by the stars themselves rather than by
+/// the names written on the map: measured on the slice, a dozen name anchors
+/// sit within 25 units of the core's middle, so "the nearest name" there is a
+/// coin toss -- Marvin Gaye's patch came out as Pop Rock. Asking the stars in
+/// view which style is most often their main one says what the patch *is*.
+async fn region(State(state): State<AppState>, Query(query): Query<NearbyQuery>) -> Response {
+    let (min_x, max_x) = minmax(query.min_x, query.max_x);
+    let (min_y, max_y) = minmax(query.min_y, query.max_y);
+    match run_region(&state.pool, min_x, min_y, max_x, max_y).await {
+        Ok(region) => (StatusCode::OK, Json(region)).into_response(),
+        Err(error) => {
+            tracing::error!(%error, "region failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "the sky could not be read" })),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn run_region(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f32) -> sqlx::Result<Region> {
+    // The sample is the same "most prominent in the rectangle" the nearby list
+    // reads; each star then votes with its main genre and its main style, the
+    // same "main" the names on the map are built from.
+    let rows = sqlx::query_as::<_, (String, bool)>(
+        "WITH sample AS (
+             SELECT p.artist_id
+             FROM artist_position p
+             JOIN sky_layout l ON l.id = p.layout_id
+             LEFT JOIN artist_prominence pr ON pr.artist_id = p.artist_id AND pr.metric_id = l.metric_id
+             WHERE l.id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
+               AND p.x BETWEEN $1 AND $3
+               AND p.y BETWEEN $2 AND $4
+             ORDER BY COALESCE(pr.weight, 0) DESC
+             LIMIT $5
+         ),
+         main AS (
+             SELECT DISTINCT ON (ag.artist_id, g.is_style) g.name, g.is_style
+             FROM sample
+             JOIN artist_genre ag ON ag.artist_id = sample.artist_id
+             JOIN genre g ON g.id = ag.genre_id
+             ORDER BY ag.artist_id, g.is_style, ag.releases DESC, g.name
+         )
+         SELECT DISTINCT ON (is_style) name, is_style
+         FROM (SELECT name, is_style, count(*) AS votes FROM main GROUP BY name, is_style) tally
+         ORDER BY is_style, votes DESC, name",
+    )
+    .bind(min_x)
+    .bind(min_y)
+    .bind(max_x)
+    .bind(max_y)
+    .bind(REGION_SAMPLE)
+    .fetch_all(pool)
+    .await?;
+
+    let pick = |style: bool| rows.iter().find(|row| row.1 == style).map(|row| row.0.clone());
+    Ok(Region {
+        style: pick(true),
+        genre: pick(false),
+    })
 }
 
 #[cfg(test)]
@@ -881,6 +1067,40 @@ mod tests {
             .oneshot(Request::get("/api/nearby?min_x=0&min_y=0&max_x=1").body(Body::empty()).unwrap())
             .await
             .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn a_list_of_ids_is_read_whole_or_not_at_all() {
+        assert_eq!(parse_ids("54,962,120"), Some(vec![54, 962, 120]));
+        assert_eq!(parse_ids(" 7 , 7 "), Some(vec![7, 7]), "a route may return to a star");
+        // One garbled stop is a garbled address, not a shorter route.
+        assert_eq!(parse_ids("54,x,120"), None);
+        assert_eq!(parse_ids("54,,120"), None);
+        assert_eq!(parse_ids("54,-1"), None);
+        assert_eq!(parse_ids(""), None);
+    }
+
+    #[test]
+    fn a_list_of_ids_has_the_same_bound_as_a_route() {
+        let fifty = (1..=50).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+        assert_eq!(parse_ids(&fifty).map(|ids| ids.len()), Some(50));
+        let fifty_one = (1..=51).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+        assert_eq!(parse_ids(&fifty_one), None);
+    }
+
+    #[tokio::test]
+    async fn a_region_missing_a_bound_is_a_bad_request_rather_than_a_guess() {
+        let response = app()
+            .oneshot(Request::get("/api/region?min_x=0&min_y=0&max_x=1").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn a_garbled_list_of_stars_is_a_bad_request_before_the_database() {
+        let response = app().oneshot(Request::get("/api/stars?ids=1,two").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 

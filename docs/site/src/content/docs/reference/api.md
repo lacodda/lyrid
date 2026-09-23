@@ -109,7 +109,14 @@ each, the neighbours from co-listening.
     { "name": "Rock", "is_style": false, "releases": 314 },
     { "name": "Grunge", "is_style": true, "releases": 303 }
   ],
-  "similar": [{ "id": 12389, "name": "Red Hot Chili Peppers", "score": 0.0141 }],
+  "similar": [
+    {
+      "id": 12389,
+      "name": "Red Hot Chili Peppers",
+      "score": 0.0141,
+      "why": { "genres": ["Alternative Rock", "Rock"], "co_listening": 0.0141, "influence": null }
+    }
+  ],
   "origin": {
     "place": "Aberdeen",
     "country": "United States",
@@ -137,6 +144,80 @@ each, the neighbours from co-listening.
 
 `404` for an unknown id; a non-numeric id is a `400` from routing and never
 reaches the database.
+
+### Why a neighbour is one
+
+Each entry in `similar` carries `why`: the reasons the canon gives for the edge,
+computed by the same code as [`/api/compare`](#get-apicomparea-b), so a card and
+a comparison never explain one pair two ways.
+
+| Field | Meaning |
+| --- | --- |
+| `genres` | Styles, then genres, that **both** carry — each at least a tenth of *each* discography. Three at most, most shared first |
+| `co_listening` | The edge's score, when the two are listened to together |
+| `influence` | `shaped_by` (the neighbour shaped this artist), `went_on_to_shape`, `mutual`, or `null` |
+
+The tenth is a floor measured against a wrong answer: counted by releases,
+Marvin Gaye and Nirvana came out as "both Electronic, Stage & Screen, Electro"
+— one remix and one soundtrack each. A shared genre has to be part of what both
+artists are.
+
+## `GET /api/compare?a=…&b=…`
+
+Two stars side by side: what joins them, their genres as shares of each one's
+own discography, and the stars both are listened alongside.
+
+```json
+{
+  "why": { "genres": ["Soul", "Rhythm & Blues", "Funk / Soul"], "co_listening": 0.388, "influence": null },
+  "spectrum": [
+    { "name": "Funk / Soul", "is_style": false, "a": 0.811, "b": 0.832 },
+    { "name": "Pop", "is_style": false, "a": 0.073, "b": 0.098 }
+  ],
+  "shared_neighbours": [{ "id": 12783, "name": "Four Tops", "score": 0.272 }]
+}
+```
+
+**Shares, not counts**: a prolific act and a sparse one are compared by what
+their work is, not by how much of it there is. Genres and styles are shared out
+separately — Discogs tags a release with both, and summing across the two would
+count one record twice. Up to six genre bands and eight style bands, the ones
+that matter most to either star; a band one star is all about and the other has
+none of is kept, because that difference is what a comparison is for.
+
+A shared neighbour's `score` is the weaker of its two edges. `404` when either
+star is unknown; `400` for a star compared with itself.
+
+## `GET /api/stars?ids=…`
+
+Several stars by id — up to 50, the same bound a route in the address has —
+with their places, in the order asked:
+
+```json
+[
+  { "id": 962, "name": "Marvin Gaye", "comment": null, "x": -5.50, "y": 7.09 },
+  { "id": 132, "name": "The Temptations", "comment": "Motown soul vocal group", "x": -2.43, "y": 15.49 }
+]
+```
+
+The order is kept because a route's order is its meaning. An id the canon does
+not know is left out rather than failing the rest; a list with anything that is
+not a positive id is a `400` whole — one garbled stop is a garbled address, not
+a shorter route.
+
+## `GET /api/region?min_x=…&min_y=…&max_x=…&max_y=…`
+
+What a patch of sky is: the commonest **main** style and genre among the 300
+most prominent stars in the rectangle. The compass asks it about the middle half
+of the view.
+
+```json
+{ "style": "House", "genre": "Electronic" }
+```
+
+Answered by the stars, not by the names written on the map: in the dense core a
+dozen name anchors sit within a few units of each other, and "the nearest name"
+there is a coin toss. Same rectangle rules as `/api/nearby`.
 
 **`position` comes from the newest layout.** An older one would place the star
 somewhere the map does not draw it. `brightness` there is the raw graph weight
@@ -233,6 +314,8 @@ client:
 ```
 sky_opened      card_opened     listen_opened
 view_shared     charter_read    data_requested
+lens_used       time_travelled  stars_compared
+route_opened
 ```
 
 A name outside the list answers `404`. The list is what stops a client
