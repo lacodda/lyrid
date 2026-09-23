@@ -5,7 +5,7 @@ import { cn } from 'dowel-ui'
 import { fetchNearby, type NearbyStar } from '@/api'
 import { panelVariants, SectionLabel } from '@/components/ui/panel'
 import type { Bounds } from './Sky'
-import type { Star } from './renderer'
+import type { Place } from './renderer'
 
 /**
  * The sky, as a list.
@@ -33,7 +33,7 @@ interface Props {
   /** What the canvas is showing. Changes on every frame the camera moves. */
   visible: Bounds
   /** Opening a star from the list does what clicking it on the canvas does. */
-  onPick: (star: Star) => void
+  onPick: (star: Place) => void
   className?: string
 }
 
@@ -96,7 +96,7 @@ export function NearbyStars({ visible, onPick, className }: Props) {
               <button
                 type="button"
                 className="block w-full cursor-pointer rounded-sm px-1.5 py-1 text-left text-xs text-text hover:bg-accent-soft focus-visible:bg-accent-soft focus-visible:outline-none"
-                onClick={() => onPick({ artistId: star.id, x: star.x, y: star.y, brightness: 1 })}
+                onClick={() => onPick({ artistId: star.id, x: star.x, y: star.y })}
               >
                 {star.name}
                 {star.comment && <span className="block text-2xs text-dim">{star.comment}</span>}

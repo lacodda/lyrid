@@ -12,7 +12,17 @@
  */
 
 /** The mechanics the server counts. Kept in step with `src/api/metrics.rs`. */
-export type Mechanic = 'sky_opened' | 'card_opened' | 'listen_opened' | 'view_shared' | 'charter_read' | 'data_requested'
+export type Mechanic =
+  | 'sky_opened'
+  | 'card_opened'
+  | 'listen_opened'
+  | 'view_shared'
+  | 'charter_read'
+  | 'data_requested'
+  | 'lens_used'
+  | 'time_travelled'
+  | 'stars_compared'
+  | 'route_opened'
 
 /**
  * Counts one use.

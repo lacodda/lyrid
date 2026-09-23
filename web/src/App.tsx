@@ -1,16 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Sky, type SkyState, type View } from '@/sky/Sky'
+import { Sky, type Overview, type SkyState, type View } from '@/sky/Sky'
 import { NearbyStars } from '@/sky/NearbyStars'
+import { Instruments } from '@/sky/Instruments'
+import { Compass } from '@/sky/Compass'
+import type { Side } from '@/sky/Compare'
+import { RoutePanel } from '@/sky/RoutePanel'
+import { addStop, removeStop } from '@/sky/route'
+import { fetchLabels, type Label } from '@/sky/labels'
 import { LanguagePicker } from '@/LanguagePicker'
 import { Button } from '@/components/ui/button'
 import { StarCard } from '@/sky/StarCard'
 import { Search } from '@/sky/Search'
 import { readLocation, readPage, writeLocation, type Page } from '@/sky/location'
 import { HaloPicker, HALO_COLOURS, HALO_DEFAULT } from '@/sky/HaloPicker'
-import { HALO_SHAPES, type HaloShape } from '@/sky/renderer'
-import { fetchArtist } from '@/api'
+import { HALO_SHAPES, type HaloShape, type Instruments as InstrumentSettings } from '@/sky/renderer'
+import { fetchArtist, fetchStars, type Hit } from '@/api'
 import { AccountPanel } from '@/AccountPanel'
 import { fetchMe, saveProfile, worthSaving, type Me } from '@/account'
 import { Charter } from '@/Charter'
@@ -18,7 +24,11 @@ import { Embed } from '@/Embed'
 import { ConfirmPage, ResetPage } from '@/LetterPage'
 import { count } from '@/metrics'
 import { useLanguage } from '@/lib/language'
-import type { Star } from '@/sky/renderer'
+import type { Place, Star } from '@/sky/renderer'
+
+// The spectrograph is opened on purpose and rarely, so it is fetched when it
+// is, rather than weighing on every visit's first load.
+const Compare = lazy(() => import('@/sky/Compare').then(module => ({ default: module.Compare })))
 
 /**
  * The sky fills the window; everything else floats over it.
@@ -49,7 +59,7 @@ export function App() {
   // understands.
   const { resolved } = useLanguage()
   const [state, setState] = useState<SkyState | null>(null)
-  const [picked, setPicked] = useState<Star | null>(null)
+  const [picked, setPicked] = useState<Place | null>(null)
   const [target, setTarget] = useState<View | null>(null)
   const [me, setMe] = useState<Me | null>(null)
 
@@ -87,11 +97,95 @@ export function App() {
   }, [])
 
   // A star chosen by name or arrived at by link has to be found first.
-  const goTo = useCallback((star: Star) => {
+  const goTo = useCallback((star: Place) => {
     setPicked(star)
     count('card_opened')
     setTarget({ x: star.x, y: star.y, scale: 8 })
   }, [])
+
+  // A star named somewhere without its place — a neighbour on a card, a
+  // shared neighbour in a comparison — is looked up and then flown to. A star
+  // the layout left out has nowhere to fly, so nothing happens rather than a
+  // flight to the origin.
+  const openById = useCallback(
+    (id: number) => {
+      void fetchStars([id]).then(
+        ([hit]) => {
+          if (hit?.x != null && hit.y != null) goTo({ artistId: hit.id, x: hit.x, y: hit.y })
+        },
+        () => undefined
+      )
+    },
+    [goTo]
+  )
+
+  // ---------------------------------------------------------- instruments
+  const [instruments, setInstruments] = useState<InstrumentSettings>({ lens: false, until: null })
+
+  // The whole sky small, for the minimap, and the names written on it. Both
+  // arrive once the sky has loaded, so the names are asked for in the same
+  // cut the tiles came from.
+  const [overview, setOverview] = useState<Overview | null>(null)
+  const [labels, setLabels] = useState<Label[]>([])
+  const onOverview = useCallback((next: Overview) => {
+    setOverview(next)
+    void fetchLabels(next.sky).then(setLabels, () => undefined)
+  }, [])
+
+  // ------------------------------------------------------------ comparison
+  // A star held up for comparison waits here until a second one is opened.
+  const [pinned, setPinned] = useState<Side | null>(null)
+  const [comparing, setComparing] = useState<[Side, Side] | null>(null)
+
+  // ----------------------------------------------------------------- route
+  const [route, setRoute] = useState<number[]>(() => opened.route ?? [])
+  const [stops, setStops] = useState<Hit[]>([])
+  const [routeAt, setRouteAt] = useState<number | null>(null)
+
+  // Arriving by a route link opens its first stop, once — the link is a walk,
+  // and a walk starts somewhere. Done where the stops land rather than in an
+  // effect watching them, so it happens exactly when they are known.
+  const routeOpened = useRef(false)
+
+  // The names and places of the stops, asked for in one request whenever the
+  // route changes. Ids the canon does not know drop out of the list — one
+  // stale stop in a link someone sent should not erase the rest of the walk.
+  useEffect(() => {
+    if (route.length === 0) return
+    const abort = new AbortController()
+    fetchStars(route, abort.signal).then(hits => {
+      setStops(hits)
+      if (routeOpened.current || !opened.route) return
+      routeOpened.current = true
+      count('route_opened')
+      const first = hits[0]
+      if (opened.view || first?.x == null || first.y == null) return
+      setRouteAt(0)
+      goTo({ artistId: first.id, x: first.x, y: first.y })
+    }, () => undefined)
+    return () => abort.abort()
+  }, [route, opened, goTo])
+
+  // An empty route shows no stops, whatever the last answer held: derived
+  // here rather than cleared in the effect, so there is one moment it changes.
+  const shownStops = useMemo(() => (route.length === 0 ? [] : stops), [route, stops])
+
+  // Placed stops only: a line can only be drawn through stars that have a
+  // place on this sky.
+  const routeLine = useMemo(
+    () => shownStops.filter(stop => stop.x != null && stop.y != null).map(stop => ({ x: stop.x ?? 0, y: stop.y ?? 0 })),
+    [shownStops]
+  )
+
+  const goToStop = useCallback(
+    (index: number) => {
+      const stop = shownStops[index]
+      if (!stop || stop.x == null || stop.y == null) return
+      setRouteAt(index)
+      goTo({ artistId: stop.id, x: stop.x, y: stop.y })
+    },
+    [shownStops, goTo]
+  )
 
   // A link to a star carries an id, not a position: the card knows where it
   // is, so the position is fetched and the camera flies there.
@@ -102,7 +196,7 @@ export function App() {
     fetchArtist(artistId, abort.signal)
       .then(artist => {
         const at = artist.position
-        setPicked({ artistId, x: at?.x ?? 0, y: at?.y ?? 0, brightness: at?.brightness ?? 1 })
+        setPicked({ artistId, x: at?.x ?? 0, y: at?.y ?? 0 })
         // A fragment in the link wins: it says where the sender was looking,
         // which may be a wide view holding this star among others.
         if (!view && at) setTarget({ x: at.x, y: at.y, scale: 8 })
@@ -204,11 +298,11 @@ export function App() {
     // write over it would replace `/charter` with `/` on the first frame the
     // sky renders behind it.
     if (page) return
-    const next = writeLocation({ artistId: picked?.artistId ?? null, view: state.view })
+    const next = writeLocation({ artistId: picked?.artistId ?? null, view: state.view, route })
     if (next !== window.location.pathname + window.location.hash) {
       window.history.replaceState(null, '', next)
     }
-  }, [state, picked, page])
+  }, [state, picked, page, route])
 
   // Where the sky was left, saved for next time. The camera changes on every
   // frame, so this asks whether the view has really moved before spending a
@@ -250,6 +344,10 @@ export function App() {
         initial={opened.view}
         marked={picked && { x: picked.x, y: picked.y, shape, colour }}
         onCapture={onCapture}
+        instruments={instruments}
+        route={routeLine}
+        labels={labels}
+        onOverview={onOverview}
       />
 
       <header className="pointer-events-none absolute left-6 top-5 flex items-center gap-3">
@@ -262,9 +360,77 @@ export function App() {
 
       <Search onPick={goTo} />
 
-      {/* Keyed by the star: picking another one mounts a fresh card rather
-          than leaving the previous artist on screen while the new one loads. */}
-      {picked && <StarCard key={picked.artistId} artistId={picked.artistId} onClose={() => setPicked(null)} />}
+      {/* The right-hand column under the search box: the card, the route and
+          the compass. One column with a ceiling, for the reason the left stack
+          has one -- pieces that grow must push each other rather than land on
+          each other -- and the card is the piece that yields, scrolling inside
+          itself. */}
+      <div className="pointer-events-none absolute bottom-4 right-6 top-20 flex flex-col items-end justify-end gap-2 [&>*]:pointer-events-auto">
+        {/* Keyed by the star: picking another one mounts a fresh card rather
+            than leaving the previous artist on screen while the new one loads. */}
+        {picked && (
+          <StarCard
+            key={picked.artistId}
+            className="mb-auto min-h-0"
+            artistId={picked.artistId}
+            onClose={() => setPicked(null)}
+            onOpen={openById}
+            onAddToRoute={side => {
+              if (route.length === 0) count('route_opened')
+              setRoute(current => addStop(current, side.id))
+            }}
+            pinned={pinned}
+            onPin={setPinned}
+            onCompare={side => {
+              if (!pinned) return
+              count('stars_compared')
+              setComparing([pinned, side])
+            }}
+          />
+        )}
+        {shownStops.length > 0 && (
+          <RoutePanel
+            className="shrink-0"
+            stops={shownStops}
+            at={routeAt}
+            onGo={goToStop}
+            onRemove={index => {
+              setRoute(current => removeStop(current, index))
+              setRouteAt(null)
+            }}
+            onClear={() => {
+              setRoute([])
+              setRouteAt(null)
+            }}
+          />
+        )}
+        {overview && state && (
+          <Compass className="hidden shrink-0 md:flex" overview={overview} view={state.view} visible={state.visible} onNavigate={setTarget} />
+        )}
+      </div>
+
+      {comparing && (
+        <Suspense fallback={null}>
+          <Compare
+            a={comparing[0]}
+            b={comparing[1]}
+            onClose={() => setComparing(null)}
+            onOpen={id => {
+              setComparing(null)
+              openById(id)
+            }}
+          />
+        </Suspense>
+      )}
+
+      {state && (
+        // Not on a phone's width: there the card already covers the stack,
+        // and two more panels would bury the sky. A narrow layout of its own
+        // is a stage of its own.
+        <div className="pointer-events-none absolute left-6 top-20 hidden md:block [&>*]:pointer-events-auto">
+          <Instruments value={instruments} onChange={setInstruments} />
+        </div>
+      )}
 
       {state && (
         // One stack in the bottom-left, so nothing can land on top of
@@ -280,7 +446,7 @@ export function App() {
         // there is room for", and `justify-end` keeps it growing upward from
         // the corner it belongs to. Pointer events are handed back per child
         // so the full-height box does not swallow drags meant for the sky.
-        <div className="pointer-events-none absolute inset-y-4 left-6 flex flex-col items-start justify-end gap-2 [&>*]:pointer-events-auto">
+        <div className="pointer-events-none absolute bottom-4 left-6 top-4 flex md:top-72 flex-col items-start justify-end gap-2 [&>*]:pointer-events-auto">
           {/* The keyboard's way into the sky, first in the stack because it is
               the one piece here that is not optional: without it the canvas has
               no reachable content at all. It is also the only piece that can

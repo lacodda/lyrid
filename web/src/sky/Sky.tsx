@@ -2,8 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { advance } from './flight'
-import { SkyRenderer, type Camera, type Halo, type Star } from './renderer'
+import { layerFor, placeLabels, type Label } from './labels'
+import { SkyRenderer, type Camera, type Halo, type Instruments, type Star } from './renderer'
 import { fetchLevel, fetchSky, levelFor, neighbouringLevels, tileAction, type Sky as SkyMeta, type Tile } from './tiles'
+
+/** The whole sky at a glance: its extent and its brightest stars. */
+export interface Overview {
+  sky: SkyMeta
+  stars: Star[]
+}
 
 /** What the sky is doing, for the caller to show around it. */
 export interface SkyState {
@@ -61,6 +68,18 @@ interface Props {
    * rarely, so instead one frame is drawn and read on the spot.
    */
   onCapture?: (capture: () => Promise<Blob | null>) => void
+  /** The era lens and the time machine. */
+  instruments?: Instruments
+  /** A route's stops, in order, drawn joined. */
+  route?: readonly { x: number; y: number }[]
+  /** Genre and style names to write on the sky. */
+  labels?: readonly Label[]
+  /**
+   * Handed the sky's extent and its level-0 stars once they have loaded, for
+   * whatever draws the sky small — the minimap. Handed over rather than
+   * fetched twice: the level is already in memory here.
+   */
+  onOverview?: (overview: Overview) => void
 }
 
 /**
@@ -70,9 +89,13 @@ interface Props {
  * entirely. A component that re-rendered per frame would spend more time in
  * reconciliation than in drawing.
  */
-export function Sky({ onState, onPick, target, initial, marked, onCapture }: Props) {
+export function Sky({ onState, onPick, target, initial, marked, onCapture, instruments, route, labels, onOverview }: Props) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  // Names are text, and text on a WebGL canvas means a glyph atlas; a 2D
+  // canvas laid over it draws them with the browser's own fonts instead, in
+  // the same frame, for a few dozen names.
+  const namesRef = useRef<HTMLCanvasElement>(null)
 
   // `t` in a ref, not in the effect's dependencies. The effect below builds the
   // WebGL context and starts the render loop; restarting it because the
@@ -111,6 +134,26 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
     markedRef.current = marked ?? null
   }, [marked])
 
+  // The same arrangement for everything else the loop reads per frame.
+  const instrumentsRef = useRef<Instruments>({ lens: false, until: null })
+  useEffect(() => {
+    instrumentsRef.current = instruments ?? { lens: false, until: null }
+  }, [instruments])
+  const labelsRef = useRef<readonly Label[]>([])
+  useEffect(() => {
+    labelsRef.current = labels ?? []
+  }, [labels])
+  // The route is uploaded when it changes, not per frame; the loop picks up a
+  // pending one on its next frame, once the renderer exists.
+  const pendingRoute = useRef<readonly { x: number; y: number }[] | null>(null)
+  useEffect(() => {
+    pendingRoute.current = route ?? []
+  }, [route])
+  const onOverviewRef = useRef(onOverview)
+  useEffect(() => {
+    onOverviewRef.current = onOverview
+  }, [onOverview])
+
   // A pending capture, resolved by the render loop on the next frame it draws.
   const pendingCapture = useRef<((blob: Blob | null) => void) | null>(null)
 
@@ -143,11 +186,20 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
     // The device pixel ratio is clamped: fill rate is the risk in a
     // glow-heavy scene, and a 3x buffer triples it for no visible gain on
     // points this small (ADR 0003, confirmed in ADR 0009).
+    const names = namesRef.current
+    const context = names?.getContext('2d') ?? null
     const resize = () => {
       const ratio = Math.min(window.devicePixelRatio || 1, 1.5)
       canvas.width = Math.floor(canvas.clientWidth * ratio)
       canvas.height = Math.floor(canvas.clientHeight * ratio)
       renderer.resize(canvas.width, canvas.height)
+      // The names at the full device ratio, not the clamped one: the clamp is
+      // about glow fill rate, and blurry text costs legibility for nothing.
+      if (names) {
+        const textRatio = window.devicePixelRatio || 1
+        names.width = Math.floor(names.clientWidth * textRatio)
+        names.height = Math.floor(names.clientHeight * textRatio)
+      }
     }
     resize()
     window.addEventListener('resize', resize)
@@ -168,9 +220,10 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
           scale: canvas.width / (sky.max_x - sky.min_x),
         }
 
-        const level0 = await fetchLevel(0, '/tiles', abort.signal)
+        const level0 = await fetchLevel(sky, 0, '/tiles', abort.signal)
         levels.current.set(0, level0)
         setLoading(false)
+        onOverviewRef.current?.({ sky, stars: level0.stars })
 
         const loop = (now: number) => {
           if (!running) return
@@ -184,7 +237,7 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
               // lands the previous level keeps drawing, so zooming never shows
               // an empty sky.
               levels.current.set(wanted, { packed: new Float32Array(0), stars: [] })
-              void fetchLevel(wanted, '/tiles', abort.signal).then(
+              void fetchLevel(sky, wanted, '/tiles', abort.signal).then(
                 loaded => levels.current.set(wanted, loaded),
                 () => {
                   // Without this the placeholder stays forever and the level
@@ -204,7 +257,7 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
               for (const near of neighbouringLevels(sky, wanted)) {
                 if (levels.current.has(near)) continue
                 levels.current.set(near, { packed: new Float32Array(0), stars: [] })
-                void fetchLevel(near, '/tiles', abort.signal).then(
+                void fetchLevel(sky, near, '/tiles', abort.signal).then(
                   loaded => levels.current.set(near, loaded),
                   () => {
                     // A prefetch that fails is not a failure: the level is
@@ -214,6 +267,11 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
                   }
                 )
               }
+            }
+
+            if (pendingRoute.current) {
+              renderer.setRoute(pendingRoute.current)
+              pendingRoute.current = null
             }
 
             const wantsCapture = pendingCapture.current
@@ -227,8 +285,12 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
               [canvas.width, canvas.height],
               now * 0.001,
               reduceMotion.matches ? 0 : 1,
-              markedRef.current
+              markedRef.current,
+              instrumentsRef.current
             )
+            if (names && context) {
+              drawNames(context, names, sky, camera.current, canvas.width, labelsRef.current)
+            }
             // Read while the frame is still in the colour buffer: after this
             // callback returns, the browser is free to discard it.
             if (wantsCapture) {
@@ -344,6 +406,9 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture }: Pro
         onPointerUp={onPointerUp}
         onWheel={onWheel}
       />
+      {/* Hidden from assistive technology: the names are the same words the
+          compass says out loud, and a reader does not need them twice. */}
+      <canvas ref={namesRef} aria-hidden="true" className="pointer-events-none absolute inset-0 block size-full" />
       {loading && !error && (
         <p className="pointer-events-none absolute inset-0 m-0 grid place-content-center text-dim">{t('sky.loading')}</p>
       )}
@@ -372,6 +437,54 @@ export function visibleBounds(camera: Camera, width: number, height: number): Bo
     minY: camera.y - halfHeight,
     maxX: camera.x + halfWidth,
     maxY: camera.y + halfHeight,
+  }
+}
+
+/**
+ * Writes the names that suit the view onto the overlay.
+ *
+ * The overlay is in its own device pixels, which may differ from the star
+ * canvas's clamped ones, so the camera's scale is converted before placing.
+ */
+function drawNames(
+  context: CanvasRenderingContext2D,
+  names: HTMLCanvasElement,
+  sky: SkyMeta,
+  camera: Camera,
+  starWidth: number,
+  labels: readonly Label[]
+): void {
+  context.clearRect(0, 0, names.width, names.height)
+  if (labels.length === 0 || starWidth === 0) return
+  const layer = layerFor(sky, starWidth / camera.scale)
+  if (!layer) return
+
+  const ratio = names.width / starWidth
+  const size = Math.round((layer === 'genre' ? 13 : 12) * (names.width / names.clientWidth))
+  // Genres in small capitals and spaced out, as a map letters a region;
+  // styles in italic, as it letters a feature inside one.
+  context.font = layer === 'genre' ? `600 ${String(size)}px system-ui, sans-serif` : `italic 500 ${String(size)}px system-ui, sans-serif`
+  context.letterSpacing = layer === 'genre' ? `${String(size * 0.18)}px` : '0px'
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+
+  const text = (label: Label) => (layer === 'genre' ? label.name.toUpperCase() : label.name)
+  const placed = placeLabels(
+    labels,
+    layer,
+    { x: camera.x, y: camera.y, scale: camera.scale * ratio },
+    { width: names.width, height: names.height },
+    name => context.measureText(layer === 'genre' ? name.toUpperCase() : name).width,
+    size * 1.4
+  )
+  for (const { label, x, y } of placed) {
+    // A dark outline first, so a name crossing a bright cluster stays
+    // readable; then the fill in the interface's dim ink.
+    context.lineWidth = size * 0.3
+    context.strokeStyle = 'rgba(7, 8, 13, 0.85)'
+    context.strokeText(text(label), x, y)
+    context.fillStyle = layer === 'genre' ? 'rgba(214, 222, 240, 0.72)' : 'rgba(190, 204, 232, 0.8)'
+    context.fillText(text(label), x, y)
   }
 }
 

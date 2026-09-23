@@ -77,6 +77,21 @@ export interface Link {
   url: string
 }
 
+/** Why two stars are near each other, in the canon's own words. */
+export interface Why {
+  /** Genres and styles both carry, most shared first, three at most. */
+  genres: string[]
+  /** The co-listening score of the edge, when there is one. */
+  co_listening: number | null
+  /** An influence between them, read from the first star's side. */
+  influence: 'shaped_by' | 'went_on_to_shape' | 'mutual' | null
+}
+
+/** A neighbour in the similarity graph, and why it is one. */
+export interface Alongside extends Neighbour {
+  why: Why
+}
+
 /** Everything a card shows about one star. */
 export interface Artist {
   id: number
@@ -89,7 +104,7 @@ export interface Artist {
   end_year: number | null
   position: { x: number; y: number; brightness: number } | null
   genres: Genre[]
-  similar: Neighbour[]
+  similar: Alongside[]
   origin: Origin | null
   labels: string[]
   /** Directed, so the two lists are different facts and stay apart. */
@@ -124,6 +139,38 @@ export async function searchArtists(term: string, signal?: AbortSignal): Promise
   return (await response.json()) as Hit[]
 }
 
+/** One band of a comparison: how much of each star's work carries a genre. */
+export interface SpectrumLine {
+  name: string
+  is_style: boolean
+  a: number
+  b: number
+}
+
+/** Two stars side by side. */
+export interface Comparison {
+  why: Why
+  spectrum: SpectrumLine[]
+  shared_neighbours: Neighbour[]
+}
+
+export async function fetchComparison(a: number, b: number, signal?: AbortSignal): Promise<Comparison> {
+  const response = await fetch(`/api/compare?a=${String(a)}&b=${String(b)}`, { signal })
+  if (!response.ok) throw new Error(response.status === 404 ? 'no such artist' : 'the canon could not be read')
+  return (await response.json()) as Comparison
+}
+
+/**
+ * Several stars by id, in the order asked, with their places: what a route
+ * needs to draw itself. Ids the canon does not know are left out.
+ */
+export async function fetchStars(ids: readonly number[], signal?: AbortSignal): Promise<Hit[]> {
+  if (ids.length === 0) return []
+  const response = await fetch(`/api/stars?ids=${ids.join(',')}`, { signal })
+  if (!response.ok) throw new Error('the canon could not be read')
+  return (await response.json()) as Hit[]
+}
+
 /**
  * A star in view: enough to name it in a list and to open its card.
  *
@@ -138,6 +185,27 @@ export interface NearbyStar {
   comment: string | null
   x: number
   y: number
+}
+
+/** What a patch of sky is: the commonest main style and genre of its stars. */
+export interface Region {
+  style: string | null
+  genre: string | null
+}
+
+export async function fetchRegion(
+  bounds: { minX: number; minY: number; maxX: number; maxY: number },
+  signal?: AbortSignal
+): Promise<Region> {
+  const query = new URLSearchParams({
+    min_x: String(bounds.minX),
+    min_y: String(bounds.minY),
+    max_x: String(bounds.maxX),
+    max_y: String(bounds.maxY),
+  })
+  const response = await fetch(`/api/region?${query.toString()}`, { signal })
+  if (!response.ok) throw new Error('the sky could not be read')
+  return (await response.json()) as Region
 }
 
 /** The named stars inside a rectangle of the layout, most prominent first. */

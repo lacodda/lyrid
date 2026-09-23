@@ -3,15 +3,28 @@ import { Trans, useTranslation } from 'react-i18next'
 import { cn } from 'dowel-ui'
 
 import { count } from '@/metrics'
-import { fetchArtist, type Artist, type Link, type Neighbour, type Origin } from '@/api'
+import { fetchArtist, type Alongside, type Artist, type Link, type Neighbour, type Origin } from '@/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { panelVariants, SectionLabel } from '@/components/ui/panel'
 import { Spinner } from '@/components/ui/spinner'
+import type { Side } from './Compare'
+import { reasons } from './why'
 
 interface Props {
   artistId: number
+  className?: string
   onClose: () => void
+  /** Opens another star by id — a neighbour named on this card. */
+  onOpen: (id: number) => void
+  /** Adds this star to the end of the route. */
+  onAddToRoute: (side: Side) => void
+  /** The star held for a comparison, if one is. */
+  pinned: Side | null
+  /** Holds this star for a comparison with the next one opened. */
+  onPin: (side: Side) => void
+  /** Compares this star with the held one. */
+  onCompare: (side: Side) => void
 }
 
 /**
@@ -27,10 +40,11 @@ interface Props {
  * of three million have no encyclopaedia article and no influence links, so an
  * empty section is the normal case, not a failure to render.
  */
-export function StarCard({ artistId, onClose }: Props) {
+export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare }: Props) {
   const { t } = useTranslation()
   const [artist, setArtist] = useState<Artist | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [added, setAdded] = useState(false)
 
   useEffect(() => {
     const abort = new AbortController()
@@ -54,7 +68,8 @@ export function StarCard({ artistId, onClose }: Props) {
     <aside
       className={cn(
         panelVariants(),
-        'glass absolute right-6 top-20 flex max-h-[calc(100vh-7rem)] w-[min(22rem,calc(100vw-3rem))] flex-col gap-2 overflow-y-auto p-4'
+        'glass relative flex w-[min(22rem,calc(100vw-3rem))] flex-col gap-2 overflow-y-auto p-4',
+        className
       )}
     >
       <Button variant="icon" size="icon-sm" className="absolute right-2 top-2" onClick={onClose} aria-label={t('card.close')}>
@@ -79,6 +94,29 @@ export function StarCard({ artistId, onClose }: Props) {
           {artist.comment && <p className="m-0 text-xs text-dim">{artist.comment}</p>}
 
           <p className="m-0 text-xs text-dim">{facts.join(' · ')}</p>
+
+          {/* The two instruments that act on this star and another: walking
+              to it as part of a route, and holding it up against a second. */}
+          <div className="flex flex-wrap gap-1.5">
+            <Button
+              size="sm"
+              onClick={() => {
+                onAddToRoute({ id: artist.id, name: artist.name })
+                setAdded(true)
+              }}
+            >
+              {added ? t('card.addedToRoute') : t('card.addToRoute')}
+            </Button>
+            {pinned && pinned.id !== artist.id ? (
+              <Button size="sm" onClick={() => onCompare({ id: artist.id, name: artist.name })}>
+                {t('card.compareWith', { name: pinned.name })}
+              </Button>
+            ) : (
+              <Button size="sm" disabled={pinned?.id === artist.id} onClick={() => onPin({ id: artist.id, name: artist.name })}>
+                {pinned?.id === artist.id ? t('card.pinned') : t('card.pin')}
+              </Button>
+            )}
+          </div>
 
           {artist.prose && (
             <div className="flex flex-col gap-1.5">
@@ -139,9 +177,9 @@ export function StarCard({ artistId, onClose }: Props) {
 
           {/* Influence is directed, so the two lists are separate claims and
               never merged into one "related" pile. */}
-          <Names heading={t('card.shapedBy')} people={artist.influenced_by} />
-          <Names heading={t('card.wentOnToShape')} people={artist.influenced} />
-          <Names heading={t('card.alongside')} people={artist.similar.slice(0, 6)} />
+          <Names heading={t('card.shapedBy')} people={artist.influenced_by} onOpen={onOpen} />
+          <Names heading={t('card.wentOnToShape')} people={artist.influenced} onOpen={onOpen} />
+          <Neighbours people={artist.similar.slice(0, 6)} onOpen={onOpen} />
         </>
       )}
     </aside>
@@ -242,17 +280,57 @@ function Player({ uploads }: { uploads: string }) {
   )
 }
 
-function Names({ heading, people }: { heading: string; people: Neighbour[] }) {
+function Names({ heading, people, onOpen }: { heading: string; people: Neighbour[]; onOpen: (id: number) => void }) {
   if (people.length === 0) return null
   return (
     <>
       <SectionLabel>{heading}</SectionLabel>
-      <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-0.5 p-0 text-xs text-dim">
+      <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-0.5 p-0 text-xs">
         {people.map(person => (
-          <li key={person.id}>{person.name}</li>
+          <li key={person.id}>
+            <NameButton name={person.name} onClick={() => onOpen(person.id)} />
+          </li>
         ))}
       </ul>
     </>
+  )
+}
+
+/**
+ * The neighbours, each with why it is one.
+ *
+ * A name alone says only that people listen to the two together; the line
+ * under it says what the canon knows about the pair — shared genres, and an
+ * influence with its direction — which is what turns an edge on the map into
+ * something learned.
+ */
+function Neighbours({ people, onOpen }: { people: Alongside[]; onOpen: (id: number) => void }) {
+  const { t } = useTranslation()
+  if (people.length === 0) return null
+  return (
+    <>
+      <SectionLabel>{t('card.alongside')}</SectionLabel>
+      <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
+        {people.map(person => {
+          const said = reasons(person.why, t)
+          return (
+            <li key={person.id} className="flex flex-col">
+              <NameButton name={person.name} onClick={() => onOpen(person.id)} />
+              {said.length > 0 && <span className="text-2xs text-dim">{said.join(' · ')}</span>}
+            </li>
+          )
+        })}
+      </ul>
+    </>
+  )
+}
+
+/** A name that opens its star: a link in look, a button in behaviour. */
+function NameButton({ name, onClick }: { name: string; onClick: () => void }) {
+  return (
+    <button type="button" className="cursor-pointer self-start text-left text-accent underline-offset-2 hover:underline" onClick={onClick}>
+      {name}
+    </button>
   )
 }
 

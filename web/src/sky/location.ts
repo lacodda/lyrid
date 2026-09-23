@@ -18,6 +18,11 @@
  * A fragment is also never sent to the server, which is the honest description
  * of what it is — a client-side bookmark.
  *
+ * A **route** is a third thing worth pointing at: several stars in an order,
+ * `/route/54,962,120`. It lives in the path because, like a star, it is what
+ * the link is about — and it is the seed of the playlists-as-routes the plan
+ * holds for later, so its address is part of the contract from the start.
+ *
  * Three paths are not the map at all — `/charter`, `/confirm` and `/reset`.
  * They are pages, and `readPage` tells them apart from a star. Two of them
  * carry a token in the query string rather than in the fragment, because a
@@ -33,14 +38,42 @@ export interface Location {
   artistId: number | null
   /** Where the camera was pointed, if the URL says. */
   view: View | null
+  /** A route's stops in order, when the address is a route. */
+  route?: number[] | null
 }
+
+/**
+ * How many stops a route may have.
+ *
+ * The server holds the same bound for the request that names them. Fifty is a
+ * long evening of listening; beyond it an address stops being something a
+ * person sends and becomes an export.
+ */
+export const MAX_ROUTE = 50
 
 /** Reads the current address. */
 export function readLocation(): Location {
   return {
     artistId: readArtistId(window.location.pathname),
     view: readView(window.location.hash),
+    route: readRoute(window.location.pathname),
   }
+}
+
+/**
+ * `/route/54,962,120` -> [54, 962, 120]; anything else -> null.
+ *
+ * All or nothing, as the server reads it: one garbled stop is a garbled link,
+ * and dropping it quietly would send the recipient along a different route
+ * than the one they were sent. A stop may repeat — a route can come back.
+ */
+export function readRoute(pathname: string): number[] | null {
+  const match = /^\/route\/([^/]+)\/?$/.exec(pathname)
+  if (!match?.[1]) return null
+  const parts = match[1].split(',')
+  if (parts.length > MAX_ROUTE) return null
+  const ids = parts.map(part => (/^\d+$/.test(part) ? Number(part) : NaN))
+  return ids.every(id => Number.isSafeInteger(id) && id > 0) ? ids : null
 }
 
 /** A page that is not the map. */
@@ -112,8 +145,15 @@ export function readView(hash: string): View | null {
  * URL twice as long for digits nobody can see, and a shared link is read by
  * people.
  */
-export function writeLocation({ artistId, view }: Location): string {
-  const path = artistId === null ? '/' : `/star/${String(artistId)}`
+export function writeLocation({ artistId, view, route }: Location): string {
+  // A route owns the path while it is open; the card on screen is one of its
+  // stops, and the route is what the link is about.
+  const path =
+    route && route.length > 0
+      ? `/route/${route.join(',')}`
+      : artistId === null
+        ? '/'
+        : `/star/${String(artistId)}`
   if (!view) return path
   const hash = `${round(view.x)},${round(view.y)},${Number(view.scale.toPrecision(3))}`
   return `${path}#${hash}`

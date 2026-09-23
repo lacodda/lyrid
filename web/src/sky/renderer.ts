@@ -8,12 +8,37 @@
  * and is the instrument for checking that a change has not cost frames.
  */
 
+import { ERAS, ERA_COLOURS, FLARE, FLARE_YEARS, UNDATED_WEIGHT, boundariesUniform, paletteUniform } from './decades'
+import { STRIDE } from './tiles'
+
 /** A star as a tile stores it, and as the GPU receives it. */
 export interface Star {
   artistId: number
   x: number
   y: number
   brightness: number
+  /** The year the act began; 0 when the canon does not know it. */
+  year: number
+}
+
+/**
+ * A star as the interface points at it: which one, and where. What the halo,
+ * a flight and the address need, without the drawing data only a tile has.
+ */
+export type Place = Pick<Star, 'artistId' | 'x' | 'y'>
+
+/**
+ * What the observer's instruments ask of the field.
+ *
+ * Both are shader uniforms rather than a re-upload: moving the time slider
+ * changes one number per frame, and rebuilding a buffer of two hundred
+ * thousand stars for each step of a drag would be the whole frame budget.
+ */
+export interface Instruments {
+  /** Colour stars by the era their act began in. */
+  lens: boolean
+  /** Show the sky as it stood in this year; `null` shows all of it. */
+  until: number | null
 }
 
 /**
@@ -45,6 +70,10 @@ export interface Camera {
   scale: number
 }
 
+// The palette and the time curve are written into the shader from
+// `decades.ts`, so the legend, the tests and the sky read one set of numbers.
+const glsl = (n: number) => (Number.isInteger(n) ? `${String(n)}.0` : String(n))
+
 const VERTEX = `#version 300 es
 precision highp float;
 
@@ -52,20 +81,56 @@ precision highp float;
 // nothing but stars.
 in vec2 a_position;
 in float a_brightness;
+in float a_year;
 
 uniform vec2 u_camera;
 uniform float u_scale;
 uniform vec2 u_viewport;
 uniform float u_time;
 uniform float u_twinkle;
+// The time machine's year, or 0 when it is off.
+uniform float u_until;
+// 1 when the era lens is on.
+uniform float u_lens;
+uniform vec3 u_palette[${String(ERA_COLOURS.length + 1)}];
+uniform float u_eras[${String(ERAS.length)}];
 
 out float v_brightness;
 out vec2 v_offset;
+out vec3 v_colour;
+out float v_lensed;
+
+// The same rule as timeWeight() in decades.ts.
+float timeWeight(float year, float until) {
+  if (year <= 0.0) return ${glsl(UNDATED_WEIGHT)};
+  if (year > until) return 0.0;
+  return 1.0 + ${glsl(FLARE)} * exp(-(until - year) / ${glsl(FLARE_YEARS)});
+}
+
+// The same rule as eraIndex() in decades.ts; the undated colour is last.
+vec3 eraColour(float year) {
+  if (year <= 0.0) return u_palette[${String(ERA_COLOURS.length)}];
+  int index = 0;
+  for (int i = 1; i < ${String(ERAS.length)}; i++) {
+    if (year >= u_eras[i]) index = i;
+  }
+  return u_palette[index];
+}
 
 void main() {
+  float weight = u_until > 0.0 ? timeWeight(a_year, u_until) : 1.0;
+  // A star from after the chosen year is not there yet: it is moved outside
+  // the clip volume, which costs nothing and draws nothing.
+  if (weight <= 0.0) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
+
   // Size follows brightness and not zoom: stars are points of light, not
-  // discs, and swelling them on approach would read as balloons.
-  float size = mix(2.0, 7.0, a_brightness);
+  // discs, and swelling them on approach would read as balloons. A star in
+  // its first years under the time machine is drawn larger as well as
+  // brighter, which is what makes it read as lighting up.
+  float size = mix(2.0, 7.0, a_brightness) * min(weight, 1.6);
 
   // A per-star phase from its position, so neighbours do not pulse together.
   float phase = a_position.x * 0.7 + a_position.y * 1.3;
@@ -79,8 +144,10 @@ void main() {
   vec2 screen = (a_position - u_camera) * u_scale;
   gl_Position = vec4((screen + corner * size) / (u_viewport * 0.5), 0.0, 1.0);
 
-  v_brightness = a_brightness;
+  v_brightness = a_brightness * min(weight, 1.0) + max(weight - 1.0, 0.0) * 0.4;
   v_offset = corner;
+  v_colour = eraColour(a_year);
+  v_lensed = u_lens;
 }`
 
 const FRAGMENT = `#version 300 es
@@ -88,6 +155,8 @@ precision highp float;
 
 in float v_brightness;
 in vec2 v_offset;
+in vec3 v_colour;
+in float v_lensed;
 out vec4 fragment;
 
 void main() {
@@ -97,9 +166,42 @@ void main() {
   float glow = exp(-4.0 * distance * distance);
   if (glow < 0.01) discard;
 
-  // Faint stars stay the mark's azure, bright ones run warm.
-  vec3 colour = mix(vec3(0.29, 0.56, 0.91), vec3(1.0, 0.94, 0.85), v_brightness * v_brightness);
-  fragment = vec4(colour * glow, glow * (0.35 + 0.65 * v_brightness));
+  // Faint stars stay the mark's azure, bright ones run warm. Under the lens
+  // the colour is the era's instead, and brightness still sets how much of it
+  // shows, so the hubs stay the hubs.
+  vec3 natural = mix(vec3(0.29, 0.56, 0.91), vec3(1.0, 0.94, 0.85), v_brightness * v_brightness);
+  vec3 colour = mix(natural, v_colour, v_lensed);
+  float alpha = glow * (0.35 + 0.65 * clamp(v_brightness, 0.0, 1.0));
+  fragment = vec4(colour * glow, alpha);
+}`
+
+/**
+ * A route through the sky: the stops joined in order.
+ *
+ * Its own tiny program for the same reason the halo has one: the field is a
+ * single measured draw call, and a route is a handful of segments.
+ */
+const ROUTE_VERTEX = `#version 300 es
+precision highp float;
+
+in vec2 a_point;
+uniform vec2 u_camera;
+uniform float u_scale;
+uniform vec2 u_viewport;
+
+void main() {
+  vec2 screen = (a_point - u_camera) * u_scale;
+  gl_Position = vec4(screen / (u_viewport * 0.5), 0.0, 1.0);
+}`
+
+const ROUTE_FRAGMENT = `#version 300 es
+precision highp float;
+
+uniform vec3 u_colour;
+out vec4 fragment;
+
+void main() {
+  fragment = vec4(u_colour, 0.55);
 }`
 
 /**
@@ -247,7 +349,15 @@ export class SkyRenderer {
   private readonly gl: WebGL2RenderingContext
   private readonly program: WebGLProgram
   private readonly buffer: WebGLBuffer
-  private readonly uniforms: Record<'camera' | 'scale' | 'viewport' | 'time' | 'twinkle', WebGLUniformLocation | null>
+  private readonly uniforms: Record<
+    'camera' | 'scale' | 'viewport' | 'time' | 'twinkle' | 'until' | 'lens' | 'palette' | 'eras',
+    WebGLUniformLocation | null
+  >
+  private readonly route: WebGLProgram
+  private readonly routeUniforms: Record<'camera' | 'scale' | 'viewport' | 'colour', WebGLUniformLocation | null>
+  private readonly routeVao: WebGLVertexArrayObject | null
+  private readonly routeBuffer: WebGLBuffer
+  private routePoints = 0
   private readonly halo: WebGLProgram
   private readonly haloUniforms: Record<
     'position' | 'camera' | 'scale' | 'viewport' | 'time' | 'twinkle' | 'shape' | 'colour',
@@ -284,15 +394,20 @@ export class SkyRenderer {
     gl.bindVertexArray(vao)
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
 
-    // Interleaved (x, y, brightness), which is what `upload` packs.
+    // Interleaved (x, y, brightness, year), which is what `upload` packs.
+    const bytes = STRIDE * 4
     const position = gl.getAttribLocation(program, 'a_position')
     const brightness = gl.getAttribLocation(program, 'a_brightness')
+    const year = gl.getAttribLocation(program, 'a_year')
     gl.enableVertexAttribArray(position)
-    gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 12, 0)
+    gl.vertexAttribPointer(position, 2, gl.FLOAT, false, bytes, 0)
     gl.vertexAttribDivisor(position, 1)
     gl.enableVertexAttribArray(brightness)
-    gl.vertexAttribPointer(brightness, 1, gl.FLOAT, false, 12, 8)
+    gl.vertexAttribPointer(brightness, 1, gl.FLOAT, false, bytes, 8)
     gl.vertexAttribDivisor(brightness, 1)
+    gl.enableVertexAttribArray(year)
+    gl.vertexAttribPointer(year, 1, gl.FLOAT, false, bytes, 12)
+    gl.vertexAttribDivisor(year, 1)
 
     this.uniforms = {
       camera: gl.getUniformLocation(program, 'u_camera'),
@@ -300,7 +415,14 @@ export class SkyRenderer {
       viewport: gl.getUniformLocation(program, 'u_viewport'),
       time: gl.getUniformLocation(program, 'u_time'),
       twinkle: gl.getUniformLocation(program, 'u_twinkle'),
+      until: gl.getUniformLocation(program, 'u_until'),
+      lens: gl.getUniformLocation(program, 'u_lens'),
+      palette: gl.getUniformLocation(program, 'u_palette'),
+      eras: gl.getUniformLocation(program, 'u_eras'),
     }
+    // Constant for the life of the page, so set once rather than per frame.
+    gl.uniform3fv(this.uniforms.palette, paletteUniform())
+    gl.uniform1fv(this.uniforms.eras, boundariesUniform())
 
     const halo = gl.createProgram()
     if (!halo) throw new Error('could not create a program')
@@ -322,6 +444,32 @@ export class SkyRenderer {
       colour: gl.getUniformLocation(halo, 'u_colour'),
     }
     this.emptyVao = gl.createVertexArray()
+
+    const route = gl.createProgram()
+    if (!route) throw new Error('could not create a program')
+    gl.attachShader(route, compile(gl, gl.VERTEX_SHADER, ROUTE_VERTEX))
+    gl.attachShader(route, compile(gl, gl.FRAGMENT_SHADER, ROUTE_FRAGMENT))
+    gl.linkProgram(route)
+    if (!gl.getProgramParameter(route, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(route) ?? 'the route program failed to link')
+    }
+    this.route = route
+    this.routeUniforms = {
+      camera: gl.getUniformLocation(route, 'u_camera'),
+      scale: gl.getUniformLocation(route, 'u_scale'),
+      viewport: gl.getUniformLocation(route, 'u_viewport'),
+      colour: gl.getUniformLocation(route, 'u_colour'),
+    }
+    const routeBuffer = gl.createBuffer()
+    if (!routeBuffer) throw new Error('could not create a buffer')
+    this.routeBuffer = routeBuffer
+    this.routeVao = gl.createVertexArray()
+    gl.bindVertexArray(this.routeVao)
+    gl.bindBuffer(gl.ARRAY_BUFFER, routeBuffer)
+    const point = gl.getAttribLocation(route, 'a_point')
+    gl.enableVertexAttribArray(point)
+    gl.vertexAttribPointer(point, 2, gl.FLOAT, false, 8, 0)
+
     gl.bindVertexArray(vao)
 
     // Additive blending, because light adds: overlapping stars brighten
@@ -330,11 +478,21 @@ export class SkyRenderer {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE)
   }
 
-  /** Replaces the field. `packed` is (x, y, brightness) triples. */
+  /** Replaces the field. `packed` is (x, y, brightness, year) quadruples. */
   upload(packed: Float32Array): void {
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffer)
     this.gl.bufferData(this.gl.ARRAY_BUFFER, packed, this.gl.STATIC_DRAW)
-    this.instances = packed.length / 3
+    this.instances = packed.length / STRIDE
+  }
+
+  /** Replaces the route: its stops in order, as world coordinates. */
+  setRoute(points: readonly { x: number; y: number }[]): void {
+    const gl = this.gl
+    const data = new Float32Array(points.flatMap(point => [point.x, point.y]))
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.routeBuffer)
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW)
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer)
+    this.routePoints = points.length
   }
 
   resize(width: number, height: number): void {
@@ -347,7 +505,14 @@ export class SkyRenderer {
    * `twinkle` is 0 or 1 rather than a boolean so the caller can honour
    * `prefers-reduced-motion` without a branch in the shader.
    */
-  draw(camera: Camera, viewport: [number, number], seconds: number, twinkle: number, marked?: Halo | null): void {
+  draw(
+    camera: Camera,
+    viewport: [number, number],
+    seconds: number,
+    twinkle: number,
+    marked?: Halo | null,
+    instruments: Instruments = { lens: false, until: null }
+  ): void {
     const gl = this.gl
     gl.clearColor(0.027, 0.031, 0.051, 1)
     gl.clear(gl.COLOR_BUFFER_BIT)
@@ -359,9 +524,25 @@ export class SkyRenderer {
     gl.uniform2f(this.uniforms.viewport, viewport[0], viewport[1])
     gl.uniform1f(this.uniforms.time, seconds)
     gl.uniform1f(this.uniforms.twinkle, twinkle)
+    gl.uniform1f(this.uniforms.until, instruments.until ?? 0)
+    gl.uniform1f(this.uniforms.lens, instruments.lens ? 1 : 0)
 
     // The whole sky, one call.
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.instances)
+
+    // The route over the field and under the halo: a line is context, the
+    // halo is the one star being looked at.
+    if (this.routePoints > 1) {
+      const vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null
+      gl.bindVertexArray(this.routeVao)
+      gl.useProgram(this.route)
+      gl.uniform2f(this.routeUniforms.camera, camera.x, camera.y)
+      gl.uniform1f(this.routeUniforms.scale, camera.scale)
+      gl.uniform2f(this.routeUniforms.viewport, viewport[0], viewport[1])
+      gl.uniform3f(this.routeUniforms.colour, 0.55, 0.75, 1.0)
+      gl.drawArrays(gl.LINE_STRIP, 0, this.routePoints)
+      gl.bindVertexArray(vao)
+    }
 
     // The marked star last, so its halo sits over its neighbours rather than
     // under them. One quad; the field's cost is untouched.

@@ -5,10 +5,10 @@ import { cn } from 'dowel-ui'
 import { searchArtists, type Hit } from '@/api'
 import { panelVariants } from '@/components/ui/panel'
 import { SearchField } from '@/components/ui/search-field'
-import type { Star } from './renderer'
+import type { Place } from './renderer'
 
 interface Props {
-  onPick: (star: Star) => void
+  onPick: (star: Place) => void
 }
 
 /**
@@ -69,7 +69,7 @@ export function Search({ onPick }: Props) {
                 type="button"
                 className="block w-full cursor-pointer rounded-sm px-2 py-1.5 text-left hover:bg-accent-soft focus-visible:bg-accent-soft focus-visible:outline-none"
                 onClick={() => {
-                  onPick({ artistId: hit.id, x: hit.x ?? 0, y: hit.y ?? 0, brightness: 1 })
+                  onPick({ artistId: hit.id, x: hit.x ?? 0, y: hit.y ?? 0 })
                   setTerm('')
                   setHits([])
                 }}

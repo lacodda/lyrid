@@ -2,15 +2,26 @@
  * Reading the tile pyramid.
  *
  * The format is specified in `reference/tile-format`: a 16-byte header, then
- * 16-byte records of (artist id, x, y, brightness), little-endian. Nothing
- * here parses — a tile becomes a typed-array view and goes to the GPU.
+ * 20-byte records of (artist id, x, y, brightness, begin year), little-endian.
+ * Nothing here parses — a tile becomes a typed-array view and goes to the GPU.
  */
 
 import type { Star } from './renderer'
 
 const HEADER = 16
-const RECORD = 16
+const RECORD = 20
 const MAGIC = 'LYST'
+/**
+ * The one format this client reads.
+ *
+ * Checked, not assumed: format 1 had 16-byte records, and reading one of those
+ * with a 20-byte stride would put every star after the first somewhere else —
+ * a sky that draws and is wrong, which is worse than one that does not draw.
+ */
+const VERSION = 2
+
+/** Floats per star in a packed buffer: x, y, brightness, year. */
+export const STRIDE = 4
 
 /** The world the tiles cover, from `sky.json`. */
 export interface Sky {
@@ -20,11 +31,22 @@ export interface Sky {
   max_y: number
   max_level: number
   record_bytes: number
+  /**
+   * Which cut of the sky this is. Put into every tile address so a browser's
+   * day-long cache of the previous cut is never read as this one; absent in a
+   * sky cut before stamps existed.
+   */
+  stamp?: number
+}
+
+/** A file of this cut, addressed so no other cut's cached copy can answer. */
+export function stamped(sky: Sky, root: string, path: string): string {
+  return sky.stamp === undefined ? `${root}/${path}` : `${root}/${path}?v=${String(sky.stamp)}`
 }
 
 /** One tile's stars, packed for the GPU and readable for the UI. */
 export interface Tile {
-  /** (x, y, brightness) triples, ready for `SkyRenderer.upload`. */
+  /** (x, y, brightness, year) quadruples, ready for `SkyRenderer.upload`. */
   packed: Float32Array
   /** The same stars with their ids, for hit testing and search. */
   stars: Star[]
@@ -46,40 +68,50 @@ export async function fetchSky(root = '/tiles', signal?: AbortSignal): Promise<S
  * CDN or a single-page host may do the same; trusting the status turns that
  * page into a tile and throws on the first zoom.
  */
-export async function fetchTile(level: number, col: number, row: number, root = '/tiles', signal?: AbortSignal): Promise<Tile | null> {
-  const response = await fetch(`${root}/${level}/${col}/${row}.bin`, { signal })
+export async function fetchTile(
+  sky: Sky,
+  level: number,
+  col: number,
+  row: number,
+  root = '/tiles',
+  signal?: AbortSignal
+): Promise<Tile | null> {
+  const response = await fetch(stamped(sky, root, `${String(level)}/${String(col)}/${String(row)}.bin`), { signal })
   if (!response.ok) return null
   const buffer = await response.arrayBuffer()
   if (buffer.byteLength < HEADER) return null
 
   const view = new DataView(buffer)
   if (String.fromCharCode(...new Uint8Array(buffer, 0, 4)) !== MAGIC) return null
+  if (view.getUint16(4, true) !== VERSION) return null
 
   const count = view.getUint32(8, true)
   if (buffer.byteLength < HEADER + count * RECORD) return null
 
-  const packed = new Float32Array(count * 3)
+  const packed = new Float32Array(count * STRIDE)
   const stars: Star[] = new Array<Star>(count)
   for (let i = 0; i < count; i++) {
     const at = HEADER + i * RECORD
     const x = view.getFloat32(at + 4, true)
     const y = view.getFloat32(at + 8, true)
     const brightness = view.getFloat32(at + 12, true)
-    packed[i * 3] = x
-    packed[i * 3 + 1] = y
-    packed[i * 3 + 2] = brightness
-    stars[i] = { artistId: view.getInt32(at, true), x, y, brightness }
+    const year = view.getInt16(at + 16, true)
+    packed[i * STRIDE] = x
+    packed[i * STRIDE + 1] = y
+    packed[i * STRIDE + 2] = brightness
+    packed[i * STRIDE + 3] = year
+    stars[i] = { artistId: view.getInt32(at, true), x, y, brightness, year }
   }
   return { packed, stars }
 }
 
 /** Every tile of one level, concatenated. */
-export async function fetchLevel(level: number, root = '/tiles', signal?: AbortSignal): Promise<Tile> {
+export async function fetchLevel(sky: Sky, level: number, root = '/tiles', signal?: AbortSignal): Promise<Tile> {
   const side = 2 ** level
   const requests: Promise<Tile | null>[] = []
   for (let col = 0; col < side; col++) {
     for (let row = 0; row < side; row++) {
-      requests.push(fetchTile(level, col, row, root, signal))
+      requests.push(fetchTile(sky, level, col, row, root, signal))
     }
   }
   const tiles = (await Promise.all(requests)).filter((tile): tile is Tile => tile !== null)

@@ -68,7 +68,12 @@
     "bornIn": "born in {{place}}",
     "formedIn": "formed in {{place}}",
     "since": "since {{year}}",
-    "years": "{{begin}}–{{end}}"
+    "years": "{{begin}}–{{end}}",
+    "addToRoute": "add to route",
+    "addedToRoute": "added to route",
+    "pin": "compare with…",
+    "pinned": "held for comparing — open another star",
+    "compareWith": "compare with {{name}}"
   },
   "embed": {
     "missing": "That star is not in this sky.",
@@ -160,5 +165,53 @@
     "system": "system",
     "en": "English",
     "ru": "Русский"
+  },
+  "why": {
+    "shapedBy": "shaped this artist",
+    "wentOnToShape": "shaped by this artist",
+    "mutual": "shaped each other",
+    "genres": "both {{list}}",
+    "coListening": "listened to together"
+  },
+  "instruments": {
+    "heading": "Instruments",
+    "lens": "colour by era",
+    "timeMachine": "time machine",
+    "skyIn": "the sky in",
+    "year": "year",
+    "timeHint": "Stars light up in the year their act began. Undated ones stay faint.",
+    "legend": "eras",
+    "before": "before {{year}}",
+    "since": "{{year}}s and since",
+    "decade": "{{year}}s",
+    "undated": "year unknown"
+  },
+  "compass": {
+    "heading": "Where am I",
+    "label": "The whole sky, small, with the view marked on it",
+    "hint": "Arrow keys move the view, plus and minus zoom, Home shows the whole sky. Click or drag to fly.",
+    "in": "in {{place}}",
+    "nowhere": "between constellations"
+  },
+  "compare": {
+    "title": "{{a}} and {{b}}",
+    "lede": "What joins them, and how their sounds differ.",
+    "failed": "could not compare these two",
+    "joins": "what joins them",
+    "nothing": "Nothing the canon records — they sit apart on the map.",
+    "spectrum": "spectrum",
+    "styles": "styles",
+    "shared": "both listened to alongside",
+    "share": "{{name}}: {{share}} {{genre}}",
+    "close": "close"
+  },
+  "route": {
+    "heading": "Route · {{count}} stop",
+    "heading_other": "Route · {{count}} stops",
+    "clear": "clear the route",
+    "remove": "remove {{name}}",
+    "previous": "back",
+    "next": "next",
+    "start": "start"
   }
 }
