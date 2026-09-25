@@ -138,7 +138,8 @@ each, the neighbours from co-listening.
     { "service": "Spotify", "url": "https://open.spotify.com/artist/6olE6TJLqED3rqDCT0FyPh" },
     { "service": "Bandcamp", "url": "https://nirvana.bandcamp.com/" }
   ],
-  "youtube_uploads": "UUzGrGrvf9g8CVVzh_LvGf-g"
+  "youtube_uploads": "UUzGrGrvf9g8CVVzh_LvGf-g",
+  "radio": { "name": "Rock", "kind": "genre" }
 }
 ```
 
@@ -212,12 +213,71 @@ most prominent stars in the rectangle. The compass asks it about the middle half
 of the view.
 
 ```json
-{ "style": "House", "genre": "Electronic" }
+{ "style": "House", "genre": "Electronic", "radio": { "name": "House", "kind": "style" } }
 ```
 
 Answered by the stars, not by the names written on the map: in the dense core a
 dozen name anchors sit within a few units of each other, and "the nearest name"
 there is a coin toss. Same rectangle rules as `/api/nearby`.
+
+`radio` is what listening here plays: the style when its radio has at least
+eight stars to play, else the genre, `null` over sky with no channels in it —
+the same rule a card's `radio` follows.
+
+## `GET /api/radio?name=…&kind=…&seed=…`
+
+The radio of a nebula: its stars with an embeddable channel, in the order to
+play them, fifty at most.
+
+```json
+{
+  "name": "Soul",
+  "kind": "style",
+  "stations": [
+    { "id": 46, "name": "Dusty Springfield", "x": 1.07, "y": 3.66, "uploads": "UUBVqdwqJHO5fSQskJb8BljA" },
+    { "id": 132, "name": "The Temptations", "x": -2.43, "y": 15.49, "uploads": "UUee8VNCWfOCYccbFhDM8B_A" }
+  ]
+}
+```
+
+`kind` is `genre` or `style` — "Rock" the genre and "Rock" the style are
+different nebulae. A member is a star whose **main** genre or style this is: the
+one most of its releases carry, the same "main" the names on the sky are built
+from, so the radio of a name plays the stars written under it.
+
+The order is a weighted shuffle: each star is drawn with the odds of its
+brightness as the sky draws it, with a floor so the faint ones still play.
+`seed` makes it repeatable — the same seed, the same order — and the client
+draws a new one per radio and per refill. An unknown name is a `404`; a known
+nebula with no channels is `200` with no stations.
+
+The playable stars — about ten thousand, on the slice and on the full canon
+alike — are read once per layout into memory and filtered per request, so this
+answers in milliseconds; see
+[ADR 0016](https://github.com/lacodda/lyrid/blob/main/docs/adr/0016-listening-to-the-sky.md).
+
+## `GET /api/signal?day=YYYY-MM-DD`
+
+The signal of the day: a faint star with a channel, the same for everyone on the
+same day, with the next four behind it.
+
+```json
+{
+  "day": "2026-09-25",
+  "stars": [
+    { "id": 148926, "name": "The Wolf Banes", "x": 275.36, "y": -164.58, "uploads": "UU…" }
+  ]
+}
+```
+
+**Faint** means outside the 8,000 brightest stars — the ones the two widest
+levels of the tile pyramid draw — so the signal is a star that only shows once
+the view has closed in. `day` is the listener's own calendar date, so the signal
+turns over at their midnight; anything but a real date written `YYYY-MM-DD` is a
+`400`. The first star is the day's signal; the others are the fallback, in the
+same order for everyone, for when a channel will not play — about a third will
+not, embedded. `stars` is empty when nothing on this sky is both faint and
+playable.
 
 **`position` comes from the newest layout.** An older one would place the star
 somewhere the map does not draw it. `brightness` there is the raw graph weight
@@ -283,6 +343,11 @@ one shop. A host the list does not know keeps MusicBrainz's word for it. The
 list is capped at eight: a median artist has four of these, 90% have nine or
 fewer, and the tail reaches 53.
 
+**`radio` is the nebula this star's radio plays**, decided here rather than
+read off `genres` by the client, which is cut to eight: the star's main style
+when that radio has at least eight stars to play, else its main genre, `null`
+when neither has a channel.
+
 **`youtube_uploads` is a playlist id, not a channel URL.** Every channel has an
 implicit "uploads" playlist whose id is the channel id with `UC` swapped for
 `UU`, and that playlist embeds in the standard player — so the card can play an
@@ -290,7 +355,10 @@ artist's own channel without the YouTube Data API. Only the `/channel/UC…` lin
 form carries the id; `/user/…` and `/@handle` name a channel without giving it,
 and resolving those needs the very API this avoids. Measured: **10,155 of
 15,944 channels** are the embeddable form, and 49,090 of 100,000 placed artists
-in the slice have somewhere to listen at all.
+in the slice have somewhere to listen at all. The channel is the first of an
+artist's YouTube links, in address order, that carries an id — so a handle filed
+before the channel does not hide it — and the radio uses the same rule, so a
+star the radio plays is one its card can play.
 
 Measured on the full canon: of the **206,636 artists with a place in the sky**,
 **77,616 (38%) carry Wikidata facts** and **55,738 (27%) carry prose**. The
@@ -315,7 +383,8 @@ client:
 sky_opened      card_opened     listen_opened
 view_shared     charter_read    data_requested
 lens_used       time_travelled  stars_compared
-route_opened
+route_opened    radio_started   signal_heard
+signal_found
 ```
 
 A name outside the list answers `404`. The list is what stops a client

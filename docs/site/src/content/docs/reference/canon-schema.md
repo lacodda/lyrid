@@ -138,6 +138,14 @@ tail of remixes and interviews would otherwise count as much as its main body.
 Consumers should threshold on `releases` rather than treat presence as
 membership.
 
+**An artist's main genre and main style** — the one carried by most of its
+releases, ties to the name that sorts first — come from one function,
+`main_genres(artists integer[])`. The names on the sky, the compass and the radio
+all ask it, so a name on the map and the radio of that name mean the same stars.
+It takes the artists to rank rather than being a view over everyone, because
+every caller already holds a small set and ranking is cheap once they are chosen
+([ADR 0016](https://github.com/lacodda/lyrid/blob/main/docs/adr/0016-listening-to-the-sky.md)).
+
 ## `artist_discogs`
 
 Which Discogs artist a canonical artist is: `(artist_id, discogs_id)`.

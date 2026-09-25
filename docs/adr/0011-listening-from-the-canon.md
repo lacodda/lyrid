@@ -4,7 +4,9 @@ Date: 2026-08-30
 
 ## Status
 
-Accepted.
+Accepted. How the channel is played is amended by
+[ADR 0016](0016-listening-to-the-sky.md): the card's bare iframe became one
+player for the whole product, on YouTube's IFrame Player API.
 
 ## Context
 

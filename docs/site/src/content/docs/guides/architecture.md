@@ -84,6 +84,7 @@ next to the code it constrains:
 - [0013 · The interface is dowel, pinned dark, in two languages](https://github.com/lacodda/lyrid/blob/main/docs/adr/0013-interface-on-dowel.md)
 - [0014 · The sky is also a list, and the server answers what is in view](https://github.com/lacodda/lyrid/blob/main/docs/adr/0014-the-sky-as-a-list.md)
 - [0015 · The sky carries time and names; the pyramid is cut on its own](https://github.com/lacodda/lyrid/blob/main/docs/adr/0015-the-sky-carries-time-and-names.md)
+- [0016 · Listening to the sky: one player, a player per star, stations read once](https://github.com/lacodda/lyrid/blob/main/docs/adr/0016-listening-to-the-sky.md)
 
 ## Releases
 
