@@ -1,6 +1,7 @@
 import { Menu as Base } from '@base-ui/react/menu'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from 'dowel-ui'
+import { usePopupContainer } from './layer'
 
 /*
  * Menu.
@@ -52,7 +53,7 @@ export const menuItemVariants = cva(
     // so one rule covers both and they cannot disagree.
     'data-[highlighted]:bg-soft data-[highlighted]:text-text',
     'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
-    '[&_svg]:size-3.5 [&_svg]:shrink-0',
+    '[&_svg:not([class*=size-])]:size-3.5 [&_svg]:shrink-0',
   ],
   {
     variants: {
@@ -87,9 +88,11 @@ export interface MenuPopupProps
   align?: Base.Positioner.Props['align']
   /** Distance from the trigger, in pixels. */
   sideOffset?: Base.Positioner.Props['sideOffset']
-  /** Where to portal to. Defaults to the document body, which keeps the menu
-   * from being clipped by a row with `overflow: hidden` - which is where most
-   * hand-written ones go to die. */
+  /** Where to portal to. Defaults to the raised host of the overlay this is
+   * opened inside (`layer.tsx`), and to the document body when there is none -
+   * either way not the element it was opened from, whose `overflow` would clip
+   * it. Pass an element to put it somewhere else, such as a container being
+   * screenshotted. */
   container?: Base.Portal.Props['container']
 }
 
@@ -104,8 +107,13 @@ export function MenuPopup({
   children,
   ...props
 }: MenuPopupProps) {
+  // Inside an overlay, the overlay's raised host rather than the body - or
+  // this popup draws under the dialog, drawer or popover that opened it. See
+  // `layer.tsx`. Outside every overlay the hook gives `undefined`: the body.
+  const host = usePopupContainer()
+
   return (
-    <Base.Portal container={container}>
+    <Base.Portal container={container ?? host}>
       <Base.Positioner
         side={side}
         align={align}
@@ -133,9 +141,18 @@ export function MenuSubTrigger({ tone, className, ...props }: MenuItemProps) {
   return <Base.SubmenuTrigger className={cn(menuItemVariants({ tone }), className)} {...props} />
 }
 
+export interface MenuCheckboxItemProps
+  extends Base.CheckboxItem.Props,
+    VariantProps<typeof menuItemVariants> {}
+
 /** An item that carries a tick. The state is the caller's - a menu does not
- * remember anything. */
-export function MenuCheckboxItem({ tone, className, ...props }: MenuItemProps) {
+ * remember anything.
+ *
+ * Typed from `CheckboxItem` rather than `Item`: it was declared with the plain
+ * item's props while rendering a checkbox, so `checked` and `onCheckedChange` -
+ * the two things it exists for - were rejected by the compiler. Nothing had
+ * called it until kilna's column picker did. */
+export function MenuCheckboxItem({ tone, className, ...props }: MenuCheckboxItemProps) {
   return <Base.CheckboxItem className={cn(menuItemVariants({ tone }), className)} {...props} />
 }
 
@@ -152,7 +169,7 @@ export function MenuSeparator({ className, ...props }: Base.Separator.Props) {
 export function MenuGroupLabel({ className, ...props }: Base.GroupLabel.Props) {
   return (
     <Base.GroupLabel
-      className={cn('px-2 py-1.5 text-2xs uppercase tracking-caption text-faint', className)}
+      className={cn('caption px-2 py-1.5', className)}
       {...props}
     />
   )

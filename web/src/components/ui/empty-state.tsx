@@ -28,23 +28,37 @@ import { cn } from 'dowel-ui'
  * The mark is the line's hexagon, drawn in the current text colour rather than
  * a product's accent. A full-strength logo in an empty panel shouts; this is a
  * watermark, and it is `aria-hidden` because it says nothing a reader needs.
+ *
+ * **`plain` is the same three kinds with no frame.** The framed panel is for
+ * a screen or a region that is empty; inside something that already has a
+ * frame - a widget, a card, a panel's list - a dashed box and a watermark are
+ * a frame inside a frame, and kilna drew seven such empties as bare text
+ * instead, without the way out. Plain keeps the words and the action and
+ * drops the rest: no border, no mark, set in the flow on the left, where the
+ * content it stands in for would have started.
  */
 
-export const emptyStateVariants = cva(
-  'flex flex-col items-center justify-center gap-3 rounded-xl p-8 text-center',
-  {
-    variants: {
-      variant: {
-        empty: 'border border-dashed border-line-2',
-        filtered: 'border border-dashed border-line-2',
-        // Solid rather than dashed: a dashed border reads as a placeholder for
-        // something that belongs there, and a failure is not that.
-        error: 'border border-bad/40 bg-bad-soft/30',
-      },
+export const emptyStateVariants = cva('flex flex-col gap-3', {
+  variants: {
+    variant: {
+      empty: '',
+      filtered: '',
+      error: '',
     },
-    defaultVariants: { variant: 'empty' },
+    plain: {
+      false: 'items-center justify-center rounded-xl p-8 text-center',
+      true: 'items-start gap-2 text-left',
+    },
   },
-)
+  compoundVariants: [
+    { plain: false, variant: 'empty', class: 'border border-dashed border-line-2' },
+    { plain: false, variant: 'filtered', class: 'border border-dashed border-line-2' },
+    // Solid rather than dashed: a dashed border reads as a placeholder for
+    // something that belongs there, and a failure is not that.
+    { plain: false, variant: 'error', class: 'border border-bad/40 bg-bad-soft/30' },
+  ],
+  defaultVariants: { variant: 'empty', plain: false },
+})
 
 /** The line's hexagon, at whatever size the caller asks for.
  *
@@ -110,12 +124,14 @@ export interface EmptyStateProps
   /** The one thing worth doing here. An empty screen with no way out is a
    * dead end. */
   action?: ReactNode
-  /** Something other than the default mark - a product's own illustration. */
+  /** Something other than the default mark - a product's own illustration.
+   * A plain empty state draws no mark, its own or the default. */
   mark?: ReactNode
 }
 
 export function EmptyState({
   variant = 'empty',
+  plain = false,
   title,
   body,
   action,
@@ -132,8 +148,20 @@ export function EmptyState({
       <EmptyMark className="text-line-2" />
     )
 
+  if (plain) {
+    return (
+      <div className={cn(emptyStateVariants({ variant, plain }), className)} {...props}>
+        <div>
+          <p className={cn('text-sm', variant === 'error' ? 'text-bad' : 'text-dim')}>{title}</p>
+          {body !== undefined && <p className="mt-0.5 text-xs text-faint">{body}</p>}
+        </div>
+        {action}
+      </div>
+    )
+  }
+
   return (
-    <div className={cn(emptyStateVariants({ variant }), className)} {...props}>
+    <div className={cn(emptyStateVariants({ variant, plain }), className)} {...props}>
       {mark ?? defaultMark}
       <div>
         <p className={cn('font-medium', variant === 'error' && 'text-bad')}>{title}</p>

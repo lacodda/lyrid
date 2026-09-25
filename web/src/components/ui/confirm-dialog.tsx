@@ -1,6 +1,9 @@
+import { useRef } from 'react'
 import { AlertDialog as Base } from '@base-ui/react/alert-dialog'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from 'dowel-ui'
+import { DialogActions, DialogBody, DialogHeader } from './dialog'
+import { LayerProvider } from './layer'
 
 /*
  * ConfirmDialog.
@@ -22,13 +25,24 @@ import { cn } from 'dowel-ui'
  *
  * So the rule for choosing between the two is not how important the content
  * feels. It is whether dismissing it by a stray click would be a loss.
+ *
+ * The anatomy is the dialog's, taken from it: a header, a body that scrolls
+ * if the consequences run long, and the two answers pinned to the bottom. It
+ * has the dialog's small sizes and not its large ones on purpose - a question
+ * that needs an editor's width to be asked is an editor, and belongs in a
+ * Dialog.
  */
 
 export const confirmDialogPopupVariants = cva(
   [
     'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',
-    'rounded-xl border border-line bg-raise p-5 text-text shadow-float',
+    'flex flex-col overflow-hidden',
+    'rounded-xl border border-line bg-raise text-text shadow-float',
     'focus-visible:outline-none',
+    // Never taller than the window, which this one used not to promise: a
+    // long list of what a deletion takes with it pushed both answers off
+    // the bottom edge.
+    'max-h-[calc(100dvh-2rem)]',
     // The enter and the leave. `duration-*` reads the token directly because
     // Tailwind's own utility takes a literal number.
     '[transition:opacity_var(--duration-base)_var(--ease-out),transform_var(--duration-base)_var(--ease-out)]',
@@ -101,8 +115,10 @@ export function ConfirmDialogPopup({
   children,
   ...props
 }: ConfirmDialogPopupProps) {
+  const portal = useRef<HTMLDivElement>(null)
+
   return (
-    <Base.Portal container={container}>
+    <Base.Portal ref={portal} container={container}>
       {backdrop && <ConfirmDialogBackdrop />}
       <Base.Popup
         className={cn(
@@ -112,7 +128,7 @@ export function ConfirmDialogPopup({
         )}
         {...props}
       >
-        {children}
+        <LayerProvider above="modal" mount={portal}>{children}</LayerProvider>
       </Base.Popup>
     </Base.Portal>
   )
@@ -130,11 +146,15 @@ export function ConfirmDialogDescription({ className, ...props }: Base.Descripti
   return <Base.Description className={cn('mt-1 text-sm text-dim', className)} {...props} />
 }
 
-/** Where the two answers go. Right-aligned, because the choice belongs where
- * the eye leaves the sentence. */
-export function ConfirmDialogActions({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('mt-5 flex justify-end gap-2', className)} {...props} />
-}
+/** The top: the question and what it costs. The dialog's part, under this
+ * one's name. */
+export const ConfirmDialogHeader = DialogHeader
+
+/** The part that scrolls, for consequences too long to fit. The dialog's
+ * part, under this one's name. */
+export const ConfirmDialogBody = DialogBody
+
+/** Where the two answers go, pinned to the bottom and right-aligned, because
+ * the choice belongs where the eye leaves the sentence. The dialog's part,
+ * under this one's name. */
+export const ConfirmDialogActions = DialogActions

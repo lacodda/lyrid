@@ -55,7 +55,7 @@ export function Switch({ children, className, ...props }: SwitchProps) {
         className={cn(
           'size-3.5 rounded-full bg-dim shadow-lift',
           'transition-[transform,background-color] duration-quick ease-out',
-          'translate-x-0.5 data-[checked]:translate-x-[1.125rem]',
+          'translate-x-0.5 data-[checked]:translate-x-4.5',
           'data-[checked]:bg-on-accent',
         )}
       />

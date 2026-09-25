@@ -1,5 +1,6 @@
-import type { ReactElement, ReactNode } from 'react'
+import { useId, type ReactElement, type ReactNode } from 'react'
 import { Field as Base } from '@base-ui/react/field'
+import { Fieldset } from '@base-ui/react/fieldset'
 import { cn } from 'dowel-ui'
 
 /*
@@ -83,7 +84,7 @@ export function Field({
     >
       <Base.Label
         className={cn(
-          'text-2xs font-medium uppercase tracking-caption text-faint',
+          'caption',
           // Off the screen, still in the accessibility tree. Not
           // `display: none`, which would take it out of both.
           labelHidden && 'sr-only',
@@ -116,5 +117,87 @@ export function Field({
         help !== undefined && <Base.Description className="text-xs text-dim">{help}</Base.Description>
       )}
     </Base.Root>
+  )
+}
+
+export interface FieldGroupProps {
+  /** What the group is called - "Type", "References". Always rendered;
+   * `labelHidden` only takes it off the screen. */
+  label: ReactNode
+  /** The controls: a row of chips, a segment, a grid of pictures, several
+   * checkboxes. Anything - a group names its contents rather than handing
+   * them an id. */
+  children: ReactNode
+  /** A hint under the group, read as the group's description. Hidden while
+   * an error is showing, as in Field. */
+  help?: ReactNode
+  /** What is wrong with the group as a whole - "choose at least one". */
+  error?: ReactNode
+  labelHidden?: boolean
+  required?: boolean
+  /** Disables every native control inside, which is what a `<fieldset>`
+   * does on its own. */
+  disabled?: boolean
+  className?: string
+}
+
+/**
+ * FieldGroup - one name for several controls.
+ *
+ * Field labels exactly one control, and it has to: the label points at an id
+ * the control carries. A row of chips, a segment or a grid of pictures has no
+ * single control to point at, and the obvious workaround - a `<label>`
+ * wrapped around the row - is a trap. A label with no `for` labels the first
+ * labelable element inside it, and a click on any plain part of it is
+ * forwarded there. kilna measured what that does in its style dialog: a click
+ * on the caption "Type" silently set the first type, and a click on
+ * "References" pressed the hidden remove cross of the first picture, which
+ * deleted it for good.
+ *
+ * So a group is a `<fieldset>` with a legend, through Base UI's Fieldset: the
+ * group is announced by its name as a reader enters it, and a caption has
+ * nothing a click could be forwarded to. The caption is the same `caption` a
+ * Field's label is, so the two kinds of field sit in one form as one kind.
+ */
+export function FieldGroup({
+  label,
+  children,
+  help,
+  error,
+  labelHidden = false,
+  required = false,
+  disabled = false,
+  className,
+}: FieldGroupProps) {
+  const noteId = useId()
+  const invalid = error !== undefined && error !== null && error !== false
+  const note = invalid ? error : help
+
+  return (
+    <Fieldset.Root
+      disabled={disabled}
+      aria-describedby={note === undefined ? undefined : noteId}
+      data-invalid={invalid ? '' : undefined}
+      // `min-w-0`: a fieldset's intrinsic minimum is its content, so a row of
+      // chips inside a grid cell refuses to wrap and pushes the grid apart.
+      className={cn('m-0 flex min-w-0 flex-col gap-1.5 border-0 p-0', className)}
+    >
+      <Fieldset.Legend className={cn('caption', labelHidden && 'sr-only')}>
+        {label}
+        {required && (
+          <span aria-hidden className="ml-0.5 text-bad">
+            *
+          </span>
+        )}
+      </Fieldset.Legend>
+
+      {children}
+
+      {note === undefined ? null : (
+        <span id={noteId} className={cn('text-xs', invalid ? 'text-bad' : 'text-dim')}>
+          {note}
+        </span>
+      )}
+    </Fieldset.Root>
   )
 }

@@ -47,7 +47,7 @@ export function SectionLabel({ className, ...props }: HTMLAttributes<HTMLDivElem
   return (
     <div
       className={cn(
-        'flex items-center gap-2 text-2xs font-medium uppercase tracking-caption text-faint',
+        'caption flex items-center gap-2',
         className,
       )}
       {...props}

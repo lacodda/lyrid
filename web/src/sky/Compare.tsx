@@ -3,7 +3,16 @@ import { useTranslation } from 'react-i18next'
 
 import { fetchComparison, type Comparison, type SpectrumLine } from '@/api'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogClose, DialogDescription, DialogPopup, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogClose,
+  DialogDescription,
+  DialogHeader,
+  DialogPopup,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { SectionLabel } from '@/components/ui/panel'
 import { Spinner } from '@/components/ui/spinner'
 import { reasons } from './why'
@@ -54,61 +63,67 @@ export function Compare({ a, b, onClose, onOpen }: Props) {
         if (!open) onClose()
       }}
     >
-      <DialogPopup size="lg" className="flex max-h-[85vh] flex-col gap-3 overflow-y-auto">
-        <DialogTitle>{t('compare.title', { a: a.name, b: b.name })}</DialogTitle>
-        <DialogDescription>{t('compare.lede')}</DialogDescription>
+      {/* The header and the close button stay put; only the body scrolls,
+          so a long spectrum never carries the way out off the screen. */}
+      <DialogPopup size="lg">
+        <DialogHeader>
+          <DialogTitle>{t('compare.title', { a: a.name, b: b.name })}</DialogTitle>
+          <DialogDescription>{t('compare.lede')}</DialogDescription>
+        </DialogHeader>
 
-        {!comparison && !error && (
-          <p className="flex items-center gap-2 text-xs text-dim">
-            <Spinner size="sm" label={t('card.reading')} />
-            {t('card.reading')}
-          </p>
-        )}
-        {error && (
-          <p role="alert" className="m-0 text-xs text-bad">
-            {error}
-          </p>
-        )}
+        <DialogBody className="flex flex-col gap-3">
+          {!comparison && !error && (
+            <p className="flex items-center gap-2 text-xs text-dim">
+              <Spinner size="sm" label={t('card.reading')} />
+              {t('card.reading')}
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="m-0 text-xs text-bad">
+              {error}
+            </p>
+          )}
 
-        {comparison && (
-          <>
-            <SectionLabel>{t('compare.joins')}</SectionLabel>
-            <p className="m-0 text-sm text-text">{said.length > 0 ? said.join(' · ') : t('compare.nothing')}</p>
+          {comparison && (
+            <>
+              <SectionLabel>{t('compare.joins')}</SectionLabel>
+              <p className="m-0 text-sm text-text">{said.length > 0 ? said.join(' · ') : t('compare.nothing')}</p>
 
-            <SectionLabel>{t('compare.spectrum')}</SectionLabel>
-            <Key a={a} b={b} />
-            <Spectrum lines={comparison.spectrum.filter(line => !line.is_style)} a={a} b={b} />
-            {comparison.spectrum.some(line => line.is_style) && (
-              <>
-                <p className="m-0 mt-1 text-2xs text-dim">{t('compare.styles')}</p>
-                <Spectrum lines={comparison.spectrum.filter(line => line.is_style)} a={a} b={b} />
-              </>
-            )}
+              <SectionLabel>{t('compare.spectrum')}</SectionLabel>
+              <Key a={a} b={b} />
+              <Spectrum lines={comparison.spectrum.filter(line => !line.is_style)} a={a} b={b} />
+              {comparison.spectrum.some(line => line.is_style) && (
+                <>
+                  <p className="m-0 mt-1 text-2xs text-dim">{t('compare.styles')}</p>
+                  <Spectrum lines={comparison.spectrum.filter(line => line.is_style)} a={a} b={b} />
+                </>
+              )}
 
-            {comparison.shared_neighbours.length > 0 && (
-              <>
-                <SectionLabel>{t('compare.shared')}</SectionLabel>
-                <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 text-xs">
-                  {comparison.shared_neighbours.map(star => (
-                    <li key={star.id}>
-                      <button
-                        type="button"
-                        className="cursor-pointer text-accent underline-offset-2 hover:underline"
-                        onClick={() => onOpen(star.id)}
-                      >
-                        {star.name}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </>
-        )}
+              {comparison.shared_neighbours.length > 0 && (
+                <>
+                  <SectionLabel>{t('compare.shared')}</SectionLabel>
+                  <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 text-xs">
+                    {comparison.shared_neighbours.map(star => (
+                      <li key={star.id}>
+                        <button
+                          type="button"
+                          className="cursor-pointer text-accent underline-offset-2 hover:underline"
+                          onClick={() => onOpen(star.id)}
+                        >
+                          {star.name}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </>
+          )}
+        </DialogBody>
 
-        <div className="mt-2 flex justify-end">
+        <DialogActions>
           <DialogClose render={<Button size="sm">{t('compare.close')}</Button>} />
-        </div>
+        </DialogActions>
       </DialogPopup>
     </Dialog>
   )

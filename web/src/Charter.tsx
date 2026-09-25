@@ -9,6 +9,7 @@ import {
   ConfirmDialogActions,
   ConfirmDialogClose,
   ConfirmDialogDescription,
+  ConfirmDialogHeader,
   ConfirmDialogPopup,
   ConfirmDialogTitle,
 } from '@/components/ui/confirm-dialog'
@@ -140,8 +141,10 @@ function Controls({ onSignedOut }: { onSignedOut: () => void }) {
 
       <ConfirmDialog open={asking} onOpenChange={setAsking}>
         <ConfirmDialogPopup>
-          <ConfirmDialogTitle>{t('charter.controls.confirmTitle')}</ConfirmDialogTitle>
-          <ConfirmDialogDescription>{t('charter.controls.confirmBody')}</ConfirmDialogDescription>
+          <ConfirmDialogHeader>
+            <ConfirmDialogTitle>{t('charter.controls.confirmTitle')}</ConfirmDialogTitle>
+            <ConfirmDialogDescription>{t('charter.controls.confirmBody')}</ConfirmDialogDescription>
+          </ConfirmDialogHeader>
           <ConfirmDialogActions>
             <ConfirmDialogClose render={<Button>{t('charter.controls.cancel')}</Button>} />
             <Button variant="danger" onClick={destroy}>

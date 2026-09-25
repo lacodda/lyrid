@@ -2,6 +2,7 @@ import type { Ref } from 'react'
 import { Combobox as Base } from '@base-ui/react/combobox'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from 'dowel-ui'
+import { usePopupContainer } from './layer'
 import { fieldClasses } from './input'
 import { selectItemVariants, selectPopupVariants } from './select'
 
@@ -194,7 +195,11 @@ export interface ComboboxPopupProps
    * how the mismatch is visible from outside.
    */
   anchor?: Base.Positioner.Props['anchor']
-  /** Where to portal to. Defaults to the document body. */
+  /** Where to portal to. Defaults to the raised host of the overlay this is
+   * opened inside (`layer.tsx`), and to the document body when there is none -
+   * either way not the element it was opened from, whose `overflow` would clip
+   * it. Pass an element to put it somewhere else, such as a container being
+   * screenshotted. */
   container?: Base.Portal.Props['container']
 }
 
@@ -210,8 +215,13 @@ export function ComboboxPopup({
   children,
   ...props
 }: ComboboxPopupProps) {
+  // Inside an overlay, the overlay's raised host rather than the body - or
+  // this popup draws under the dialog, drawer or popover that opened it. See
+  // `layer.tsx`. Outside every overlay the hook gives `undefined`: the body.
+  const host = usePopupContainer()
+
   return (
-    <Base.Portal container={container}>
+    <Base.Portal container={container ?? host}>
       <Base.Positioner
         side={side}
         align={align}
@@ -266,7 +276,7 @@ export function ComboboxChipRemove({ className, ...props }: Base.ChipRemove.Prop
 export function ComboboxGroupLabel({ className, ...props }: Base.GroupLabel.Props) {
   return (
     <Base.GroupLabel
-      className={cn('px-2 py-1.5 text-2xs uppercase tracking-caption text-faint', className)}
+      className={cn('caption px-2 py-1.5', className)}
       {...props}
     />
   )

@@ -1,6 +1,9 @@
+import { useRef } from 'react'
 import { Drawer as Base } from '@base-ui/react/drawer'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from 'dowel-ui'
+import { DialogActions, DialogBody, DialogHeader } from './dialog'
+import { LayerProvider } from './layer'
 
 /*
  * Drawer.
@@ -26,6 +29,12 @@ import { cn } from 'dowel-ui'
  * reason is that a drawer is dragged as well as animated: the popup carries a
  * live `--drawer-swipe-movement-*` while a finger is on it, and the transform
  * has to compose with that rather than replace it.
+ *
+ * The anatomy is the dialog's, taken from it rather than copied: a header that
+ * stays, a body that scrolls, and the actions pinned to the bottom edge. The
+ * panel used to scroll as a whole, which on a tall form took the buttons down
+ * with it. A popup opened inside - the menu on a row of the assistant's chat
+ * in kilna, which opened underneath the drawer - rides a layer above it.
  */
 
 /** The Viewport: fixed to the whole window, pushing the popup to one edge.
@@ -46,8 +55,8 @@ const drawerViewportVariants = cva('fixed inset-0 flex', {
 
 export const drawerPopupVariants = cva(
   [
-    'flex flex-col overflow-y-auto overscroll-contain',
-    'border-line bg-raise p-5 text-text shadow-float',
+    'flex flex-col overflow-hidden',
+    'border-line bg-raise text-text shadow-float',
     'focus-visible:outline-none',
     // Composed with the live swipe offset rather than replacing it, so a
     // half-dragged drawer animates from where the finger left it.
@@ -60,26 +69,50 @@ export const drawerPopupVariants = cva(
        * a right-hand pane, its mirror, and a bottom sheet. */
       side: {
         right: [
-          'h-full w-[min(24rem,calc(100vw-3rem))] border-l',
+          'h-full border-l',
           '[transform:translateX(var(--drawer-swipe-movement-x))]',
           'data-[starting-style]:[transform:translateX(100%)]',
           'data-[ending-style]:[transform:translateX(100%)]',
         ],
         left: [
-          'h-full w-[min(24rem,calc(100vw-3rem))] border-r',
+          'h-full border-r',
           '[transform:translateX(var(--drawer-swipe-movement-x))]',
           'data-[starting-style]:[transform:translateX(-100%)]',
           'data-[ending-style]:[transform:translateX(-100%)]',
         ],
         bottom: [
-          'max-h-[80vh] w-full rounded-t-xl border-t',
+          'w-full rounded-t-xl border-t',
           '[transform:translateY(var(--drawer-swipe-movement-y))]',
           'data-[starting-style]:[transform:translateY(100%)]',
           'data-[ending-style]:[transform:translateY(100%)]',
         ],
       },
+      /* How much of the window it takes, across the edge it comes from: the
+       * width of a side panel, the height of a bottom sheet. A filter sheet
+       * and a detail pane are different sizes of the same thing. */
+      size: {
+        sm: '',
+        md: '',
+        lg: '',
+        xl: '',
+        full: '',
+      },
     },
-    defaultVariants: { side: 'right' },
+    compoundVariants: [
+      { side: ['right', 'left'], size: 'sm', className: 'w-[min(20rem,calc(100vw-3rem))]' },
+      { side: ['right', 'left'], size: 'md', className: 'w-[min(24rem,calc(100vw-3rem))]' },
+      { side: ['right', 'left'], size: 'lg', className: 'w-[min(32rem,calc(100vw-3rem))]' },
+      { side: ['right', 'left'], size: 'xl', className: 'w-[min(48rem,calc(100vw-3rem))]' },
+      { side: ['right', 'left'], size: 'full', className: 'w-[calc(100vw-3rem)]' },
+      // A sheet is capped rather than sized, so a short one stays short - up
+      // to `full`, which is set, so the body fills it while content loads.
+      { side: 'bottom', size: 'sm', className: 'max-h-[40vh]' },
+      { side: 'bottom', size: 'md', className: 'max-h-[80vh]' },
+      { side: 'bottom', size: 'lg', className: 'max-h-[90vh]' },
+      { side: 'bottom', size: 'xl', className: 'max-h-[calc(100dvh-3rem)]' },
+      { side: 'bottom', size: 'full', className: 'h-[calc(100dvh-3rem)]' },
+    ],
+    defaultVariants: { side: 'right', size: 'md' },
   },
 )
 
@@ -128,25 +161,29 @@ export interface DrawerPopupProps
 }
 
 /** The panel. Portalled, and wrapped in its own viewport so the edge it is
- * pinned to holds still while the contents scroll. */
+ * pinned to holds still while the body scrolls. Put a `DrawerHeader`, a
+ * `DrawerBody` and `DrawerActions` inside it. */
 export function DrawerPopup({
   container,
   backdrop = true,
   side,
+  size,
   className,
   children,
   ...props
 }: DrawerPopupProps) {
+  const portal = useRef<HTMLDivElement>(null)
+
   return (
-    <Base.Portal container={container}>
+    <Base.Portal ref={portal} container={container}>
       {backdrop && <DrawerBackdrop />}
       <div className={cn(drawerViewportVariants({ side }), '[z-index:var(--z-modal)]')}>
         <Base.Viewport className="flex w-full">
           <Base.Popup
-            className={cn(drawerPopupVariants({ side }), className)}
+            className={cn(drawerPopupVariants({ side, size }), className)}
             {...props}
           >
-            {children}
+            <LayerProvider above="modal" mount={portal}>{children}</LayerProvider>
           </Base.Popup>
         </Base.Viewport>
       </div>
@@ -165,9 +202,14 @@ export function DrawerDescription({ className, ...props }: Base.Description.Prop
   return <Base.Description className={cn('mt-1 text-sm text-dim', className)} {...props} />
 }
 
-/** Where the actions go. Pushed to the bottom of the panel rather than sitting
- * under the content, because a drawer is tall and its buttons should not
- * wander up the page when there is little in it. */
-export function DrawerActions({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('mt-auto flex justify-end gap-2 pt-5', className)} {...props} />
-}
+/** The top of the panel: the title, the line under it, and an action beside
+ * them. The dialog's part, under the drawer's name. */
+export const DrawerHeader = DialogHeader
+
+/** The part that scrolls. The dialog's part, under the drawer's name. */
+export const DrawerBody = DialogBody
+
+/** Where the actions go, pinned to the bottom edge of the panel however
+ * little is in it - a drawer is tall, and its buttons should not wander up
+ * the page. The dialog's part, under the drawer's name. */
+export const DrawerActions = DialogActions
