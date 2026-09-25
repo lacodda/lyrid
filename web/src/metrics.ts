@@ -23,6 +23,9 @@ export type Mechanic =
   | 'time_travelled'
   | 'stars_compared'
   | 'route_opened'
+  | 'radio_started'
+  | 'signal_heard'
+  | 'signal_found'
 
 /**
  * Counts one use.

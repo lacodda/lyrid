@@ -3,9 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { cn } from 'dowel-ui'
 
 import { panelVariants } from '@/components/ui/panel'
-import { fetchRegion, type Region } from '@/api'
-import { fromMap, keyMove, middle, toMap, viewRect } from './minimap'
-import { boundsKey } from './NearbyStars'
+import type { Region } from '@/api'
+import { fromMap, keyMove, toMap, viewRect } from './minimap'
 import type { Bounds, Overview, View } from './Sky'
 import type { Star } from './renderer'
 import { fetchLevel } from './tiles'
@@ -14,6 +13,10 @@ interface Props {
   overview: Overview
   view: View
   visible: Bounds
+  /** What the middle of the view is, asked once above for every reader. */
+  region: Region | null
+  /** The star the player is sounding, marked on the small sky. */
+  sounding: { x: number; y: number } | null
   onNavigate: (view: View) => void
   className?: string
 }
@@ -32,7 +35,7 @@ const MAP_LEVEL = 2
  * `+` and `-` zoom, Home shows everything — because the canvas itself has no
  * content a keyboard can land on. A pointer drags or clicks on it to fly.
  */
-export function Compass({ overview, view, visible, onNavigate, className }: Props) {
+export function Compass({ overview, view, visible, region, sounding, onNavigate, className }: Props) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const dragging = useRef(false)
@@ -95,22 +98,6 @@ export function Compass({ overview, view, visible, onNavigate, className }: Prop
     context.strokeRect(rect.x + (rect.width - width) / 2, rect.y + (rect.height - height) / 2, width, height)
   }, [field, sky, visible])
 
-  // Asked of the server, debounced and keyed on a rounded view the way the
-  // nearby list is: the answer is a vote among the stars in the middle of the
-  // view, and those are in the database, not in the tiles.
-  const [region, setRegion] = useState<Region | null>(null)
-  const key = boundsKey(middle(visible))
-  useEffect(() => {
-    const abort = new AbortController()
-    const [minX = 0, minY = 0, maxX = 0, maxY = 0] = key.split(',').map(Number)
-    const timer = window.setTimeout(() => {
-      fetchRegion({ minX, minY, maxX, maxY }, abort.signal).then(setRegion, () => undefined)
-    }, 400)
-    return () => {
-      window.clearTimeout(timer)
-      abort.abort()
-    }
-  }, [key])
   const where = [region?.style, region?.genre].filter(Boolean).join(' · ')
   const wholeScale = (visibleWidth(visible) * view.scale) / (sky.max_x - sky.min_x)
 
@@ -125,33 +112,39 @@ export function Compass({ overview, view, visible, onNavigate, className }: Prop
       <h2 id="compass-heading" className="sr-only">
         {t('compass.heading')}
       </h2>
-      <canvas
-        ref={canvasRef}
-        style={{ width: SIZE, height: SIZE }}
-        className="block cursor-crosshair rounded-inner bg-[#07080d] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        tabIndex={0}
-        role="application"
-        aria-label={t('compass.label')}
-        aria-describedby="compass-hint"
-        onPointerDown={event => {
-          dragging.current = true
-          event.currentTarget.setPointerCapture(event.pointerId)
-          flyTo(event)
-        }}
-        onPointerMove={event => {
-          if (dragging.current) flyTo(event)
-        }}
-        onPointerUp={event => {
-          dragging.current = false
-          event.currentTarget.releasePointerCapture(event.pointerId)
-        }}
-        onKeyDown={event => {
-          const next = keyMove(event.key, view, visible, sky, wholeScale)
-          if (!next) return
-          event.preventDefault()
-          onNavigate(next)
-        }}
-      />
+      {/* The sound's place on the small sky: where the music is coming from,
+          which for the signal of the day is the only clue to where it is. A
+          ping only where motion is welcome; a still ring otherwise. */}
+      <div className="relative">
+        <canvas
+          ref={canvasRef}
+          style={{ width: SIZE, height: SIZE }}
+          className="block cursor-crosshair rounded-inner bg-[#07080d] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          tabIndex={0}
+          role="application"
+          aria-label={t('compass.label')}
+          aria-describedby="compass-hint"
+          onPointerDown={event => {
+            dragging.current = true
+            event.currentTarget.setPointerCapture(event.pointerId)
+            flyTo(event)
+          }}
+          onPointerMove={event => {
+            if (dragging.current) flyTo(event)
+          }}
+          onPointerUp={event => {
+            dragging.current = false
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }}
+          onKeyDown={event => {
+            const next = keyMove(event.key, view, visible, sky, wholeScale)
+            if (!next) return
+            event.preventDefault()
+            onNavigate(next)
+          }}
+        />
+        {sounding && <Sounding at={toMap(sky, SIZE, sounding.x, sounding.y)} />}
+      </div>
       <p id="compass-hint" className="sr-only">
         {t('compass.hint')}
       </p>
@@ -161,6 +154,24 @@ export function Compass({ overview, view, visible, onNavigate, className }: Prop
         {where ? t('compass.in', { place: where }) : t('compass.nowhere')}
       </p>
     </section>
+  )
+}
+
+/**
+ * Two tones, like a pin on a map: the minimap is blue at its edges and white
+ * at its core, and the accent -- tried first -- vanished into the blue. White
+ * in a dark rim reads on both.
+ */
+function Sounding({ at }: { at: { x: number; y: number } }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute size-3 -translate-x-1/2 -translate-y-1/2"
+      style={{ left: at.x, top: at.y }}
+    >
+      <span className="absolute inset-0 rounded-full bg-white/80 motion-safe:animate-ping" />
+      <span className="absolute inset-0 rounded-full border-2 border-black bg-white" />
+    </span>
   )
 }
 

@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import { cn } from 'dowel-ui'
 
-import { count } from '@/metrics'
-import { fetchArtist, type Alongside, type Artist, type Link, type Neighbour, type Origin } from '@/api'
+import { fetchArtist, type Alongside, type Artist, type Link, type Nebula, type Neighbour, type Origin } from '@/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { panelVariants, SectionLabel } from '@/components/ui/panel'
@@ -25,6 +24,12 @@ interface Props {
   onPin: (side: Side) => void
   /** Compares this star with the held one. */
   onCompare: (side: Side) => void
+  /** Plays this star's channel in the one player. */
+  onListen: (uploads: string, name: string) => void
+  /** Starts the radio of a nebula. */
+  onRadio: (nebula: Nebula) => void
+  /** The star the player is sounding, so the card can say it is this one. */
+  sounding: number | null
 }
 
 /**
@@ -40,7 +45,7 @@ interface Props {
  * of three million have no encyclopaedia article and no influence links, so an
  * empty section is the normal case, not a failure to render.
  */
-export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare }: Props) {
+export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare, onListen, onRadio, sounding }: Props) {
   const { t } = useTranslation()
   const [artist, setArtist] = useState<Artist | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -173,7 +178,14 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
             </>
           )}
 
-          <Listen links={artist.listen} uploads={artist.youtube_uploads} />
+          <Listen
+            links={artist.listen}
+            uploads={artist.youtube_uploads}
+            radio={artist.radio}
+            playing={sounding === artist.id}
+            onPlay={uploads => onListen(uploads, artist.name)}
+            onRadio={onRadio}
+          />
 
           {/* Influence is directed, so the two lists are separate claims and
               never merged into one "related" pile. */}
@@ -220,14 +232,45 @@ function Extract({ text }: { text: string }) {
  * could be down or rate-limiting. The honest consequence is that they are
  * artist pages, not tracks — MusicBrainz relates an artist to a service, not
  * a recording to one.
+ *
+ * The channel plays in the one player rather than in the card, so it keeps
+ * playing after the card closes; and the star's radio is offered beside it,
+ * the nebula decided by the server rather than read off the genres above.
  */
-function Listen({ links, uploads }: { links: Link[]; uploads: string | null }) {
+function Listen({
+  links,
+  uploads,
+  radio,
+  playing,
+  onPlay,
+  onRadio,
+}: {
+  links: Link[]
+  uploads: string | null
+  radio: Nebula | null
+  playing: boolean
+  onPlay: (uploads: string) => void
+  onRadio: (nebula: Nebula) => void
+}) {
   const { t } = useTranslation()
-  if (links.length === 0) return null
+  if (links.length === 0 && !radio) return null
   return (
     <>
       <SectionLabel>{t('card.listen')}</SectionLabel>
-      {uploads && <Player uploads={uploads} />}
+      {(uploads || radio) && (
+        <div className="flex flex-wrap gap-1.5">
+          {uploads && (
+            <Button variant="soft" size="sm" disabled={playing} onClick={() => onPlay(uploads)}>
+              {playing ? t('card.playing') : t('card.play')}
+            </Button>
+          )}
+          {radio && (
+            <Button size="sm" onClick={() => onRadio(radio)}>
+              {t('listen.radioOf', { name: radio.name })}
+            </Button>
+          )}
+        </div>
+      )}
       <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 text-xs">
         {links.map(link => (
           <li key={link.url}>
@@ -238,45 +281,6 @@ function Listen({ links, uploads }: { links: Link[]; uploads: string | null }) {
         ))}
       </ul>
     </>
-  )
-}
-
-/**
- * The artist's own channel, played in place.
- *
- * Loaded on click rather than with the card: a YouTube iframe pulls scripts
- * and sets cookies, and this card opens on every star a visitor touches.
- * Until then it is a button, and a visitor who never presses it never meets
- * YouTube at all.
- */
-function Player({ uploads }: { uploads: string }) {
-  const { t } = useTranslation()
-  const [playing, setPlaying] = useState(false)
-  if (!playing) {
-    return (
-      <Button
-        variant="soft"
-        size="sm"
-        className="self-start"
-        onClick={() => {
-          count('listen_opened')
-          setPlaying(true)
-        }}
-      >
-        {t('card.play')}
-      </Button>
-    )
-  }
-  return (
-    <div className="aspect-video w-full overflow-hidden rounded-md border border-line">
-      <iframe
-        className="size-full border-0"
-        src={`https://www.youtube-nocookie.com/embed/videoseries?list=${uploads}`}
-        title={t('card.channel')}
-        allow="accelerometer; clipboard-write; encrypted-media; picture-in-picture"
-        allowFullScreen
-      />
-    </div>
   )
 }
 

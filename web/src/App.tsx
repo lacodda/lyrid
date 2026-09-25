@@ -16,7 +16,10 @@ import { Search } from '@/sky/Search'
 import { readLocation, readPage, writeLocation, type Page } from '@/sky/location'
 import { HaloPicker, HALO_COLOURS, HALO_DEFAULT } from '@/sky/HaloPicker'
 import { HALO_SHAPES, type HaloShape, type Instruments as InstrumentSettings } from '@/sky/renderer'
-import { fetchArtist, fetchStars, type Hit } from '@/api'
+import { Player } from '@/sky/Player'
+import { follows, localDay, newSeed, refill, sounding, stepRadio, type Listening } from '@/sky/listening'
+import { useRegion } from '@/sky/region'
+import { fetchArtist, fetchRadio, fetchSignal, fetchStars, type Hit, type Nebula, type Station } from '@/api'
 import { AccountPanel } from '@/AccountPanel'
 import { fetchMe, saveProfile, worthSaving, type Me } from '@/account'
 import { Charter } from '@/Charter'
@@ -89,19 +92,207 @@ export function App() {
   // every render would tear the canvas down and build it again.
   const onState = useCallback((next: SkyState) => setState(next), [])
 
-  const onPick = useCallback((star: Star | null) => {
-    setPicked(star)
-    if (star) count('card_opened')
-    // A star picked on the map is already on screen; flying to it would yank
-    // the view out from under the click.
+  // ------------------------------------------------------------- listening
+  // One player for the whole sky: what it plays survives closing the card and
+  // flying somewhere else, which is what listening to the sky means.
+  const [listening, setListening] = useState<Listening | null>(null)
+  const [listenNote, setListenNote] = useState<string | null>(null)
+  const [tuning, setTuning] = useState(false)
+
+  // Read by callbacks that must stay stable -- the sky's `onPick` among them,
+  // which would rebuild the canvas if it changed -- so they read these rather
+  // than closing over the state.
+  const listeningRef = useRef<Listening | null>(null)
+  const pickedRef = useRef<Place | null>(null)
+  useEffect(() => {
+    listeningRef.current = listening
+    pickedRef.current = picked
+  }, [listening, picked])
+
+  // Which request is current. A radio or a signal that arrives after the
+  // listener stopped, or started something else, is dropped rather than
+  // bringing back what they turned off.
+  const generation = useRef(0)
+
+  // Stations in a row that would not play. One or two is a channel taken
+  // down; many is YouTube out of reach, and a radio skipping its whole queue in
+  // seconds helps nobody.
+  const brokenRun = useRef(0)
+
+  // Reaching the signal's star, by any path, is what reveals its name.
+  const reach = useCallback((id: number) => {
+    const current = listeningRef.current
+    if (current?.kind !== 'signal' || current.found || sounding(current)?.id !== id) return
+    count('signal_found')
+    setListening({ ...current, found: true })
   }, [])
 
+  const onPick = useCallback(
+    (star: Star | null) => {
+      setPicked(star)
+      if (star) {
+        count('card_opened')
+        reach(star.artistId)
+      }
+      // A star picked on the map is already on screen; flying to it would yank
+      // the view out from under the click.
+    },
+    [reach]
+  )
+
   // A star chosen by name or arrived at by link has to be found first.
-  const goTo = useCallback((star: Place) => {
-    setPicked(star)
-    count('card_opened')
-    setTarget({ x: star.x, y: star.y, scale: 8 })
+  const goTo = useCallback(
+    (star: Place) => {
+      setPicked(star)
+      count('card_opened')
+      setTarget({ x: star.x, y: star.y, scale: 8 })
+      reach(star.artistId)
+    },
+    [reach]
+  )
+
+  const goToStation = useCallback((station: Station) => goTo({ artistId: station.id, x: station.x, y: station.y }), [goTo])
+
+  const stopListening = useCallback(() => {
+    generation.current += 1
+    setListening(null)
+    setListenNote(null)
+    setTuning(false)
   }, [])
+
+  const startRadio = useCallback(
+    (nebula: Nebula) => {
+      generation.current += 1
+      const mine = generation.current
+      const seed = newSeed()
+      setListenNote(null)
+      fetchRadio(nebula, seed).then(
+        stations => {
+          if (mine !== generation.current) return
+          if (stations.length === 0) {
+            setListenNote(t('listen.silent', { name: nebula.name }))
+            return
+          }
+          count('radio_started')
+          brokenRun.current = 0
+          setListening({ kind: 'radio', nebula, stations, at: 0, seed })
+        },
+        () => {
+          if (mine === generation.current) setListenNote(t('listen.failed'))
+        }
+      )
+    },
+    [t]
+  )
+
+  // The card is always the picked star's, so its place comes from there.
+  const playChannel = useCallback((uploads: string, name: string) => {
+    const star = pickedRef.current
+    if (!star) return
+    generation.current += 1
+    count('listen_opened')
+    setListenNote(null)
+    setListening({ kind: 'channel', station: { id: star.artistId, name, x: star.x, y: star.y, uploads } })
+  }, [])
+
+  const tuneSignal = useCallback(() => {
+    generation.current += 1
+    const mine = generation.current
+    const day = localDay(new Date())
+    setTuning(true)
+    setListenNote(null)
+    fetchSignal(day).then(
+      stars => {
+        if (mine !== generation.current) return
+        setTuning(false)
+        const first = stars[0]
+        if (!first) {
+          setListenNote(t('listen.noSignal'))
+          return
+        }
+        count('signal_heard')
+        // A listener already looking at the star has found it.
+        setListening({ kind: 'signal', stations: stars, at: 0, day, found: pickedRef.current?.artistId === first.id })
+      },
+      () => {
+        if (mine !== generation.current) return
+        setTuning(false)
+        setListenNote(t('listen.failed'))
+      }
+    )
+  }, [t])
+
+  // The radio one station along. Past the end of the queue it carries on into
+  // a fresh one on a new seed; the view goes along only for a listener whose
+  // open card is the star that was playing.
+  const moveRadio = useCallback(
+    (by: 1 | -1) => {
+      const current = listeningRef.current
+      if (current?.kind !== 'radio') return
+      const from = sounding(current)
+      const carryOn = (next: Listening) => {
+        setListening(next)
+        const to = sounding(next)
+        if (to && follows(pickedRef.current?.artistId ?? null, from)) goToStation(to)
+      }
+      const next = stepRadio(current, by)
+      if (next) {
+        carryOn(next)
+        return
+      }
+      if (by === -1) return
+      const mine = generation.current
+      const seed = newSeed()
+      fetchRadio(current.nebula, seed).then(
+        fresh => {
+          if (mine !== generation.current) return
+          if (fresh.length === 0) {
+            stopListening()
+            setListenNote(t('listen.silent', { name: current.nebula.name }))
+            return
+          }
+          carryOn(refill(current, fresh, seed))
+        },
+        () => {
+          if (mine === generation.current) setListenNote(t('listen.failed'))
+        }
+      )
+    },
+    [goToStation, stopListening, t]
+  )
+
+  const onEnded = useCallback(() => moveRadio(1), [moveRadio])
+
+  const onPlaying = useCallback(() => {
+    brokenRun.current = 0
+    setListenNote(null)
+  }, [])
+
+  // A radio skips a station that will not play, and the signal falls back to
+  // the next star of the day's list -- the same fallback for everyone, so the
+  // signal stays one signal. A channel says so and stays: the star is still
+  // worth going to.
+  const onBroken = useCallback(() => {
+    const current = listeningRef.current
+    if (current?.kind === 'signal') {
+      const at = current.at + 1
+      const next = current.stations[at]
+      if (next) setListening({ ...current, at, found: pickedRef.current?.artistId === next.id })
+      else setListenNote(t('listen.unplayable'))
+      return
+    }
+    if (current?.kind !== 'radio') {
+      setListenNote(t('listen.unplayable'))
+      return
+    }
+    brokenRun.current += 1
+    if (brokenRun.current >= LOST_AFTER) {
+      stopListening()
+      setListenNote(t('listen.lost'))
+      return
+    }
+    moveRadio(1)
+  }, [moveRadio, stopListening, t])
 
   // A star named somewhere without its place — a neighbour on a card, a
   // shared neighbour in a comparison — is looked up and then flown to. A star
@@ -118,6 +309,9 @@ export function App() {
     },
     [goTo]
   )
+
+  const region = useRegion(state?.visible ?? null)
+  const playing = sounding(listening)
 
   // ---------------------------------------------------------- instruments
   const [instruments, setInstruments] = useState<InstrumentSettings>({ lens: false, until: null })
@@ -386,6 +580,9 @@ export function App() {
               count('stars_compared')
               setComparing([pinned, side])
             }}
+            onListen={playChannel}
+            onRadio={startRadio}
+            sounding={playing?.id ?? null}
           />
         )}
         {shownStops.length > 0 && (
@@ -404,9 +601,37 @@ export function App() {
             }}
           />
         )}
-        {overview && state && (
-          <Compass className="hidden shrink-0 md:flex" overview={overview} view={state.view} visible={state.visible} onNavigate={setTarget} />
-        )}
+        {/* The compass and the player side by side on a wide screen, where
+            stacking them would leave the card a sliver; one above the other
+            where the width is not there. The row hands pointer events back
+            to its children only, so the gap above the shorter one is sky. */}
+        <div className="pointer-events-none! flex shrink-0 flex-col items-end gap-2 lg:flex-row lg:items-end [&>*]:pointer-events-auto">
+          {overview && state && (
+            <Compass
+              className="hidden md:flex"
+              overview={overview}
+              view={state.view}
+              visible={state.visible}
+              region={region}
+              sounding={playing}
+              onNavigate={setTarget}
+            />
+          )}
+          <Player
+            listening={listening}
+            here={region?.radio ?? null}
+            note={listenNote}
+            tuning={tuning}
+            onRadio={startRadio}
+            onSignal={tuneSignal}
+            onStep={moveRadio}
+            onEnded={onEnded}
+            onBroken={onBroken}
+            onPlaying={onPlaying}
+            onGo={goToStation}
+            onStop={stopListening}
+          />
+        </div>
       </div>
 
       {comparing && (
@@ -471,6 +696,13 @@ export function App() {
     </main>
   )
 }
+
+/**
+ * Stations in a row that may fail before a radio gives up on YouTube. About a
+ * third of the canon's channels will not play embedded, so five in a row
+ * happens often enough by chance; eight happens about once in three thousand.
+ */
+const LOST_AFTER = 8
 
 /**
  * Taking the view with you: the link to it, or a picture of it.

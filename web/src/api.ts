@@ -116,6 +116,12 @@ export interface Artist {
   listen: Link[]
   /** Playlist id that embeds the artist's YouTube channel, when there is one. */
   youtube_uploads: string | null
+  /**
+   * The radio this star belongs to, decided by the server: its main style when
+   * that radio has enough to play, else its main genre. `null` when neither has
+   * a channel to play.
+   */
+  radio: Nebula | null
 }
 
 /** A search result, with a place to fly to. */
@@ -191,6 +197,47 @@ export interface NearbyStar {
 export interface Region {
   style: string | null
   genre: string | null
+  /** What listening here plays, decided the same way a card's radio is. */
+  radio: Nebula | null
+}
+
+/** A genre or a style, by the name the sky writes on it. */
+export interface Nebula {
+  name: string
+  kind: 'genre' | 'style'
+}
+
+/** A star that can be played: where it is, and its channel's uploads. */
+export interface Station {
+  id: number
+  name: string
+  x: number
+  y: number
+  uploads: string
+}
+
+/**
+ * A nebula's radio: its stars with a channel, bright ones more often, in an
+ * order the seed makes repeatable. Empty when the nebula has no channels.
+ */
+export async function fetchRadio(nebula: Nebula, seed: number, signal?: AbortSignal): Promise<Station[]> {
+  const query = new URLSearchParams({ name: nebula.name, kind: nebula.kind, seed: String(seed) })
+  const response = await fetch(`/api/radio?${query.toString()}`, { signal })
+  if (!response.ok) throw new Error(response.status === 404 ? 'no such genre or style' : 'the sky could not be read')
+  const body = (await response.json()) as { stations: Station[] }
+  return body.stations
+}
+
+/**
+ * The signal of the day: one faint star with a channel, the same for everyone
+ * on the same calendar day, with the next few behind it for when a channel
+ * will not play. Empty when the sky has nothing dark to play.
+ */
+export async function fetchSignal(day: string, signal?: AbortSignal): Promise<Station[]> {
+  const response = await fetch(`/api/signal?day=${encodeURIComponent(day)}`, { signal })
+  if (!response.ok) throw new Error('the sky could not be read')
+  const body = (await response.json()) as { stars: Station[] }
+  return body.stars
 }
 
 export async function fetchRegion(
