@@ -2,10 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.14.0] - 2026-09-25
+
+### Documentation
+- Record how the sky is listened to
+
+### Features
+- Play a nebula's radio and the signal of the day
+- One player for the whole sky
+
 ## [0.13.0] - 2026-09-23
 
 ### Documentation
 - Record the instruments and the tile format they rest on
+- Generate for v0.13.0
 
 ### Features
 - Carry the year, cut on their own, and write names
