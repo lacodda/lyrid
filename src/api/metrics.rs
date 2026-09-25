@@ -42,7 +42,7 @@ use crate::app::AppState;
 /// something that identifies a person -- an artist id, a search term. A closed
 /// list cannot carry a payload, which is the property that makes the promise
 /// hold against a hostile client rather than a polite one.
-const MECHANICS: [&str; 10] = [
+const MECHANICS: [&str; 13] = [
     // The sky opened at all, once per visit.
     "sky_opened",
     // A star's card was opened.
@@ -63,6 +63,12 @@ const MECHANICS: [&str; 10] = [
     "stars_compared",
     // A route was opened, from a link or by adding a first stop.
     "route_opened",
+    // A nebula's radio was started.
+    "radio_started",
+    // The signal of the day was tuned in.
+    "signal_heard",
+    // The signal of the day was followed to its star.
+    "signal_found",
 ];
 
 pub fn routes() -> Router<AppState> {
@@ -120,6 +126,7 @@ mod tests {
             secure_cookie: false,
             public_url: "http://localhost:8080".to_string(),
             mailer: crate::mail::Mailer::Log,
+            dial: crate::api::listening::Dial::default(),
         })
     }
 

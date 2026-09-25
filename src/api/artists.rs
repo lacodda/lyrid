@@ -19,6 +19,7 @@ use axum::{Json, Router, routing::get};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
+use crate::api::listening::{Dial, Nebula, radio_here, radio_of};
 use crate::api::relations::{Why, why_many};
 use crate::app::AppState;
 
@@ -72,6 +73,10 @@ struct Artist {
     /// canon knows a channel in an embeddable form. This is the one address
     /// on the card a page can play rather than link to.
     youtube_uploads: Option<String>,
+    /// The nebula whose radio this star belongs to, when that radio has
+    /// anything to play. Decided here rather than read off `genres` by the
+    /// client: that list is cut to eight, and "main" has one definition.
+    radio: Option<Nebula>,
 }
 
 /// One outbound link, with the service named rather than the raw kind.
@@ -162,7 +167,7 @@ struct Alongside {
 }
 
 async fn artist(State(state): State<AppState>, Path(id): Path<i32>) -> Response {
-    match load_artist(&state.pool, id).await {
+    match load_artist(&state.pool, &state.dial, id).await {
         Ok(Some(artist)) => (StatusCode::OK, Json(artist)).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "no such artist" }))).into_response(),
         Err(error) => {
@@ -176,7 +181,7 @@ async fn artist(State(state): State<AppState>, Path(id): Path<i32>) -> Response 
     }
 }
 
-async fn load_artist(pool: &PgPool, id: i32) -> sqlx::Result<Option<Artist>> {
+async fn load_artist(pool: &PgPool, dial: &Dial, id: i32) -> sqlx::Result<Option<Artist>> {
     let Some(row) = sqlx::query_as::<
         _,
         (
@@ -233,11 +238,8 @@ async fn load_artist(pool: &PgPool, id: i32) -> sqlx::Result<Option<Artist>> {
 
     let similar = alongside(pool, id).await?;
 
-    let listen = listen(pool, id).await?;
-    let youtube_uploads = listen
-        .iter()
-        .find(|link| link.service == "YouTube")
-        .and_then(|link| uploads_playlist(&link.url));
+    let (listen, youtube_uploads) = listen(pool, id).await?;
+    let radio = radio_of(pool, dial, id).await;
 
     let origin = origin(pool, id).await?;
     let labels = labels(pool, id).await?;
@@ -272,6 +274,7 @@ async fn load_artist(pool: &PgPool, id: i32) -> sqlx::Result<Option<Artist>> {
         releases,
         listen,
         youtube_uploads,
+        radio,
     }))
 }
 
@@ -407,7 +410,8 @@ async fn releases(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Release>> {
     .collect())
 }
 
-/// Where the artist can be heard, newest-known service first.
+/// Where the artist can be heard, newest-known service first, and the channel
+/// the card can play.
 ///
 /// Read from the canon's own URL relationships: nothing here calls out to a
 /// streaming service, which is what ADR 0002 requires of the critical path.
@@ -415,7 +419,7 @@ async fn releases(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Release>> {
 /// because `MusicBrainz` links an artist to a service and not a recording to
 /// one. Measured on the slice: of 100,000 placed stars, 49,090 have somewhere
 /// to go and 14,198 have a `YouTube` channel.
-async fn listen(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Link>> {
+async fn listen(pool: &PgPool, id: i32) -> sqlx::Result<(Vec<Link>, Option<String>)> {
     let rows = sqlx::query_as::<_, (String, String)>(
         "SELECT kind, url
          FROM artist_url
@@ -427,6 +431,12 @@ async fn listen(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Link>> {
     .bind(id)
     .fetch_all(pool)
     .await?;
+
+    // Read before the links are cut to one per service below: an artist whose
+    // first `YouTube` link is a handle and whose second is the channel itself
+    // would otherwise keep the handle and lose the player. 103 stars of the
+    // slice were silent that way while the radio could play them.
+    let uploads = channel_of(rows.iter().filter(|(kind, _)| kind == "youtube").map(|(_, url)| url.as_str()));
 
     let mut links: Vec<Link> = Vec::new();
     for (kind, url) in rows {
@@ -449,7 +459,7 @@ async fn listen(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Link>> {
     // fewer, but the tail reaches 53 - a wall of regional shops nobody scrolls.
     // The ranking above means what survives the cut is the part worth showing.
     links.truncate(8);
-    Ok(links)
+    Ok((links, uploads))
 }
 
 /// Names the service behind a URL.
@@ -508,13 +518,22 @@ fn service_of(url: &str, kind: &str) -> String {
 /// name a channel without giving its id, and resolving them needs the very API
 /// this avoids. Measured on the canon: 10,155 of 15,944 channels are the
 /// embeddable form; the rest stay a link.
-fn uploads_playlist(url: &str) -> Option<String> {
+pub(crate) fn uploads_playlist(url: &str) -> Option<String> {
     let id = url.split("/channel/").nth(1)?.split(['/', '?', '#']).next()?;
     // A channel id is "UC" and 22 more characters of base64url. Checked so a
     // malformed link becomes no player rather than a broken one.
     let rest = id.strip_prefix("UC")?;
     let well_formed = rest.len() == 22 && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     well_formed.then(|| format!("UU{rest}"))
+}
+
+/// The channel a star plays: the first of its `YouTube` links, in address
+/// order, that names a channel by id.
+///
+/// One rule for the card and the radio, so a star the radio plays is a star
+/// whose card can play it too.
+pub(crate) fn channel_of<'a>(urls: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    urls.into_iter().find_map(uploads_playlist)
 }
 
 /// The label a domain is registered under: `music.amazon.co.uk` -> `amazon`.
@@ -839,11 +858,15 @@ async fn run_nearby(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f3
     Ok(rows.into_iter().map(|(id, name, comment, x, y)| Nearby { id, name, comment, x, y }).collect())
 }
 
-/// What the middle of the view is: its commonest main style and genre.
+/// What the middle of the view is: its commonest main style and genre, and
+/// the radio of the place.
 #[derive(Serialize)]
 struct Region {
     style: Option<String>,
     genre: Option<String>,
+    /// What "listen here" plays: the style when its radio has enough to play,
+    /// else the genre. `None` over a patch of sky with no channels in it.
+    radio: Option<Nebula>,
 }
 
 /// How many of the most prominent stars in the rectangle are asked what they
@@ -862,7 +885,10 @@ async fn region(State(state): State<AppState>, Query(query): Query<NearbyQuery>)
     let (min_x, max_x) = minmax(query.min_x, query.max_x);
     let (min_y, max_y) = minmax(query.min_y, query.max_y);
     match run_region(&state.pool, min_x, min_y, max_x, max_y).await {
-        Ok(region) => (StatusCode::OK, Json(region)).into_response(),
+        Ok(mut region) => {
+            region.radio = radio_here(&state.pool, &state.dial, region.genre.as_deref(), region.style.as_deref()).await;
+            (StatusCode::OK, Json(region)).into_response()
+        }
         Err(error) => {
             tracing::error!(%error, "region failed");
             (
@@ -876,8 +902,9 @@ async fn region(State(state): State<AppState>, Query(query): Query<NearbyQuery>)
 
 async fn run_region(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f32) -> sqlx::Result<Region> {
     // The sample is the same "most prominent in the rectangle" the nearby list
-    // reads; each star then votes with its main genre and its main style, the
-    // same "main" the names on the map are built from.
+    // reads; each star then votes with its main genre and its main style --
+    // `main_genres`, the same "main" the names on the map are built from and
+    // the radio plays.
     let rows = sqlx::query_as::<_, (String, bool)>(
         "WITH sample AS (
              SELECT p.artist_id
@@ -890,15 +917,14 @@ async fn run_region(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f3
              ORDER BY COALESCE(pr.weight, 0) DESC
              LIMIT $5
          ),
-         main AS (
-             SELECT DISTINCT ON (ag.artist_id, g.is_style) g.name, g.is_style
-             FROM sample
-             JOIN artist_genre ag ON ag.artist_id = sample.artist_id
-             JOIN genre g ON g.id = ag.genre_id
-             ORDER BY ag.artist_id, g.is_style, ag.releases DESC, g.name
+         tally AS (
+             SELECT g.name, g.is_style, count(*) AS votes
+             FROM main_genres(ARRAY(SELECT artist_id FROM sample)) main
+             JOIN genre g ON g.id = main.genre_id
+             GROUP BY g.name, g.is_style
          )
          SELECT DISTINCT ON (is_style) name, is_style
-         FROM (SELECT name, is_style, count(*) AS votes FROM main GROUP BY name, is_style) tally
+         FROM tally
          ORDER BY is_style, votes DESC, name",
     )
     .bind(min_x)
@@ -913,6 +939,7 @@ async fn run_region(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f3
     Ok(Region {
         style: pick(true),
         genre: pick(false),
+        radio: None,
     })
 }
 
@@ -941,6 +968,7 @@ mod tests {
             secure_cookie: false,
             public_url: "http://localhost:8080".to_string(),
             mailer: crate::mail::Mailer::Log,
+            dial: crate::api::listening::Dial::default(),
         })
     }
 
@@ -981,6 +1009,18 @@ mod tests {
         // Malformed ids are refused rather than turned into a dead player.
         assert_eq!(uploads_playlist("https://www.youtube.com/channel/UCtooshort"), None);
         assert_eq!(uploads_playlist("https://www.youtube.com/channel/XY123456789012345678901"), None);
+    }
+
+    #[test]
+    fn a_handle_filed_first_does_not_hide_the_channel() {
+        // Addresses sort `@` before `c`, so a handle is often an artist's
+        // first YouTube link; the channel after it is still the one to play.
+        let links = [
+            "https://www.youtube.com/@someartist",
+            "https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv",
+        ];
+        assert_eq!(channel_of(links), Some("UUabcdefghijklmnopqrstuv".to_string()));
+        assert_eq!(channel_of(["https://www.youtube.com/@someartist"]), None);
     }
 
     #[test]

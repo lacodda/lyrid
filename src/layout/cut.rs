@@ -211,17 +211,17 @@ fn plausible_year(year: Option<i16>) -> i16 {
 /// Main, not any: an artist's genres run long -- a jazz musician with one
 /// electronic remix carries "Electronic" -- and counting every mention would
 /// pull each label towards the crossover acts that are loosely everything.
+/// "Main" is the `main_genres` function, the one definition the compass and
+/// the radio read too: a name on the sky and the radio of that name play the
+/// same stars.
 async fn groups(pool: &PgPool, layout_id: i16) -> Result<Vec<labels::Group>> {
     let rows: Vec<(String, bool, f32, f32)> = sqlx::query_as(
-        "SELECT g.name, g.is_style, main.x, main.y
-         FROM (
-             SELECT DISTINCT ON (ag.artist_id, g.is_style) g.id AS genre_id, p.x, p.y
-             FROM artist_genre ag
-             JOIN genre g ON g.id = ag.genre_id
-             JOIN artist_position p ON p.artist_id = ag.artist_id AND p.layout_id = $1
-             ORDER BY ag.artist_id, g.is_style, ag.releases DESC, g.name
-         ) main
-         JOIN genre g ON g.id = main.genre_id",
+        "SELECT g.name, g.is_style, p.x, p.y
+         FROM artist_position p
+         JOIN main_genres(ARRAY(SELECT artist_id FROM artist_position WHERE layout_id = $1)) main
+             ON main.artist_id = p.artist_id
+         JOIN genre g ON g.id = main.genre_id
+         WHERE p.layout_id = $1",
     )
     .bind(layout_id)
     .fetch_all(pool)

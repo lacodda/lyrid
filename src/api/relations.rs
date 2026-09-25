@@ -347,6 +347,7 @@ mod tests {
             secure_cookie: false,
             public_url: "http://localhost:8080".to_string(),
             mailer: crate::mail::Mailer::Log,
+            dial: crate::api::listening::Dial::default(),
         })
     }
 

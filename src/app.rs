@@ -26,6 +26,9 @@ pub struct AppState {
     pub public_url: String,
     /// How the two letters leave the building, or the log they go to instead.
     pub mailer: crate::mail::Mailer,
+    /// The playable stars of the current layout, read once and shared by the
+    /// radio and the signal.
+    pub dial: crate::api::listening::Dial,
 }
 
 /// The router, optionally serving the built SPA and the tile pyramid.
@@ -45,6 +48,7 @@ pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
         .merge(crate::api::accounts::routes())
         .merge(crate::api::metrics::routes())
         .merge(crate::api::relations::routes())
+        .merge(crate::api::listening::routes())
         .with_state(state);
 
     let Some(root) = static_dir else {
@@ -207,6 +211,7 @@ mod tests {
             secure_cookie: false,
             public_url: "http://localhost:8080".to_string(),
             mailer: crate::mail::Mailer::Log,
+            dial: crate::api::listening::Dial::default(),
         }
     }
 

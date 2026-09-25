@@ -152,11 +152,17 @@ async fn serve(config: &config::Config) -> Result<()> {
         .with_context(|| format!("failed to bind {}", config.addr))?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), addr = %config.addr, "lyrid listening");
 
+    // The playable stars are read in the background as the server starts, so
+    // the first person to press play does not wait for them.
+    let dial = api::listening::Dial::default();
+    tokio::spawn(dial.clone().warm(pool.clone()));
+
     let state = app::AppState {
         pool,
         secure_cookie: config.secure_cookie,
         public_url: config.public_url.clone(),
         mailer,
+        dial,
     };
 
     axum::serve(listener, app::router(state, config.static_dir.as_deref()))
