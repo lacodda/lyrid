@@ -12,9 +12,16 @@
 # below goes through `docker compose exec`, and the dump travels over ssh as a
 # stream rather than being staged on the stand's disk first.
 #
+# A canon that grows by a few tables does not need the whole database
+# replaced: `--tables` restores only the rows of the named tables, emptying them
+# first, and leaves every other table -- the accounts above all -- as it is.
+# The tables must already exist on the stand, which a deploy of the release
+# that adds them has done by running its migrations.
+#
 # Usage:
 #   tools/stage-seed.sh [--stand pi] [--dump .local/lyrid-slice-100k.dump]
 #                       [--tiles tiles] [--force] [--skip-db] [--skip-tiles]
+#                       [--tables label,label_artist,label_year]
 set -eu
 
 stand=pi@pi
@@ -24,6 +31,7 @@ tiles=tiles
 force=no
 do_db=yes
 do_tiles=yes
+tables=
 
 while [ $# -gt 0 ]; do
     case $1 in
@@ -34,7 +42,8 @@ while [ $# -gt 0 ]; do
         --force) force=yes; shift ;;
         --skip-db) do_db=no; shift ;;
         --skip-tiles) do_tiles=no; shift ;;
-        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --tables) tables=$2; shift 2 ;;
+        -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "stage-seed: unknown argument: $1" >&2; exit 1 ;;
     esac
 done
@@ -56,6 +65,52 @@ remote_psql() {
     remote "$remote_env; docker compose -f docker-compose.prod.yml exec -T db \
         psql -U \"\$user\" -d \"\$db\" $*"
 }
+
+if [ "$do_db" = yes ] && [ -n "$tables" ]; then
+    [ -f "$dump" ] || { echo "stage-seed: no dump at $dump" >&2; exit 1; }
+
+    # Table names go into SQL and onto a command line, so only the plain
+    # lower_snake_case every table of this schema uses is let through.
+    case $tables in
+        *[!a-z0-9_,]*|,*|*,|*,,*)
+            echo "stage-seed: --tables takes comma-separated table names, got: $tables" >&2
+            exit 1 ;;
+    esac
+
+    # Only the named tables' rows, in the order the dump holds them: pg_dump
+    # sorts table data so a referenced table loads before the one pointing
+    # at it, which is what keeps the foreign keys satisfied row by row.
+    list=$(mktemp)
+    trap 'rm -f "$list"' EXIT
+    names=$(printf '%s' "$tables" | tr ',' ' ')
+    toc=$(docker compose exec -T db pg_restore -l < "$dump")
+    for table in $names; do
+        printf '%s\n' "$toc" | grep -qE "TABLE DATA public $table " || {
+            echo "stage-seed: the dump holds no data for $table" >&2
+            exit 1
+        }
+    done
+    printf '%s\n' "$toc" | grep -E "TABLE DATA public ($(printf '%s' "$tables" | tr ',' '|')) " > "$list"
+
+    echo "stage-seed: replacing the rows of $tables on $stand"
+    # Emptied in one statement and without CASCADE: the named tables may
+    # reference each other, and a table outside the list that points at one of
+    # them makes the truncate fail rather than silently emptying it too.
+    remote_psql -c "'TRUNCATE $(printf '%s' "$tables" | sed 's/,/, /g')'"
+
+    # pg_restore reads a list from a file, not from a pipe it is also reading
+    # the dump from, so the list is written into the container first.
+    remote "docker compose -f docker-compose.prod.yml exec -T db sh -c 'cat > /tmp/stage-seed.list'" < "$list"
+    remote "$remote_env; docker compose -f docker-compose.prod.yml exec -T db \
+        pg_restore -U \"\$user\" -d \"\$db\" --data-only --no-owner --no-privileges -L /tmp/stage-seed.list" \
+        < "$dump"
+
+    for table in $names; do
+        rows=$(remote_psql -tAc "'select count(*) from $table'")
+        echo "stage-seed: the stand holds $rows rows in $table"
+    done
+    do_db=no
+fi
 
 if [ "$do_db" = yes ]; then
     [ -f "$dump" ] || {
