@@ -2,10 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.15.0] - 2026-09-30
+
+### Documentation
+- Record stations, dossiers and the rosters they rest on
+
+### Features
+- Read label rosters from the Discogs releases file
+- Open labels and scenes into dossiers
+- Open labels and scenes as dossiers over the sky
+- Mark a station's stars on the sky
+
 ## [0.14.0] - 2026-09-25
 
 ### Documentation
 - Record how the sky is listened to
+- Generate for v0.14.0
 
 ### Features
 - Play a nebula's radio and the signal of the day
