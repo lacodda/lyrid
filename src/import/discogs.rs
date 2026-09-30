@@ -1,19 +1,24 @@
-//! Imports genres, styles and labels from the Discogs monthly XML dumps.
+//! Imports genres, styles, labels and label rosters from the Discogs monthly
+//! XML dumps.
 //!
-//! Three files, each one gzipped XML document, read in one streaming pass
-//! apiece:
+//! Four files, each one gzipped XML document, read in one streaming pass
+//! apiece, labels first because the others are asked for names it points at:
 //!
-//! - `artists` — only to learn which Discogs ids exist, so a genre can never
-//!   be attached through a dangling reference.
 //! - `labels` — the stations of the map: imprints, their descriptions, and
 //!   which imprint owns which.
+//! - `artists` — to learn which Discogs ids exist, so a genre can never be
+//!   attached through a dangling reference, and to name the artists a label's
+//!   description points at by id.
 //! - `masters` — where the genres actually live. Discogs puts genre and style
 //!   on releases, never on artists, so an artist's genres are aggregated from
 //!   their discography.
+//! - `releases` — who released on which label, and when: the only place
+//!   Discogs joins a label to an artist. Not for genres -- a master carries
+//!   the same genres as its pressings -- but for rosters, which exist nowhere
+//!   else. See `discogs_releases` and ADR 0017.
 //!
-//! The 10 GB `releases` file is deliberately not read: a master release
-//! carries the same genres as its pressings, and the pressings add ten
-//! gigabytes to say it again.
+//! All four come from one dump and are written in one transaction, so the
+//! genres, the labels and the rosters in the canon always share a version.
 //!
 //! **Why Discogs and not MusicBrainz for genres.** MusicBrainz models genre as
 //! a folksonomy tag, and its tag tables ship in `mbdump-derived` under
@@ -39,7 +44,9 @@ use clap::Args as ClapArgs;
 use flate2::read::MultiGzDecoder;
 use sqlx::PgPool;
 
+use super::discogs_releases;
 use super::discogs_xml::{Attributes, Record, Records};
+use crate::markup::{self, Kind};
 
 /// How many rows to accumulate before sending a batch to Postgres.
 const BATCH: usize = 8192;
@@ -51,12 +58,21 @@ pub struct Args {
     pub masters: PathBuf,
 
     /// Path to discogs_<date>_labels.xml.gz. Optional: without it the labels
-    /// table is left as it was, and genres still import.
-    #[arg(long, value_name = "FILE")]
+    /// and their rosters are left as they were, and genres still import. With
+    /// it, the releases and artists files are needed too -- a label without
+    /// its roster, or with a description naming artists by bare id, is half a
+    /// station.
+    #[arg(long, value_name = "FILE", requires_all = ["releases", "artists"])]
     pub labels: Option<PathBuf>,
 
-    /// Path to discogs_<date>_artists.xml.gz. Optional, and only used to check
-    /// that the ids the masters credit actually exist.
+    /// Path to discogs_<date>_releases.xml.gz: who released on which label,
+    /// and when. Read together with the labels it points at.
+    #[arg(long, value_name = "FILE", requires = "labels")]
+    pub releases: Option<PathBuf>,
+
+    /// Path to discogs_<date>_artists.xml.gz. Checks that the ids the masters
+    /// credit actually exist, and names the artists label descriptions point
+    /// at by id.
     #[arg(long, value_name = "FILE")]
     pub artists: Option<PathBuf>,
 
@@ -69,19 +85,24 @@ pub struct Args {
 /// One `<master>`: the genres of one release, and who it is credited to.
 #[derive(Default)]
 struct Master {
+    /// The master's own id -- needed only to name the masters a label
+    /// description points at by id.
+    id: Option<i32>,
     /// Discogs ids of the credited artists.
     artists: Vec<i32>,
     genres: Vec<String>,
     styles: Vec<String>,
+    title: Option<String>,
 }
 
 impl Record for Master {
     const ELEMENT: &'static str = "master";
 
-    fn open(_: Attributes<'_>) -> Self {
-        // The master's own id is not needed: nothing points back at a master,
-        // and the genres are counted per artist.
-        Self::default()
+    fn open(attributes: Attributes<'_>) -> Self {
+        Self {
+            id: attributes.parse("id"),
+            ..Self::default()
+        }
     }
 
     fn field(&mut self, path: &[&str], text: &str, _: Attributes<'_>) {
@@ -96,6 +117,9 @@ impl Record for Master {
             }
             ["genres", "genre"] if !text.is_empty() => self.genres.push(text.to_string()),
             ["styles", "style"] if !text.is_empty() => self.styles.push(text.to_string()),
+            // The master's own title, at depth one: a video's title sits at
+            // `["videos", "video", "title"]` and is somebody's upload.
+            ["title"] if !text.is_empty() => self.title = Some(text.to_string()),
             _ => {}
         }
     }
@@ -121,7 +145,9 @@ impl Record for Label {
         match path {
             ["id"] => self.id = text.parse().ok(),
             ["name"] => self.name = Some(text.to_string()),
-            ["profile"] if !text.is_empty() => self.profile = Some(text.to_string()),
+            // Line breaks arrive as `&#13;` plus a newline; one kind of break
+            // is stored, so a page splitting paragraphs has one rule to follow.
+            ["profile"] if !text.is_empty() => self.profile = Some(text.replace("\r\n", "\n").replace('\r', "\n")),
             // camelCase, alone among these element names; the id is on the
             // attribute while the text is the parent's name.
             ["parentLabel"] => self.parent_id = attributes.parse("id"),
@@ -132,29 +158,76 @@ impl Record for Label {
     }
 }
 
-/// One `<artist>`, read only for its id.
+/// One `<artist>`, read for its id and, when a label description points at
+/// it, its name.
+#[derive(Default)]
 struct DiscogsArtist {
     id: Option<i32>,
+    name: Option<String>,
 }
 
 impl Record for DiscogsArtist {
     const ELEMENT: &'static str = "artist";
 
     fn open(_: Attributes<'_>) -> Self {
-        Self { id: None }
+        Self::default()
     }
 
     fn field(&mut self, path: &[&str], text: &str, _: Attributes<'_>) {
-        // Only the record's own id, at depth one. `["members", "id"]` and
-        // `["aliases", "name"]` are other artists.
-        if path == ["id"] {
-            self.id = text.parse().ok();
+        // Only the record's own id and name, at depth one. `["members", "id"]`
+        // and `["aliases", "name"]` are other artists.
+        match path {
+            ["id"] => self.id = text.parse().ok(),
+            ["name"] if !text.is_empty() => self.name = Some(text.to_string()),
+            _ => {}
         }
     }
 }
 
 /// What one pass over the masters file yields, per artist.
 type GenreCounts = HashMap<i32, HashMap<(String, bool), i32>>;
+
+/// The references label descriptions make by bare id, grouped by what they
+/// point at, so each file's pass can pick up the names it holds.
+#[derive(Default)]
+struct Wanted {
+    artists: HashSet<i32>,
+    labels: HashSet<i32>,
+    masters: HashSet<i32>,
+    releases: HashSet<i32>,
+}
+
+impl Wanted {
+    fn of(labels: &[Label]) -> Self {
+        let mut wanted = Self::default();
+        for (kind, id) in labels.iter().filter_map(|l| l.profile.as_deref()).flat_map(markup::unnamed) {
+            let set = match kind {
+                Kind::Artist => &mut wanted.artists,
+                Kind::Label => &mut wanted.labels,
+                Kind::Master => &mut wanted.masters,
+                Kind::Release => &mut wanted.releases,
+            };
+            set.insert(id);
+        }
+        wanted
+    }
+}
+
+/// Names found for the references in label descriptions.
+#[derive(Default)]
+struct Names {
+    artists: HashMap<i32, String>,
+    labels: HashMap<i32, String>,
+    masters: HashMap<i32, String>,
+    releases: HashMap<i32, String>,
+}
+
+/// Everything read out of the dump files, ready to write.
+struct Read {
+    counts: GenreCounts,
+    labels: Vec<Label>,
+    rosters: Option<discogs_releases::Rosters>,
+}
 
 pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
     // The join comes from the MusicBrainz import; without it there is nothing
@@ -173,24 +246,85 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
         .clone()
         .or_else(|| version_from_filename(&args.masters))
         .context("cannot tell the dump version from the filename; pass --dump-version")?;
+    let latest = latest_year(&version)?;
 
     // Only the ids that some canonical artist actually points at are worth
     // counting; the rest of Discogs is millions of artists this sky has never
     // heard of.
-    let wanted: HashSet<i32> = mapping.keys().copied().collect();
+    let credited: HashSet<i32> = mapping.keys().copied().collect();
 
-    let known_artists = match &args.artists {
-        Some(path) => Some(read_artist_ids(path, &wanted)?),
-        None => None,
-    };
-
-    let counts = read_masters(&args.masters, &wanted, known_artists.as_ref())?;
-    let labels = match &args.labels {
+    // Labels first: their descriptions say which names the other files must
+    // be asked for.
+    let mut labels = match &args.labels {
         Some(path) => read_labels(path)?,
         None => Vec::new(),
     };
+    let wanted = Wanted::of(&labels);
+    let mut names = Names {
+        labels: labels
+            .iter()
+            .filter(|l| l.id.is_some_and(|id| wanted.labels.contains(&id)))
+            .filter_map(|l| Some((l.id?, l.name.clone()?)))
+            .collect(),
+        ..Names::default()
+    };
 
-    write(pool, &mapping, &counts, &labels, &version).await
+    let known_artists = match &args.artists {
+        Some(path) => {
+            let (known, artist_names) = read_artists(path, &credited, &wanted.artists)?;
+            names.artists = artist_names;
+            Some(known)
+        }
+        None => None,
+    };
+
+    let (counts, titles) = read_masters(&args.masters, &credited, known_artists.as_ref(), &wanted.masters)?;
+    names.masters = titles;
+
+    let rosters = match &args.releases {
+        Some(path) => {
+            let rosters = discogs_releases::read(path, &credited, &wanted.releases, latest)?;
+            names.releases.clone_from(&rosters.titles);
+            Some(rosters)
+        }
+        None => None,
+    };
+
+    name_references(&mut labels, &names);
+
+    write(pool, &mapping, Read { counts, labels, rosters }, &version).await
+}
+
+/// The last year a release in this dump can carry: the year after the dump's
+/// own, since a label announces what it will issue next January.
+fn latest_year(version: &str) -> Result<i16> {
+    version
+        .get(..4)
+        .and_then(|year| year.parse::<i16>().ok())
+        .map(|year| year + 1)
+        .with_context(|| format!("the dump version {version:?} does not start with a year"))
+}
+
+/// Rewrites every label description so its id-only references carry names.
+fn name_references(labels: &mut [Label], names: &Names) {
+    let mut unnamed = 0usize;
+    for label in labels.iter_mut() {
+        let Some(profile) = label.profile.as_deref() else {
+            continue;
+        };
+        let rewritten = markup::named(profile, |kind, id| {
+            let table = match kind {
+                Kind::Artist => &names.artists,
+                Kind::Label => &names.labels,
+                Kind::Master => &names.masters,
+                Kind::Release => &names.releases,
+            };
+            table.get(&id).map(String::as_str)
+        });
+        unnamed += markup::unnamed(&rewritten).count();
+        label.profile = Some(rewritten);
+    }
+    tracing::info!(left_unnamed = unnamed, "label descriptions named");
 }
 
 /// Which Discogs id each canonical artist points at, taken from the URL
@@ -200,10 +334,17 @@ async fn load_discogs_ids(pool: &PgPool) -> Result<HashMap<i32, Vec<i32>>> {
     // there are millions of URL rows and only the Discogs artist ones matter.
     // `/artist/` specifically -- the same relationship kind also points at
     // label and release pages on some artists.
+    //
+    // MusicBrainz's special purpose artists are left out: "Various Artists"
+    // links to Discogs's "Various", and joining through it would hand one
+    // star the genres and the label of every compilation there is.
     let rows: Vec<(i32, String)> = sqlx::query_as(
-        "SELECT artist_id, url FROM artist_url
-         WHERE kind = 'discogs' AND url LIKE '%discogs.com/artist/%'",
+        "SELECT u.artist_id, u.url FROM artist_url u
+         JOIN artist a ON a.id = u.artist_id
+         WHERE u.kind = 'discogs' AND u.url LIKE '%discogs.com/artist/%'
+           AND a.mbid <> ALL($1)",
     )
+    .bind(super::special::special_purpose())
     .fetch_all(pool)
     .await
     .context("failed to read Discogs links from the canon")?;
@@ -242,7 +383,7 @@ fn version_from_filename(path: &Path) -> Option<String> {
 /// `MultiGzDecoder` rather than `GzDecoder`: a file built by concatenating
 /// gzip members would otherwise stop at the first one and silently truncate
 /// the import — the same trap the MusicBrainz importer hit with bzip2.
-fn open_dump(path: &Path) -> Result<impl BufRead> {
+pub(super) fn open_dump(path: &Path) -> Result<impl BufRead> {
     let file = File::open(path).with_context(|| format!("cannot open {}", path.display()))?;
     let size = file.metadata().map_or(0, |m| m.len());
     tracing::info!(dump = %path.display(), size_mb = size / 1_048_576, "reading a Discogs dump");
@@ -250,21 +391,29 @@ fn open_dump(path: &Path) -> Result<impl BufRead> {
     Ok(BufReader::with_capacity(1 << 20, decoder))
 }
 
-/// Reads the artists file, keeping only the ids the canon points at.
-fn read_artist_ids(path: &Path, wanted: &HashSet<i32>) -> Result<HashSet<i32>> {
+/// Reads the artists file: which of the ids the canon points at exist, and
+/// the names of the artists label descriptions point at.
+fn read_artists(path: &Path, credited: &HashSet<i32>, to_name: &HashSet<i32>) -> Result<(HashSet<i32>, HashMap<i32, String>)> {
     let mut records = Records::<_, DiscogsArtist>::new(open_dump(path)?);
-    let mut found = HashSet::with_capacity(wanted.len());
+    let mut found = HashSet::with_capacity(credited.len());
+    let mut names = HashMap::with_capacity(to_name.len());
     let mut total: u64 = 0;
     while let Some(record) = records.next_record()? {
         total += 1;
-        if let Some(id) = record.id
-            && wanted.contains(&id)
-        {
+        let Some(id) = record.id else {
+            continue;
+        };
+        if credited.contains(&id) {
             found.insert(id);
         }
+        if let Some(name) = record.name
+            && to_name.contains(&id)
+        {
+            names.insert(id, name);
+        }
     }
-    tracing::info!(records = total, linked_found = found.len(), "artists file read");
-    Ok(found)
+    tracing::info!(records = total, linked_found = found.len(), named = names.len(), "artists file read");
+    Ok((found, names))
 }
 
 /// Adds one master's genres to the running counts, returning how many artist
@@ -301,25 +450,33 @@ fn tally(master: &Master, wanted: &HashSet<i32>, known: Option<&HashSet<i32>>, c
     credited
 }
 
-/// Reads the masters file, counting genres and styles per Discogs artist.
-fn read_masters(path: &Path, wanted: &HashSet<i32>, known: Option<&HashSet<i32>>) -> Result<GenreCounts> {
+/// Reads the masters file, counting genres and styles per Discogs artist and
+/// keeping the titles of the masters label descriptions point at.
+fn read_masters(path: &Path, wanted: &HashSet<i32>, known: Option<&HashSet<i32>>, to_title: &HashSet<i32>) -> Result<(GenreCounts, HashMap<i32, String>)> {
     let mut records = Records::<_, Master>::new(open_dump(path)?);
     let mut counts: GenreCounts = HashMap::new();
+    let mut titles = HashMap::with_capacity(to_title.len());
     let mut total: u64 = 0;
     let mut credited: u64 = 0;
 
     while let Some(master) = records.next_record()? {
         total += 1;
         credited += tally(&master, wanted, known, &mut counts);
+        if let (Some(id), Some(title)) = (master.id, master.title)
+            && to_title.contains(&id)
+        {
+            titles.insert(id, title);
+        }
     }
 
     tracing::info!(
         records = total,
         artists_with_genres = counts.len(),
         credits_counted = credited,
+        titles = titles.len(),
         "masters file read"
     );
-    Ok(counts)
+    Ok((counts, titles))
 }
 
 /// Reads the labels file.
@@ -338,8 +495,8 @@ fn read_labels(path: &Path) -> Result<Vec<Label>> {
 }
 
 /// Writes everything in one transaction: an interrupted import leaves the
-/// previous genres and labels intact rather than a half-replaced set.
-async fn write(pool: &PgPool, mapping: &HashMap<i32, Vec<i32>>, counts: &GenreCounts, labels: &[Label], version: &str) -> Result<()> {
+/// previous genres, labels and rosters intact rather than a half-replaced set.
+async fn write(pool: &PgPool, mapping: &HashMap<i32, Vec<i32>>, read: Read, version: &str) -> Result<()> {
     let mut tx = pool.begin().await.context("failed to open the import transaction")?;
 
     let import_id: i32 = sqlx::query_scalar(
@@ -360,9 +517,15 @@ async fn write(pool: &PgPool, mapping: &HashMap<i32, Vec<i32>>, counts: &GenreCo
 
     let mut written: i64 = 0;
     written += write_artist_discogs(&mut tx, mapping).await?;
-    written += write_genres(&mut tx, mapping, counts).await?;
-    if !labels.is_empty() {
-        written += write_labels(&mut tx, labels).await?;
+    written += write_genres(&mut tx, mapping, &read.counts).await?;
+    if !read.labels.is_empty() {
+        // Clears the rosters with the labels they hang from: `label_artist`
+        // and `label_year` reference `label` and go with it.
+        written += write_labels(&mut tx, &read.labels).await?;
+        if let Some(rosters) = &read.rosters {
+            let held: HashSet<i32> = read.labels.iter().filter_map(|l| l.id).collect();
+            written += write_rosters(&mut tx, rosters, mapping, &held).await?;
+        }
     }
 
     sqlx::query("UPDATE dump_import SET finished_at = now(), rows_imported = $2 WHERE id = $1")
@@ -375,6 +538,61 @@ async fn write(pool: &PgPool, mapping: &HashMap<i32, Vec<i32>>, counts: &GenreCo
     tx.commit().await.context("failed to commit the import")?;
     tracing::info!(version, rows = written, "Discogs import complete");
     Ok(())
+}
+
+/// Writes the rosters, and the chronology of every label that has one.
+async fn write_rosters(
+    tx: &mut sqlx::PgTransaction<'_>,
+    rosters: &discogs_releases::Rosters,
+    mapping: &HashMap<i32, Vec<i32>>,
+    held: &HashSet<i32>,
+) -> Result<i64> {
+    let rows = discogs_releases::roster_rows(&rosters.spans, mapping, held);
+    let mut written = 0i64;
+    for chunk in rows.chunks(BATCH) {
+        let labels: Vec<i32> = chunk.iter().map(|(label, _, _)| *label).collect();
+        let artists: Vec<i32> = chunk.iter().map(|(_, artist, _)| *artist).collect();
+        let releases: Vec<i32> = chunk.iter().map(|(_, _, span)| span.releases).collect();
+        let firsts: Vec<Option<i16>> = chunk.iter().map(|(_, _, span)| span.first).collect();
+        let lasts: Vec<Option<i16>> = chunk.iter().map(|(_, _, span)| span.last).collect();
+        sqlx::query(
+            "INSERT INTO label_artist (label_id, artist_id, releases, first_year, last_year)
+             SELECT * FROM UNNEST($1::int[], $2::int[], $3::int[], $4::smallint[], $5::smallint[])",
+        )
+        .bind(&labels)
+        .bind(&artists)
+        .bind(&releases)
+        .bind(&firsts)
+        .bind(&lasts)
+        .execute(&mut **tx)
+        .await
+        .context("failed to write label rosters")?;
+        written += i64::try_from(chunk.len()).unwrap_or(i64::MAX);
+    }
+
+    let stations: HashSet<i32> = rows.iter().map(|(label, _, _)| *label).collect();
+    tracing::info!(rows = written, stations = stations.len(), "label rosters written");
+
+    let years = discogs_releases::year_rows(&rosters.years, &stations);
+    let mut year_written = 0i64;
+    for chunk in years.chunks(BATCH) {
+        let labels: Vec<i32> = chunk.iter().map(|(label, _, _)| *label).collect();
+        let years: Vec<i16> = chunk.iter().map(|(_, year, _)| *year).collect();
+        let releases: Vec<i32> = chunk.iter().map(|(_, _, releases)| *releases).collect();
+        sqlx::query(
+            "INSERT INTO label_year (label_id, year, releases)
+             SELECT * FROM UNNEST($1::int[], $2::smallint[], $3::int[])",
+        )
+        .bind(&labels)
+        .bind(&years)
+        .bind(&releases)
+        .execute(&mut **tx)
+        .await
+        .context("failed to write label chronologies")?;
+        year_written += i64::try_from(chunk.len()).unwrap_or(i64::MAX);
+    }
+    tracing::info!(rows = year_written, "label chronologies written");
+    Ok(written + year_written)
 }
 
 /// Records which Discogs artist each canonical artist is, so the join is
@@ -743,5 +961,82 @@ mod tests {
         );
         let labels = labels_of(xml);
         assert_eq!(labels[0].profile.as_deref(), Some("Carl Craig's techno label."));
+    }
+
+    #[test]
+    fn stores_one_kind_of_line_break_in_a_description() {
+        let xml = "<labels><label><id>1</id><name>L</name><profile>One.&#13;\n&#13;\nTwo.\rThree.</profile></label></labels>";
+        assert_eq!(labels_of(xml)[0].profile.as_deref(), Some("One.\n\nTwo.\nThree."));
+    }
+
+    #[test]
+    fn a_master_title_is_its_own_and_not_a_videos() {
+        let xml = concat!(
+            "<masters><master id=\"12\"><title>Nevermind</title>",
+            "<videos><video src=\"x\"><title>Nirvana - Lithium (Live)</title></video></videos></master></masters>"
+        );
+        let mut records = Records::<_, Master>::new(xml.as_bytes());
+        let master = records.next_record().unwrap().unwrap();
+        assert_eq!((master.id, master.title.as_deref()), (Some(12), Some("Nevermind")));
+    }
+
+    #[test]
+    fn an_artists_name_is_its_own_and_not_an_aliases() {
+        let xml = concat!(
+            "<artists><artist><id>674</id><name>Stephan Grieder</name>",
+            "<aliases><name id=\"9\">Other Name</name></aliases></artist></artists>"
+        );
+        let mut records = Records::<_, DiscogsArtist>::new(xml.as_bytes());
+        let artist = records.next_record().unwrap().unwrap();
+        assert_eq!((artist.id, artist.name.as_deref()), (Some(674), Some("Stephan Grieder")));
+    }
+
+    #[test]
+    fn asks_each_file_for_the_names_descriptions_point_at() {
+        let labels = labels_of(concat!(
+            "<labels><label><id>5</id><name>Svek</name>",
+            "<profile>Started by [a674], run with [a=Jesper], see [l2] and [m12] and [r1].</profile></label></labels>"
+        ));
+        let wanted = Wanted::of(&labels);
+        assert_eq!(wanted.artists, HashSet::from([674]));
+        assert_eq!(wanted.labels, HashSet::from([2]));
+        assert_eq!(wanted.masters, HashSet::from([12]));
+        assert_eq!(wanted.releases, HashSet::from([1]));
+    }
+
+    #[test]
+    fn names_the_references_it_found_names_for() {
+        let mut labels = labels_of("<labels><label><id>5</id><name>Svek</name><profile>By [a674] and [a239].</profile></label></labels>");
+        let names = Names {
+            artists: HashMap::from([(674, "Stephan Grieder".to_string())]),
+            ..Names::default()
+        };
+        name_references(&mut labels, &names);
+        assert_eq!(labels[0].profile.as_deref(), Some("By [a674=Stephan Grieder] and [a239]."));
+    }
+
+    #[test]
+    fn a_release_may_carry_the_year_after_its_dump_and_no_later() {
+        assert_eq!(latest_year("20260801").unwrap(), 2027);
+        assert!(latest_year("latest").is_err());
+    }
+
+    #[test]
+    fn labels_come_with_their_releases_and_artists_or_not_at_all() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct Cli {
+            #[command(flatten)]
+            args: Args,
+        }
+
+        let base = ["lyrid", "--masters", "m.xml.gz"];
+        let with = |extra: &[&'static str]| Cli::try_parse_from(base.iter().chain(extra)).map(|_| ());
+        assert!(with(&[]).is_ok(), "genres alone still import");
+        assert!(with(&["--labels", "l", "--releases", "r", "--artists", "a"]).is_ok());
+        assert!(with(&["--labels", "l"]).is_err(), "a label without its roster is half a station");
+        assert!(with(&["--labels", "l", "--releases", "r"]).is_err(), "descriptions would name nobody");
+        assert!(with(&["--releases", "r", "--artists", "a"]).is_err(), "rosters need the labels they hang from");
     }
 }

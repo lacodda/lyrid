@@ -5,6 +5,7 @@ mod config;
 mod import;
 mod layout;
 mod mail;
+mod markup;
 mod slice;
 
 use anyhow::{Context, Result};

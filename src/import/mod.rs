@@ -1,8 +1,10 @@
 pub mod copy_text;
 pub mod discogs;
+pub mod discogs_releases;
 pub mod discogs_xml;
 pub mod listenbrainz;
 pub mod musicbrainz;
+pub mod special;
 pub mod wikidata;
 pub mod wikipedia;
 pub mod wikitext;

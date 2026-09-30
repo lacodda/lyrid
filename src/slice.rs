@@ -19,14 +19,18 @@
 //! emptied in bulk before the artists themselves: `ON DELETE CASCADE` is
 //! enforced by a per-row trigger, so deleting the artists first would fire
 //! sixteen triggers for each of nearly three million rows and take hours.
-//! `label` references no artist at all and is dropped outright.
+//!
+//! `label` references no artist, so no cascade from the artists reaches it.
+//! A label stays when it still has a roster in the slice -- a station the
+//! slice can open -- or owns one that does, so the line "part of Warner" on a
+//! station still leads somewhere; the other two million go.
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use sqlx::AssertSqlSafe;
-use sqlx::PgPool;
 #[cfg(test)]
 use sqlx::postgres::PgPoolOptions;
+use sqlx::{PgConnection, PgPool};
 
 #[derive(Parser)]
 pub struct Args {
@@ -112,48 +116,9 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
     // artists directly fires sixteen of them for each of nearly three million
     // rows. Measured at roughly 3-5 ms per artist, which is hours -- and the
     // stand this exists for is slower than the machine it was measured on.
-    //
-    // The table list comes from the catalogue rather than from a list written
-    // here, so a table added later is covered without this code being edited.
-    // That was the property the cascade was providing, and it is worth keeping
-    // once the cascade itself is no longer doing the work.
-    let children: Vec<(String, String)> = sqlx::query_as(
-        "SELECT c.relname::text, a.attname::text
-         FROM pg_constraint con
-         JOIN pg_class c ON c.oid = con.conrelid
-         JOIN pg_class f ON f.oid = con.confrelid
-         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY (con.conkey)
-         WHERE con.contype = 'f' AND f.relname = 'artist' AND con.confdeltype = 'c'
-         ORDER BY c.relname, a.attname",
-    )
-    .fetch_all(&mut *tx)
-    .await
-    .context("failed to read the tables referencing artist")?;
-
-    if children.is_empty() {
+    let pruned = prune_children(&mut tx, "artist", "kept_artist").await?;
+    if pruned == 0 {
         bail!("no table references artist: refusing to cut a slice against an unexpected schema");
-    }
-
-    for (table, column) in &children {
-        // These identifiers come from the catalogue rather than from any
-        // input, but they are still checked before being interpolated: the
-        // statement cannot be parameterised, so the guarantee should be
-        // enforced here rather than asserted in a comment.
-        if !is_plain_identifier(table) || !is_plain_identifier(column) {
-            bail!("refusing to prune `{table}`.`{column}`: not a plain identifier");
-        }
-        let statement = format!("DELETE FROM {table} WHERE {column} NOT IN (SELECT id FROM kept_artist)");
-        // The statement is assembled rather than literal, so sqlx requires the
-        // assertion below. It is honest here: both identifiers come from the
-        // catalogue rather than from input, and both were just checked against
-        // `is_plain_identifier`. The only value in the statement is a table
-        // and a column name; there is nothing a caller could influence.
-        let rows = sqlx::raw_sql(AssertSqlSafe(statement))
-            .execute(&mut *tx)
-            .await
-            .with_context(|| format!("failed to prune {table}.{column}"))?
-            .rows_affected();
-        tracing::info!(table = %table, column = %column, removed = rows, "pruned");
     }
 
     // By now the cascades have nothing left to find, so this is a plain delete.
@@ -163,14 +128,7 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
         .context("failed to remove artists outside the slice")?
         .rows_affected();
 
-    // `label` is the one large table that does not reference an artist at all,
-    // so no cascade reaches it. Nothing the map or the card serves reads a
-    // label, and it is the third largest table in the canon.
-    let labels = sqlx::query("DELETE FROM label")
-        .execute(&mut *tx)
-        .await
-        .context("failed to remove labels")?
-        .rows_affected();
+    let labels = prune_labels(&mut tx).await?;
 
     tx.commit().await.context("failed to commit the slice")?;
 
@@ -183,6 +141,109 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
     tracing::info!("run `VACUUM FULL` to return the freed space to the filesystem");
 
     Ok(())
+}
+
+/// Empties, in bulk, the rows of every table whose `ON DELETE CASCADE` key
+/// into `parent` points outside `kept`, and returns how many such keys there
+/// were.
+///
+/// The table list comes from the catalogue rather than from a list written
+/// here, so a table added later is covered without this code being edited.
+/// That was the property the cascade was providing, and it is worth keeping
+/// once the cascade itself is no longer doing the work.
+async fn prune_children(tx: &mut PgConnection, parent: &str, kept: &str) -> Result<usize> {
+    let children: Vec<(String, String)> = sqlx::query_as(
+        "SELECT c.relname::text, a.attname::text
+         FROM pg_constraint con
+         JOIN pg_class c ON c.oid = con.conrelid
+         JOIN pg_class f ON f.oid = con.confrelid
+         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY (con.conkey)
+         WHERE con.contype = 'f' AND f.relname = $1 AND con.confdeltype = 'c'
+         ORDER BY c.relname, a.attname",
+    )
+    .bind(parent)
+    .fetch_all(&mut *tx)
+    .await
+    .with_context(|| format!("failed to read the tables referencing {parent}"))?;
+
+    for (table, column) in &children {
+        // These identifiers come from the catalogue rather than from any
+        // input, but they are still checked before being interpolated: the
+        // statement cannot be parameterised, so the guarantee should be
+        // enforced here rather than asserted in a comment.
+        if ![table.as_str(), column, kept].into_iter().all(is_plain_identifier) {
+            bail!("refusing to prune `{table}`.`{column}`: not a plain identifier");
+        }
+        let statement = format!("DELETE FROM {table} WHERE {column} NOT IN (SELECT id FROM {kept})");
+        // The statement is assembled rather than literal, so sqlx requires the
+        // assertion below. It is honest here: every identifier in it comes
+        // from the catalogue or from this module, and all were just checked
+        // against `is_plain_identifier`. There is nothing a caller could
+        // influence.
+        let rows = sqlx::raw_sql(AssertSqlSafe(statement))
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("failed to prune {table}.{column}"))?
+            .rows_affected();
+        tracing::info!(table = %table, column = %column, removed = rows, "pruned");
+    }
+    Ok(children.len())
+}
+
+/// Keeps the labels a slice can still open, and returns how many went.
+///
+/// A label stays when it has a roster among the kept artists -- the pruning
+/// of `label_artist` has already happened by now -- or when it owns, however
+/// far up, one that does: a station's "part of" line should lead somewhere.
+/// Everything else goes, which on a full canon is nearly all of 2.4 million.
+async fn prune_labels(tx: &mut PgConnection) -> Result<u64> {
+    sqlx::query("CREATE TEMPORARY TABLE kept_label (id integer PRIMARY KEY) ON COMMIT DROP")
+        .execute(&mut *tx)
+        .await
+        .context("failed to create the table of kept labels")?;
+
+    // UNION rather than UNION ALL: it stops the walk at a label already seen,
+    // so an ownership cycle in the dump ends instead of recursing forever.
+    sqlx::query(
+        "INSERT INTO kept_label (id)
+         WITH RECURSIVE kept (id) AS (
+             SELECT label_id FROM label_artist
+             UNION
+             SELECT l.parent_label_id FROM label l JOIN kept k ON k.id = l.id
+             WHERE l.parent_label_id IS NOT NULL
+         )
+         SELECT id FROM kept",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("failed to choose the labels to keep")?;
+
+    sqlx::query("ANALYZE kept_label")
+        .execute(&mut *tx)
+        .await
+        .context("failed to analyse the table of kept labels")?;
+
+    // The chronology and whatever else hangs off a label, in bulk.
+    prune_children(&mut *tx, "label", "kept_label").await?;
+
+    // A label's owner is set to NULL when the owner goes -- a per-row trigger
+    // again, and nearly every label that goes owns or is owned by another that
+    // goes too. Cleared in one statement first, so the delete has nothing
+    // left to update. No kept label points at a removed one: owners are kept.
+    sqlx::query(
+        "UPDATE label SET parent_label_id = NULL
+         WHERE parent_label_id IS NOT NULL AND id NOT IN (SELECT id FROM kept_label)",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("failed to detach the labels outside the slice")?;
+
+    let removed = sqlx::query("DELETE FROM label WHERE id NOT IN (SELECT id FROM kept_label)")
+        .execute(&mut *tx)
+        .await
+        .context("failed to remove labels outside the slice")?
+        .rows_affected();
+    Ok(removed)
 }
 
 /// Whether a name is safe to interpolate into a statement unquoted: the
@@ -254,5 +315,85 @@ mod tests {
                 "the refusal should name the flag, got: {error}"
             );
         }
+    }
+
+    /// Cuts the labels of a fixture canon inside a transaction that is rolled
+    /// back. The rule is SQL -- a recursive walk up the owners -- so it runs
+    /// against Postgres, and says so when there is none to run against.
+    #[tokio::test]
+    async fn keeps_the_labels_with_a_roster_and_everything_that_owns_them() {
+        let _ = dotenvy::dotenv();
+        let Ok(url) = std::env::var("LYRID_TEST_DATABASE_URL") else {
+            eprintln!("LYRID_TEST_DATABASE_URL is not set: the label cut was NOT checked against a database");
+            return;
+        };
+        let pool = PgPoolOptions::new().max_connections(1).connect(&url).await.expect("test database");
+        sqlx::migrate!().run(&pool).await.expect("migrations apply");
+        let mut tx = pool.begin().await.unwrap();
+
+        // Ids far above anything Discogs or MusicBrainz issues.
+        let artist = 2_000_000_301;
+        sqlx::query("INSERT INTO artist (id, mbid, name, sort_name) VALUES ($1, gen_random_uuid(), 'Fixture', 'Fixture')")
+            .bind(artist)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+
+        // station -> owner -> grand owner; an unrelated pair that goes; and
+        // an ownership cycle around a second station, which must end.
+        let (station, owner, grand, gone, gone_owner, looped, loop_owner) = (
+            2_000_000_001,
+            2_000_000_002,
+            2_000_000_003,
+            2_000_000_004,
+            2_000_000_005,
+            2_000_000_006,
+            2_000_000_007,
+        );
+        for id in [station, owner, grand, gone, gone_owner, looped, loop_owner] {
+            sqlx::query("INSERT INTO label (id, name) VALUES ($1, 'Fixture label')")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+        }
+        for (child, parent) in [(station, owner), (owner, grand), (gone, gone_owner), (looped, loop_owner), (loop_owner, looped)] {
+            sqlx::query("UPDATE label SET parent_label_id = $2 WHERE id = $1")
+                .bind(child)
+                .bind(parent)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+        }
+        for label in [station, looped] {
+            sqlx::query("INSERT INTO label_artist (label_id, artist_id, releases) VALUES ($1, $2, 1)")
+                .bind(label)
+                .bind(artist)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+        }
+        for label in [station, gone] {
+            sqlx::query("INSERT INTO label_year (label_id, year, releases) VALUES ($1, 1990, 3)")
+                .bind(label)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+        }
+
+        prune_labels(&mut tx).await.expect("the cut runs");
+
+        let left: Vec<i32> = sqlx::query_scalar("SELECT id FROM label WHERE id >= 2000000001 ORDER BY id")
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(left, vec![station, owner, grand, looped, loop_owner]);
+        let years: Vec<i32> = sqlx::query_scalar("SELECT label_id FROM label_year WHERE label_id >= 2000000001")
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(years, vec![station], "the chronology goes with its label");
+
+        tx.rollback().await.unwrap();
     }
 }
