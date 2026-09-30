@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { readArtistId, readView, writeLocation } from './location'
+import { readArtistId, readDossier, readView, writeLocation } from './location'
 
 describe('readArtistId', () => {
   it('reads a star route', () => {
@@ -66,5 +66,44 @@ describe('writeLocation', () => {
     const [path, hash] = url.split('#')
     expect(readArtistId(path as string)).toBe(54)
     expect(readView(hash as string)).toEqual(view)
+  })
+})
+
+describe('readDossier', () => {
+  it('reads a label by its Discogs id and a scene by its Wikidata item', () => {
+    expect(readDossier('/label/1')).toEqual({ kind: 'label', id: 1 })
+    expect(readDossier('/label/1/')).toEqual({ kind: 'label', id: 1 })
+    expect(readDossier('/scene/Q18125')).toEqual({ kind: 'scene', qid: 18125 })
+    expect(readDossier('/scene/q18125')).toEqual({ kind: 'scene', qid: 18125 })
+    // A bare number can only mean the same item.
+    expect(readDossier('/scene/18125')).toEqual({ kind: 'scene', qid: 18125 })
+  })
+
+  it('is null for anything that is not one', () => {
+    expect(readDossier('/')).toBeNull()
+    expect(readDossier('/star/54')).toBeNull()
+    expect(readDossier('/label/motown')).toBeNull()
+    expect(readDossier('/label/0')).toBeNull()
+    expect(readDossier('/scene/Q')).toBeNull()
+    expect(readDossier('/scene/P434')).toBeNull()
+    expect(readDossier('/label/90071992547409911')).toBeNull()
+  })
+})
+
+describe('writeLocation with a dossier', () => {
+  it('gives the path to the dossier and keeps the camera', () => {
+    const view = { x: 1, y: 2, scale: 3 }
+    expect(writeLocation({ artistId: 54, view, route: [1, 2], dossier: { kind: 'label', id: 7 } })).toBe('/label/7#1,2,3')
+    expect(writeLocation({ artistId: 54, view: null, dossier: { kind: 'scene', qid: 18125 } })).toBe('/scene/Q18125')
+  })
+
+  it('round-trips through the reader', () => {
+    for (const dossier of [{ kind: 'label', id: 7 } as const, { kind: 'scene', qid: 18125 } as const]) {
+      expect(readDossier(writeLocation({ artistId: null, view: null, dossier }))).toEqual(dossier)
+    }
+  })
+
+  it('hands the path back when it closes', () => {
+    expect(writeLocation({ artistId: 54, view: null, dossier: null })).toBe('/star/54')
   })
 })

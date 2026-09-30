@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import { cn } from 'dowel-ui'
 
-import { fetchArtist, type Alongside, type Artist, type Link, type Nebula, type Neighbour, type Origin } from '@/api'
+import { fetchArtist, type Alongside, type Artist, type Link, type Nebula, type Neighbour, type OnLabel } from '@/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { panelVariants, SectionLabel } from '@/components/ui/panel'
 import { Spinner } from '@/components/ui/spinner'
 import type { Side } from './Compare'
+import type { Dossier } from './location'
 import { reasons } from './why'
 
 interface Props {
@@ -28,6 +29,8 @@ interface Props {
   onListen: (uploads: string, name: string) => void
   /** Starts the radio of a nebula. */
   onRadio: (nebula: Nebula) => void
+  /** Opens a station this star belongs to: a label it released on, or where it comes from. */
+  onDossier: (dossier: Dossier) => void
   /** The star the player is sounding, so the card can say it is this one. */
   sounding: number | null
 }
@@ -45,7 +48,7 @@ interface Props {
  * of three million have no encyclopaedia article and no influence links, so an
  * empty section is the normal case, not a failure to render.
  */
-export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare, onListen, onRadio, sounding }: Props) {
+export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare, onListen, onRadio, onDossier, sounding }: Props) {
   const { t } = useTranslation()
   const [artist, setArtist] = useState<Artist | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -64,10 +67,10 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
     return () => abort.abort()
   }, [artistId, t])
 
-  // Computed unconditionally, before any branch: the facts are three strings
-  // from `t`, and calling for them inside the JSX below would put a hook after
-  // an early return.
-  const facts = artist ? factsOf(artist, t) : []
+  // Computed unconditionally, before any branch: the facts are strings from
+  // `t`, and calling for them inside the JSX below would put a hook after an
+  // early return.
+  const facts = artist ? factsOf(artist, t) : null
 
   return (
     <aside
@@ -98,7 +101,7 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
           <h2 className="m-0 pr-8 text-xl font-semibold tracking-tight text-text">{artist.name}</h2>
           {artist.comment && <p className="m-0 text-xs text-dim">{artist.comment}</p>}
 
-          <p className="m-0 text-xs text-dim">{facts.join(' · ')}</p>
+          {facts && <Facts facts={facts} scene={artist.origin?.place ? (artist.origin.qid ?? null) : null} onScene={qid => onDossier({ kind: 'scene', qid })} />}
 
           {/* The two instruments that act on this star and another: walking
               to it as part of a route, and holding it up against a second. */}
@@ -157,12 +160,7 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
             </ul>
           )}
 
-          {artist.labels.length > 0 && (
-            <>
-              <SectionLabel>{t('card.labels')}</SectionLabel>
-              <p className="m-0 text-xs text-dim">{artist.labels.join(' · ')}</p>
-            </>
-          )}
+          <Labels labels={artist.labels} onOpen={id => onDossier({ kind: 'label', id })} />
 
           {artist.releases.length > 0 && (
             <>
@@ -329,13 +327,76 @@ function Neighbours({ people, onOpen }: { people: Alongside[]; onOpen: (id: numb
   )
 }
 
-/** A name that opens its star: a link in look, a button in behaviour. */
-function NameButton({ name, onClick }: { name: string; onClick: () => void }) {
+/** A name that opens something: a link in look, a button in behaviour. */
+function NameButton({ name, onClick, inline = false }: { name: string; onClick: () => void; inline?: boolean }) {
   return (
-    <button type="button" className="cursor-pointer self-start text-left text-accent underline-offset-2 hover:underline" onClick={onClick}>
+    <button
+      type="button"
+      className={cn('cursor-pointer text-left text-accent underline-offset-2 hover:underline', !inline && 'self-start')}
+      onClick={onClick}
+    >
       {name}
     </button>
   )
+}
+
+/** The one-line summary, in three parts: what, where from, and when. */
+interface FactLine {
+  kind: string | null
+  place: string | null
+  years: string
+}
+
+/**
+ * The line under the name, with the place a way into its scene: "formed in
+ * Manchester" opens Manchester, the stars that come from there.
+ */
+function Facts({ facts, scene, onScene }: { facts: FactLine; scene: number | null; onScene: (qid: number) => void }) {
+  const parts: ReactNode[] = []
+  if (facts.kind) parts.push(facts.kind)
+  if (facts.place) {
+    parts.push(scene === null ? facts.place : <NameButton key="place" name={facts.place} onClick={() => onScene(scene)} inline />)
+  }
+  if (facts.years) parts.push(facts.years)
+  if (parts.length === 0) return null
+  return (
+    <p className="m-0 text-xs text-dim">
+      {parts.map((part, index) => (
+        // The three parts have fixed places, so a place is their identity.
+        <Fragment key={index}>
+          {index > 0 && ' · '}
+          {part}
+        </Fragment>
+      ))}
+    </p>
+  )
+}
+
+/**
+ * The labels this star released on, each a station of its own: the name
+ * opens the label's dossier, and the years say when this star was on it.
+ */
+function Labels({ labels, onOpen }: { labels: OnLabel[]; onOpen: (id: number) => void }) {
+  const { t } = useTranslation()
+  if (labels.length === 0) return null
+  return (
+    <>
+      <SectionLabel>{t('card.labels')}</SectionLabel>
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+        {labels.map(label => (
+          <li key={label.id} className="flex items-baseline justify-between gap-2 text-xs">
+            <NameButton name={label.name} onClick={() => onOpen(label.id)} />
+            <span className="shrink-0 text-faint">{labelYears(label)}</span>
+          </li>
+        ))}
+      </ul>
+    </>
+  )
+}
+
+function labelYears({ first_year: first, last_year: last }: OnLabel): string {
+  if (first === null) return ''
+  return last === null || last === first ? String(first) : `${String(first)}–${String(last)}`
 }
 
 /**
@@ -350,15 +411,14 @@ function NameButton({ name, onClick }: { name: string; onClick: () => void }) {
  * and "formed in Seattle" are different claims in every language, and which
  * preposition goes where is the translator's business rather than this file's.
  */
-function factsOf(artist: Artist, t: Translate): string[] {
-  const line = [artist.kind, place(artist, t), years(artist, t)]
-  return line.filter((part): part is string => Boolean(part))
+function factsOf(artist: Artist, t: Translate): FactLine {
+  return { kind: artist.kind, place: place(artist, t), years: years(artist, t) }
 }
 
 type Translate = ReturnType<typeof useTranslation>['t']
 
 function place(artist: Artist, t: Translate): string | null {
-  const origin: Origin | null = artist.origin
+  const origin = artist.origin
   if (!origin?.place) return artist.area
   // "Formed in Seattle" and "born in Seattle" are different claims, and the
   // card says which one it is showing rather than flattening both to "from".

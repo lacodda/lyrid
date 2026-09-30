@@ -23,6 +23,11 @@
  * the link is about — and it is the seed of the playlists-as-routes the plan
  * holds for later, so its address is part of the contract from the start.
  *
+ * A **dossier** is the fourth: a station opened into a page, `/label/1` for a
+ * label (its Discogs id) and `/scene/Q18125` for a place (its Wikidata item,
+ * written the way Wikidata writes it). It opens over the sky rather than
+ * instead of it, so the fragment still says where the camera is behind it.
+ *
  * Three paths are not the map at all — `/charter`, `/confirm` and `/reset`.
  * They are pages, and `readPage` tells them apart from a star. Two of them
  * carry a token in the query string rather than in the fragment, because a
@@ -40,7 +45,12 @@ export interface Location {
   view: View | null
   /** A route's stops in order, when the address is a route. */
   route?: number[] | null
+  /** The dossier open over the sky, when the address is one. */
+  dossier?: Dossier | null
 }
+
+/** A station opened into a page. */
+export type Dossier = { kind: 'label'; id: number } | { kind: 'scene'; qid: number }
 
 /**
  * How many stops a route may have.
@@ -57,7 +67,35 @@ export function readLocation(): Location {
     artistId: readArtistId(window.location.pathname),
     view: readView(window.location.hash),
     route: readRoute(window.location.pathname),
+    dossier: readDossier(window.location.pathname),
   }
+}
+
+/** `/label/1` or `/scene/Q18125` -> a dossier; anything else -> null. */
+export function readDossier(pathname: string): Dossier | null {
+  const label = /^\/label\/(\d+)\/?$/.exec(pathname)
+  if (label) {
+    const id = safeId(label[1])
+    return id === null ? null : { kind: 'label', id }
+  }
+  // The Q is how Wikidata writes an item, and how a reader will type it; a
+  // bare number is taken too, since it can only mean the same item.
+  const scene = /^\/scene\/[Qq]?(\d+)\/?$/.exec(pathname)
+  if (scene) {
+    const qid = safeId(scene[1])
+    return qid === null ? null : { kind: 'scene', qid }
+  }
+  return null
+}
+
+/** The path a dossier lives at. */
+export function dossierPath(dossier: Dossier): string {
+  return dossier.kind === 'label' ? `/label/${String(dossier.id)}` : `/scene/Q${String(dossier.qid)}`
+}
+
+function safeId(digits: string | undefined): number | null {
+  const id = Number(digits)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
 }
 
 /**
@@ -145,11 +183,14 @@ export function readView(hash: string): View | null {
  * URL twice as long for digits nobody can see, and a shared link is read by
  * people.
  */
-export function writeLocation({ artistId, view, route }: Location): string {
-  // A route owns the path while it is open; the card on screen is one of its
-  // stops, and the route is what the link is about.
-  const path =
-    route && route.length > 0
+export function writeLocation({ artistId, view, route, dossier }: Location): string {
+  // An open dossier owns the path: it is what the reader is looking at, and
+  // closing it gives the path back to whatever is under it. Under it, a route
+  // owns the path while it is open; the card on screen is one of its stops,
+  // and the route is what the link is about.
+  const path = dossier
+    ? dossierPath(dossier)
+    : route && route.length > 0
       ? `/route/${route.join(',')}`
       : artistId === null
         ? '/'

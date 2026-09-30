@@ -13,7 +13,8 @@ import { LanguagePicker } from '@/LanguagePicker'
 import { Button } from '@/components/ui/button'
 import { StarCard } from '@/sky/StarCard'
 import { Search } from '@/sky/Search'
-import { readLocation, readPage, writeLocation, type Page } from '@/sky/location'
+import { readLocation, readPage, writeLocation, type Dossier as DossierTarget, type Page } from '@/sky/location'
+import { fitView, type Member } from '@/sky/roster'
 import { HaloPicker, HALO_COLOURS, HALO_DEFAULT } from '@/sky/HaloPicker'
 import { HALO_SHAPES, type HaloShape, type Instruments as InstrumentSettings } from '@/sky/renderer'
 import { Player } from '@/sky/Player'
@@ -29,9 +30,10 @@ import { count } from '@/metrics'
 import { useLanguage } from '@/lib/language'
 import type { Place, Star } from '@/sky/renderer'
 
-// The spectrograph is opened on purpose and rarely, so it is fetched when it
-// is, rather than weighing on every visit's first load.
+// The spectrograph and the dossiers are opened on purpose and rarely, so they
+// are fetched when they are, rather than weighing on every visit's first load.
 const Compare = lazy(() => import('@/sky/Compare').then(module => ({ default: module.Compare })))
+const Dossier = lazy(() => import('@/sky/Dossier').then(module => ({ default: module.Dossier })))
 
 /**
  * The sky fills the window; everything else floats over it.
@@ -331,6 +333,21 @@ export function App() {
   const [pinned, setPinned] = useState<Side | null>(null)
   const [comparing, setComparing] = useState<[Side, Side] | null>(null)
 
+  // -------------------------------------------------------------- dossiers
+  // A station opened into a page over the sky. Seeded from the address, so a
+  // link to a label or a scene lands on it.
+  const [dossier, setDossier] = useState<DossierTarget | null>(() => opened.dossier ?? null)
+
+  const openDossier = useCallback((next: DossierTarget) => {
+    count('dossier_opened')
+    setDossier(next)
+  }, [])
+
+  // One count for a dossier arrived at by link, as for one opened by hand.
+  useEffect(() => {
+    if (opened.dossier) count('dossier_opened')
+  }, [opened])
+
   // ----------------------------------------------------------------- route
   const [route, setRoute] = useState<number[]>(() => opened.route ?? [])
   const [stops, setStops] = useState<Hit[]>([])
@@ -492,11 +509,11 @@ export function App() {
     // write over it would replace `/charter` with `/` on the first frame the
     // sky renders behind it.
     if (page) return
-    const next = writeLocation({ artistId: picked?.artistId ?? null, view: state.view, route })
+    const next = writeLocation({ artistId: picked?.artistId ?? null, view: state.view, route, dossier })
     if (next !== window.location.pathname + window.location.hash) {
       window.history.replaceState(null, '', next)
     }
-  }, [state, picked, page, route])
+  }, [state, picked, page, route, dossier])
 
   // Where the sky was left, saved for next time. The camera changes on every
   // frame, so this asks whether the view has really moved before spending a
@@ -552,7 +569,7 @@ export function App() {
         </div>
       </header>
 
-      <Search onPick={goTo} />
+      <Search onPick={goTo} onDossier={openDossier} />
 
       {/* The right-hand column under the search box: the card, the route and
           the compass. One column with a ceiling, for the reason the left stack
@@ -582,6 +599,7 @@ export function App() {
             }}
             onListen={playChannel}
             onRadio={startRadio}
+            onDossier={openDossier}
             sounding={playing?.id ?? null}
           />
         )}
@@ -643,6 +661,30 @@ export function App() {
             onOpen={id => {
               setComparing(null)
               openById(id)
+            }}
+          />
+        </Suspense>
+      )}
+
+      {dossier && (
+        <Suspense fallback={null}>
+          <Dossier
+            key={dossier.kind === 'label' ? `label-${String(dossier.id)}` : `scene-${String(dossier.qid)}`}
+            target={dossier}
+            overview={overview}
+            onClose={() => setDossier(null)}
+            onOpenStar={id => {
+              setDossier(null)
+              openById(id)
+            }}
+            onOpenDossier={openDossier}
+            onShowOnSky={(members: Member[]) => {
+              if (!state) return
+              const view = fitView(members, state.visible, state.view)
+              if (!view) return
+              setDossier(null)
+              setPicked(null)
+              setTarget(view)
             }}
           />
         </Suspense>

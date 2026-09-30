@@ -17,11 +17,15 @@
     }
   },
   "search": {
-    "placeholder": "find a star",
-    "label": "find a star",
+    "placeholder": "find a star, a label or a place",
+    "label": "find a star, a label or a place",
     "hits": "{{count}} match",
     "hits_other": "{{count}} matches",
-    "clear": "clear the search"
+    "clear": "clear the search",
+    "labels": "labels",
+    "scenes": "places",
+    "stars": "{{number}} star",
+    "stars_other": "{{number}} stars"
   },
   "halo": {
     "label": "halo",
@@ -235,5 +239,41 @@
     "previous": "back",
     "next": "next",
     "start": "start"
+  },
+  "dossier": {
+    "label": "label",
+    "scene": "scene",
+    "reading": "reading…",
+    "failed": "could not read this dossier",
+    "missing": "This label or place is not in this sky.",
+    "years": "{{first}}–{{last}}",
+    "since": "since {{year}}",
+    "releases": "{{number}} release",
+    "releases_other": "{{number}} releases",
+    "formedHere": "formed here: {{number}}",
+    "bornHere": "born here: {{number}}",
+    "formed": "formed here",
+    "born": "born here",
+    "onTheSky": "{{number}} star on the sky",
+    "onTheSky_other": "{{number}} stars on the sky",
+    "showOnSky": "show them on the sky",
+    "mapLabel": "Where its {{count}} star sits on the sky",
+    "mapLabel_other": "Where its {{count}} stars sit on the sky",
+    "mapHint": "click a star to fly to it",
+    "mapStar": "a star in this dossier",
+    "sound": "sound",
+    "partOf": "part of",
+    "imprints": "imprints",
+    "comesFrom": "comes from",
+    "releasedOn": "released on",
+    "byYear": "releases by year",
+    "began": "when they began — formed or born",
+    "peak": "busiest: {{year}}, {{number}}",
+    "roster": "roster",
+    "rosterFirst": "roster — the first {{count}} of {{number}}",
+    "all": "show all {{count}}",
+    "fewer": "show fewer",
+    "source": "from {{name}}",
+    "close": "close"
   }
 }

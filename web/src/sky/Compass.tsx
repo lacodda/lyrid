@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from 'dowel-ui'
 
@@ -6,8 +6,7 @@ import { panelVariants } from '@/components/ui/panel'
 import type { Region } from '@/api'
 import { fromMap, keyMove, toMap, viewRect } from './minimap'
 import type { Bounds, Overview, View } from './Sky'
-import type { Star } from './renderer'
-import { fetchLevel } from './tiles'
+import { useSkyField } from './field'
 
 interface Props {
   overview: Overview
@@ -24,9 +23,6 @@ interface Props {
 /** The minimap's side, in CSS pixels. */
 const SIZE = 168
 
-/** The pyramid level the minimap draws. */
-const MAP_LEVEL = 2
-
 /**
  * Where am I: the whole sky drawn small, the view as a rectangle on it, and the
  * name of the region the middle of the view is in.
@@ -41,40 +37,9 @@ export function Compass({ overview, view, visible, region, sounding, onNavigate,
   const dragging = useRef(false)
   const { sky } = overview
 
-  // Drawn from a deeper level than the sky opens on. Level 0 is the bright
-  // core only -- measured on the slice, its stars sit within 160 units of the
-  // middle while the faint ones spread past 1,200 -- so a minimap of level 0
-  // would show the sky's shape as a dot. Level 2 is a few tens of thousands of
-  // points, drawn once, and the sky has usually fetched it already.
-  const [stars, setStars] = useState<Star[]>(overview.stars)
-  useEffect(() => {
-    const abort = new AbortController()
-    fetchLevel(sky, Math.min(MAP_LEVEL, sky.max_level), '/tiles', abort.signal).then(
-      tile => setStars(tile.stars),
-      () => undefined
-    )
-    return () => abort.abort()
-  }, [sky])
-
   // The stars are drawn once into a bitmap of their own; each frame after
   // that is one copy and one rectangle.
-  const field = useMemo(() => {
-    const ratio = window.devicePixelRatio || 1
-    const canvas = document.createElement('canvas')
-    canvas.width = canvas.height = Math.round(SIZE * ratio)
-    const context = canvas.getContext('2d')
-    if (!context) return canvas
-    context.scale(ratio, ratio)
-    for (const star of stars) {
-      const at = toMap(sky, SIZE, star.x, star.y)
-      // Faint, because tens of thousands of points share a few thousand
-      // pixels: at full strength the sky's shape saturates into a flat disc.
-      context.globalAlpha = 0.05 + 0.6 * star.brightness
-      context.fillStyle = star.brightness > 0.5 ? '#f2ead9' : '#6f9ee0'
-      context.fillRect(at.x, at.y, 1, 1)
-    }
-    return canvas
-  }, [sky, stars])
+  const field = useSkyField(overview, SIZE)
 
   useEffect(() => {
     const canvas = canvasRef.current

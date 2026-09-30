@@ -44,6 +44,8 @@ export interface Neighbour {
 /** Where an act comes from, as Wikidata records it. */
 export interface Origin {
   place: string | null
+  /** The place's Wikidata item: the scene whose dossier this star belongs to. */
+  qid: number | null
   country: string | null
   /** A person's birthplace rather than a group's place of formation. */
   is_birth: boolean
@@ -106,7 +108,8 @@ export interface Artist {
   genres: Genre[]
   similar: Alongside[]
   origin: Origin | null
-  labels: string[]
+  /** The labels the act released on, most releases first. */
+  labels: OnLabel[]
   /** Directed, so the two lists are different facts and stay apart. */
   influenced_by: Neighbour[]
   influenced: Neighbour[]
@@ -124,6 +127,16 @@ export interface Artist {
   radio: Nebula | null
 }
 
+/** A label on a card: a station this star belongs to. */
+export interface OnLabel {
+  id: number
+  name: string
+  /** How many of the artist's releases carry it. */
+  releases: number
+  first_year: number | null
+  last_year: number | null
+}
+
 /** A search result, with a place to fly to. */
 export interface Hit {
   id: number
@@ -139,10 +152,128 @@ export async function fetchArtist(id: number, signal?: AbortSignal): Promise<Art
   return (await response.json()) as Artist
 }
 
-export async function searchArtists(term: string, signal?: AbortSignal): Promise<Hit[]> {
+/** What a search finds: stars, and the stations they gather at. */
+export interface Found {
+  stars: Hit[]
+  labels: LabelRef[]
+  scenes: SceneRef[]
+}
+
+export async function search(term: string, signal?: AbortSignal): Promise<Found> {
   const response = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { signal })
   if (!response.ok) throw new Error('the canon could not be searched')
-  return (await response.json()) as Hit[]
+  return (await response.json()) as Found
+}
+
+/** A label named elsewhere, and how many stars it stands for there. */
+export interface LabelRef {
+  id: number
+  name: string
+  artists: number
+}
+
+/** A place named elsewhere, and how many stars come from it. */
+export interface SceneRef {
+  qid: number
+  name: string
+  artists: number
+}
+
+/** A count in one year: releases on a label, or acts beginning in a place. */
+export interface YearCount {
+  year: number
+  count: number
+}
+
+/** A style (or a genre) and how many of a roster have it as their main one. */
+export interface Sound {
+  name: string
+  is_style: boolean
+  artists: number
+}
+
+/**
+ * Who is on a station: the first names, and every member's place.
+ *
+ * `map` holds `[id, x, y, brightness]` for every placed member, however many
+ * are listed by name — the map is where a cluster shows itself.
+ */
+export interface Roster<T> {
+  size: number
+  listed: T[]
+  map: [number, number, number, number][]
+}
+
+/** One run of a description, and what it leads to, if anything. */
+export interface Segment {
+  text: string
+  /** A star on this sky. */
+  star?: number
+  /** A label with a dossier of its own. */
+  label?: number
+  /** A web address, only ever http or https. */
+  url?: string
+}
+
+export interface LabelMember {
+  id: number
+  name: string
+  releases: number
+  first_year: number | null
+  last_year: number | null
+}
+
+export interface SceneMember {
+  id: number
+  name: string
+  /** Born here, rather than formed here. */
+  born: boolean
+  begin_year: number | null
+  end_year: number | null
+}
+
+/** A label as a page. */
+export interface LabelDossier {
+  id: number
+  name: string
+  discogs_url: string
+  /** Paragraphs of segments. */
+  profile: Segment[][]
+  parent: LabelRef | null
+  sublabels: LabelRef[]
+  /** Releases per year, over all the label's official releases. */
+  chronology: YearCount[]
+  roster: Roster<LabelMember>
+  sound: Sound[]
+  /** Where the roster comes from. */
+  scenes: SceneRef[]
+}
+
+/** A place as a page. */
+export interface SceneDossier {
+  qid: number
+  name: string
+  wikidata_url: string
+  formed: number
+  born: number
+  /** Acts beginning per year. */
+  chronology: YearCount[]
+  roster: Roster<SceneMember>
+  sound: Sound[]
+  /** The labels the scene's people released on. */
+  labels: LabelRef[]
+}
+
+export async function fetchLabel(id: number, signal?: AbortSignal): Promise<LabelDossier> {
+  const response = await fetch(`/api/labels/${String(id)}`, { signal })
+  if (!response.ok) throw new Error(response.status === 404 ? 'no such label' : 'the canon could not be read')
+  return (await response.json()) as LabelDossier
+}
+
+export async function fetchScene(qid: number, signal?: AbortSignal): Promise<SceneDossier> {
+  const response = await fetch(`/api/scenes/${String(qid)}`, { signal })
+  if (!response.ok) throw new Error(response.status === 404 ? 'no such scene' : 'the canon could not be read')
+  return (await response.json()) as SceneDossier
 }
 
 /** One band of a comparison: how much of each star's work carries a genre. */

@@ -26,6 +26,7 @@ export type Mechanic =
   | 'radio_started'
   | 'signal_heard'
   | 'signal_found'
+  | 'dossier_opened'
 
 /**
  * Counts one use.
