@@ -42,8 +42,8 @@ interface Props {
   onOpenStar: (id: number) => void
   /** Opens another station's dossier in place of this one. */
   onOpenDossier: (target: Target) => void
-  /** Frames the roster on the big sky. */
-  onShowOnSky: (members: Member[]) => void
+  /** Marks the roster on the big sky and frames it, under the station's name. */
+  onShowOnSky: (members: Member[], name: string) => void
 }
 
 /** A roster row: whoever it is, with the years it spans. */
@@ -207,7 +207,7 @@ export function Dossier({ target, overview, onClose, onOpenStar, onOpenDossier, 
                 <div className="flex min-w-0 flex-col gap-2">
                   <p className="m-0 text-sm text-text">{t('dossier.onTheSky', { count: shape.size, number: number(shape.size) })}</p>
                   {shape.map.length > 0 && (
-                    <Button size="sm" className="self-start" onClick={() => onShowOnSky(shape.map)}>
+                    <Button size="sm" className="self-start" onClick={() => onShowOnSky(shape.map, shape.title)}>
                       {t('dossier.showOnSky')}
                     </Button>
                   )}

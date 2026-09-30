@@ -7,6 +7,7 @@ import { Instruments } from '@/sky/Instruments'
 import { Compass } from '@/sky/Compass'
 import type { Side } from '@/sky/Compare'
 import { RoutePanel } from '@/sky/RoutePanel'
+import { GatheringPanel } from '@/sky/GatheringPanel'
 import { addStop, removeStop } from '@/sky/route'
 import { fetchLabels, type Label } from '@/sky/labels'
 import { LanguagePicker } from '@/LanguagePicker'
@@ -343,6 +344,11 @@ export function App() {
     setDossier(next)
   }, [])
 
+  // A station's stars marked on the sky, with the dossier they came from so
+  // the panel can lead back to it.
+  const [gathering, setGathering] = useState<{ from: DossierTarget; name: string; points: { x: number; y: number }[] } | null>(null)
+  const gatheringPoints = useMemo(() => gathering?.points ?? [], [gathering])
+
   // One count for a dossier arrived at by link, as for one opened by hand.
   useEffect(() => {
     if (opened.dossier) count('dossier_opened')
@@ -557,6 +563,7 @@ export function App() {
         onCapture={onCapture}
         instruments={instruments}
         route={routeLine}
+        gathering={gatheringPoints}
         labels={labels}
         onOverview={onOverview}
       />
@@ -601,6 +608,15 @@ export function App() {
             onRadio={startRadio}
             onDossier={openDossier}
             sounding={playing?.id ?? null}
+          />
+        )}
+        {gathering && (
+          <GatheringPanel
+            className="shrink-0"
+            name={gathering.name}
+            size={gathering.points.length}
+            onBack={() => openDossier(gathering.from)}
+            onClear={() => setGathering(null)}
           />
         )}
         {shownStops.length > 0 && (
@@ -678,10 +694,11 @@ export function App() {
               openById(id)
             }}
             onOpenDossier={openDossier}
-            onShowOnSky={(members: Member[]) => {
+            onShowOnSky={(members: Member[], name: string) => {
               if (!state) return
               const view = fitView(members, state.visible, state.view)
               if (!view) return
+              setGathering({ from: dossier, name, points: members.map(([, x, y]) => ({ x, y })) })
               setDossier(null)
               setPicked(null)
               setTarget(view)

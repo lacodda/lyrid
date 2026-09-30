@@ -29,7 +29,8 @@
     "stars_one": "{{number}} звезда",
     "stars_few": "{{number}} звезды",
     "stars_many": "{{number}} звёзд",
-    "stars_other": "{{number}} звезды"
+    "stars_other": "{{number}} звезды",
+    "starsHeading": "звёзды"
   },
   "halo": {
     "label": "гало",
@@ -266,7 +267,7 @@
     "onTheSky_few": "{{number}} звезды на небе",
     "onTheSky_many": "{{number}} звёзд на небе",
     "onTheSky_other": "{{number}} звезды на небе",
-    "showOnSky": "показать их на небе",
+    "showOnSky": "отметить их на небе",
     "mapLabel_one": "Где на небе {{count}} звезда",
     "mapLabel_few": "Где на небе {{count}} звезды",
     "mapLabel_many": "Где на небе {{count}} звёзд",
@@ -289,5 +290,14 @@
     "close": "закрыть",
     "formedHere": "собрались здесь: {{number}}",
     "bornHere": "родом отсюда: {{number}}"
+  },
+  "gathering": {
+    "label": "{{name}} на небе",
+    "heading_one": "{{name}} · {{number}} звезда",
+    "heading_few": "{{name}} · {{number}} звезды",
+    "heading_many": "{{name}} · {{number}} звёзд",
+    "heading_other": "{{name}} · {{number}} звезды",
+    "back": "вернуться к досье",
+    "clear": "убрать отметки"
   }
 }

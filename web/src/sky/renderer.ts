@@ -205,6 +205,45 @@ void main() {
 }`
 
 /**
+ * A gathering: every star of a station marked at once, so a label's roster or
+ * a city's people can be seen together on the sky itself.
+ *
+ * Points rather than quads: a roster is hundreds to thousands of stars, and a
+ * point sprite is one vertex each. Each is a ring of a fixed size in pixels,
+ * open in the middle so the star under it still shows, in the gold the
+ * dossier's own map marks them with.
+ */
+const GATHER_VERTEX = `#version 300 es
+precision highp float;
+
+in vec2 a_point;
+uniform vec2 u_camera;
+uniform float u_scale;
+uniform vec2 u_viewport;
+
+void main() {
+  vec2 screen = (a_point - u_camera) * u_scale;
+  gl_Position = vec4(screen / (u_viewport * 0.5), 0.0, 1.0);
+  gl_PointSize = 13.0;
+}`
+
+const GATHER_FRAGMENT = `#version 300 es
+precision highp float;
+
+uniform vec3 u_colour;
+out vec4 fragment;
+
+void main() {
+  float r = length(gl_PointCoord * 2.0 - 1.0);
+  float ring = smoothstep(0.5, 0.68, r) * (1.0 - smoothstep(0.82, 1.0, r));
+  if (ring <= 0.0) discard;
+  fragment = vec4(u_colour, 0.85 * ring);
+}`
+
+/** The gathering's gold, the same #e0a040 the dossier's map marks a roster with. */
+const GATHER_COLOUR: [number, number, number] = [0.878, 0.627, 0.251]
+
+/**
  * The halo around the one star being looked at.
  *
  * A second, single-instance pass rather than a flag on every star: the field
@@ -358,6 +397,11 @@ export class SkyRenderer {
   private readonly routeVao: WebGLVertexArrayObject | null
   private readonly routeBuffer: WebGLBuffer
   private routePoints = 0
+  private readonly gather: WebGLProgram
+  private readonly gatherUniforms: Record<'camera' | 'scale' | 'viewport' | 'colour', WebGLUniformLocation | null>
+  private readonly gatherVao: WebGLVertexArrayObject | null
+  private readonly gatherBuffer: WebGLBuffer
+  private gatherPoints = 0
   private readonly halo: WebGLProgram
   private readonly haloUniforms: Record<
     'position' | 'camera' | 'scale' | 'viewport' | 'time' | 'twinkle' | 'shape' | 'colour',
@@ -470,6 +514,31 @@ export class SkyRenderer {
     gl.enableVertexAttribArray(point)
     gl.vertexAttribPointer(point, 2, gl.FLOAT, false, 8, 0)
 
+    const gather = gl.createProgram()
+    if (!gather) throw new Error('could not create a program')
+    gl.attachShader(gather, compile(gl, gl.VERTEX_SHADER, GATHER_VERTEX))
+    gl.attachShader(gather, compile(gl, gl.FRAGMENT_SHADER, GATHER_FRAGMENT))
+    gl.linkProgram(gather)
+    if (!gl.getProgramParameter(gather, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(gather) ?? 'the gathering program failed to link')
+    }
+    this.gather = gather
+    this.gatherUniforms = {
+      camera: gl.getUniformLocation(gather, 'u_camera'),
+      scale: gl.getUniformLocation(gather, 'u_scale'),
+      viewport: gl.getUniformLocation(gather, 'u_viewport'),
+      colour: gl.getUniformLocation(gather, 'u_colour'),
+    }
+    const gatherBuffer = gl.createBuffer()
+    if (!gatherBuffer) throw new Error('could not create a buffer')
+    this.gatherBuffer = gatherBuffer
+    this.gatherVao = gl.createVertexArray()
+    gl.bindVertexArray(this.gatherVao)
+    gl.bindBuffer(gl.ARRAY_BUFFER, gatherBuffer)
+    const gathered = gl.getAttribLocation(gather, 'a_point')
+    gl.enableVertexAttribArray(gathered)
+    gl.vertexAttribPointer(gathered, 2, gl.FLOAT, false, 8, 0)
+
     gl.bindVertexArray(vao)
 
     // Additive blending, because light adds: overlapping stars brighten
@@ -493,6 +562,16 @@ export class SkyRenderer {
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW)
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer)
     this.routePoints = points.length
+  }
+
+  /** Replaces the gathering: the stars to mark together, as world coordinates. */
+  setGathering(points: readonly { x: number; y: number }[]): void {
+    const gl = this.gl
+    const data = new Float32Array(points.flatMap(point => [point.x, point.y]))
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.gatherBuffer)
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW)
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer)
+    this.gatherPoints = points.length
   }
 
   resize(width: number, height: number): void {
@@ -541,6 +620,20 @@ export class SkyRenderer {
       gl.uniform2f(this.routeUniforms.viewport, viewport[0], viewport[1])
       gl.uniform3f(this.routeUniforms.colour, 0.55, 0.75, 1.0)
       gl.drawArrays(gl.LINE_STRIP, 0, this.routePoints)
+      gl.bindVertexArray(vao)
+    }
+
+    // The gathering over the route: rings round stars a reader asked to see
+    // together, and still under the one marked star.
+    if (this.gatherPoints > 0) {
+      const vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null
+      gl.bindVertexArray(this.gatherVao)
+      gl.useProgram(this.gather)
+      gl.uniform2f(this.gatherUniforms.camera, camera.x, camera.y)
+      gl.uniform1f(this.gatherUniforms.scale, camera.scale)
+      gl.uniform2f(this.gatherUniforms.viewport, viewport[0], viewport[1])
+      gl.uniform3f(this.gatherUniforms.colour, ...GATHER_COLOUR)
+      gl.drawArrays(gl.POINTS, 0, this.gatherPoints)
       gl.bindVertexArray(vao)
     }
 

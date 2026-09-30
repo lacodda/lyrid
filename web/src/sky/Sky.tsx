@@ -72,6 +72,8 @@ interface Props {
   instruments?: Instruments
   /** A route's stops, in order, drawn joined. */
   route?: readonly { x: number; y: number }[]
+  /** A station's stars, marked together. */
+  gathering?: readonly { x: number; y: number }[]
   /** Genre and style names to write on the sky. */
   labels?: readonly Label[]
   /**
@@ -89,7 +91,7 @@ interface Props {
  * entirely. A component that re-rendered per frame would spend more time in
  * reconciliation than in drawing.
  */
-export function Sky({ onState, onPick, target, initial, marked, onCapture, instruments, route, labels, onOverview }: Props) {
+export function Sky({ onState, onPick, target, initial, marked, onCapture, instruments, route, gathering, labels, onOverview }: Props) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   // Names are text, and text on a WebGL canvas means a glyph atlas; a 2D
@@ -149,6 +151,11 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture, instr
   useEffect(() => {
     pendingRoute.current = route ?? []
   }, [route])
+  // The same for a gathering.
+  const pendingGathering = useRef<readonly { x: number; y: number }[] | null>(null)
+  useEffect(() => {
+    pendingGathering.current = gathering ?? []
+  }, [gathering])
   const onOverviewRef = useRef(onOverview)
   useEffect(() => {
     onOverviewRef.current = onOverview
@@ -269,6 +276,10 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture, instr
               }
             }
 
+            if (pendingGathering.current) {
+              renderer.setGathering(pendingGathering.current)
+              pendingGathering.current = null
+            }
             if (pendingRoute.current) {
               renderer.setRoute(pendingRoute.current)
               pendingRoute.current = null

@@ -25,7 +25,8 @@
     "labels": "labels",
     "scenes": "places",
     "stars": "{{number}} star",
-    "stars_other": "{{number}} stars"
+    "stars_other": "{{number}} stars",
+    "starsHeading": "stars"
   },
   "halo": {
     "label": "halo",
@@ -256,7 +257,7 @@
     "born": "born here",
     "onTheSky": "{{number}} star on the sky",
     "onTheSky_other": "{{number}} stars on the sky",
-    "showOnSky": "show them on the sky",
+    "showOnSky": "mark them on the sky",
     "mapLabel": "Where its {{count}} star sits on the sky",
     "mapLabel_other": "Where its {{count}} stars sit on the sky",
     "mapHint": "click a star to fly to it",
@@ -275,5 +276,12 @@
     "fewer": "show fewer",
     "source": "from {{name}}",
     "close": "close"
+  },
+  "gathering": {
+    "label": "{{name}} on the sky",
+    "heading": "{{name}} · {{number}} star",
+    "heading_other": "{{name}} · {{number}} stars",
+    "back": "back to the dossier",
+    "clear": "clear the marks"
   }
 }
