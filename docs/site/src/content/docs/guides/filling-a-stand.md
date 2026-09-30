@@ -73,11 +73,28 @@ than staged on the stand's disk first.
 | `--tiles <dir>` | the tile directory to copy |
 | `--skip-db` / `--skip-tiles` | move only one half |
 | `--force` | replace a stand that already holds artists |
+| `--tables a,b,c` | replace only the rows of these tables, leaving the rest |
 
 Without `--force` the script refuses to restore over a stand whose `artist`
-table is not empty. Today the only thing there is the canon, which can always
-be rebuilt; once accounts exist, a silent overwrite would be data loss rather
-than a convenience.
+table is not empty. The canon can always be rebuilt; the accounts on a running
+stand cannot, and a whole restore replaces them with whatever the dump holds.
+
+## Adding tables to a stand that has accounts
+
+When a release adds canon tables and nothing else changes — v0.15 added the
+label rosters — the stand does not need its database replaced. Deploy the
+release first, so its migrations create the empty tables, then move only their
+rows:
+
+```sh
+tools/stage-seed.sh --skip-tiles --tables label,label_artist,label_year
+```
+
+The named tables are emptied in one `TRUNCATE` — without `CASCADE`, so a table
+outside the list that points at one of them stops the script instead of being
+emptied along with it — and their rows restored from the dump in the order the
+dump holds them, which loads a table before the ones that point at it. Every
+other table, the accounts above all, is left as it was.
 
 The credentials are read from the stand's own `.env` on the stand — they are
 never passed on a command line and never copied to the machine holding the

@@ -162,13 +162,47 @@ The stations of the map: imprints, and which imprint owns which.
 | Column | Meaning |
 | --- | --- |
 | `id` | Discogs's own label id |
-| `name` | Label name |
-| `profile` | Discogs's description, for the station page |
+| `name` | Label name, verbatim — with the number Discogs adds to tell namesakes apart ("Antidote (4)"), which the API drops on the way out |
+| `profile` | Discogs's description, for the station page, with its references named (below) |
 | `parent_label_id` | The owning imprint, when Discogs records one |
 
 Contact information is deliberately not imported: those blocks carry postal
 addresses and personal e-mail of small-label owners, which this product has no
 use for.
+
+**References in `profile` carry their names.** Discogs writes `[a674]` for an
+artist and `[l123]` for a label, and an id alone cannot be shown. The import
+picks up the names while every dump file is open and stores `[a674=Stephan
+Grieder]` — an id and a name together, this project's own form. Everything else
+is Discogs's markup as written: `[a=Name]`, `[l=Name]`, `[url=…]…[/url]`, `[b]`,
+`[i]`. Line breaks are stored as `
+` only; a blank line separates paragraphs.
+
+A slice keeps a label when it has a roster among the kept artists, or owns one
+that does, however far up.
+
+## `label_artist`
+
+A label's roster: who released on it, how much, and when.
+
+| Column | Meaning |
+| --- | --- |
+| `label_id` | The label |
+| `artist_id` | A canonical artist with releases on it |
+| `releases` | How many of the artist's official releases carry this label, pressings included |
+| `first_year`, `last_year` | The years of the first and the last of them, where Discogs dates them — the artist's span on the label |
+
+From the Discogs releases file, through `artist_discogs`. Unofficial releases
+and "Not On Label" are not counted; a label printed twice on one release counts
+once. See ADR 0017.
+
+## `label_year`
+
+A label's output year by year: `(label_id, year, releases)`, over **all** its
+official releases — not only those by artists the canon holds, because this is
+the label's history, not the canon's. Kept for labels with a roster only. A
+label's first year, last year and total come from here rather than being stored
+twice.
 
 ## `artist_wikidata`
 
@@ -195,6 +229,10 @@ together.
 | `inception_year` | From Wikidata. May disagree with `artist.begin_year`; both are kept rather than one silently overwriting the other |
 | `country_qid` | Country of origin |
 
+`origin_qid` is also a **scene**: the place a dossier gathers everyone from.
+It is indexed for that question, which reads this table by place rather than by
+artist.
+
 ## `wikidata_item`
 
 Names for the items facts point at: `(qid, label)`.
@@ -217,9 +255,10 @@ self-influence, which Wikidata does contain.
 ## `artist_wikidata_genre`, `artist_wikidata_label`
 
 Genres and record labels as Wikidata claims them, kept apart from the Discogs
-vocabulary in `artist_genre`. Discogs terms carry a release count behind them;
-these are editorial claims with no weight. Mixing two vocabularies in one table
-is the mistake `similarity_metric` exists to prevent.
+vocabulary in `artist_genre` and `label_artist`. Discogs terms carry a release
+count behind them; these are editorial claims with no weight. Mixing two
+vocabularies in one table is the mistake `similarity_metric` exists to prevent.
+Nothing serves them: the card's labels are the Discogs stations.
 
 ## `artist_prose`
 

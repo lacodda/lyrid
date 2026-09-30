@@ -1,6 +1,6 @@
 ---
-title: Importing genres and labels
-description: Add genres, styles and record labels to the canon from the Discogs monthly dumps.
+title: Importing genres, labels and rosters
+description: Add genres, styles, record labels and who released on them to the canon from the Discogs monthly dumps.
 ---
 
 Stars have positions and routes between them. This import gives them a
@@ -21,60 +21,73 @@ CC0, so the canon stays public domain end to end. The full reasoning is in
 
 ## Get the dumps
 
-The dumps live behind an index at [data.discogs.com](https://data.discogs.com/).
-Object URLs take a `?download=` parameter — a plain path returns the HTML index
-with a `200`, so check what you actually downloaded:
+The dumps live behind an index at [data.discogs.com](https://data.discogs.com/),
+and the host is particular: it ignores `Range`, so a cut transfer cannot be
+resumed, and it cut plain HTTP/1.1 transfers of the releases file after six to
+eight minutes, every time. Over HTTP/2 the same file arrives whole. The
+repository carries a downloader that does it that way, one file after another,
+and checks each against the dump's own `CHECKSUM.txt`:
 
 ```sh
-base='https://data.discogs.com/?download=data%2F2026%2F'
-for file in CHECKSUM.txt masters.xml.gz labels.xml.gz artists.xml.gz; do
-  curl -sL -o "discogs_20260801_$file" "${base}discogs_20260801_$file"
-done
-sha256sum -c discogs_20260801_CHECKSUM.txt
+node tools/fetch-discogs.mjs 20260801 .local/discogs
 ```
 
-Three files are needed, about 1.15 GB together:
+Four files, about 12.4 GB together:
 
 | File | Size | What it gives |
 | --- | --- | --- |
-| `masters.xml.gz` | 593 MB | The genres and styles themselves |
 | `labels.xml.gz` | 86 MB | Labels, their descriptions and ownership |
-| `artists.xml.gz` | 472 MB | Optional: verifies that credited ids exist |
+| `artists.xml.gz` | 472 MB | Verifies credited ids exist; names the artists label descriptions point at |
+| `masters.xml.gz` | 593 MB | The genres and styles |
+| `releases.xml.gz` | 10.4 GB | Who released on which label, and when: the label rosters |
 
-**Do not download `releases.xml.gz`.** It is 10.4 GB and adds nothing: a master
-release already carries the genres of all its pressings.
+Run it again if a file fails: files already whole are skipped. Do not loop it —
+the host answers a burst of requests with `429` for about an hour, and each
+retry extends the wait.
 
 ## Run the import
 
 ```sh
-lyrid import discogs \
-  --masters ./discogs_20260801_masters.xml.gz \
-  --labels  ./discogs_20260801_labels.xml.gz \
-  --artists ./discogs_20260801_artists.xml.gz
+lyrid import discogs   --masters  .local/discogs/discogs_20260801_masters.xml.gz   --labels   .local/discogs/discogs_20260801_labels.xml.gz   --artists  .local/discogs/discogs_20260801_artists.xml.gz   --releases .local/discogs/discogs_20260801_releases.xml.gz
 ```
 
-Each file is read in one streaming pass — nothing is held in memory whole — and
-everything is written in one transaction, so an interrupted run leaves the
-previous genres standing. On a full 2026-08 dump set the whole import took
-about two and a half minutes.
+Each file is read in one streaming pass — nothing is held in memory whole but
+the counts — and everything is written in one transaction, so an interrupted
+run leaves the previous genres, labels and rosters standing.
+
+On the full 20260801 dumps the import took about fifty minutes: twenty-four
+reading — twenty-one of them in the releases file — and twenty-seven writing.
 
 ```
-INFO lyrid::import::discogs: resolving Discogs data against the canon linked=…
-INFO lyrid::import::discogs: artists file read records=10163318 linked_found=…
-INFO lyrid::import::discogs: masters file read records=2579897 artists_with_genres=… credits_counted=…
+INFO lyrid::import::discogs: resolving Discogs data against the canon linked=1286568
 INFO lyrid::import::discogs: labels file read records=2405196 kept=2405195
-INFO lyrid::import::discogs: genre vocabulary written rows=…
-INFO lyrid::import::discogs: artist genres written rows=…
+INFO lyrid::import::discogs: artists file read records=10163318 linked_found=1271875 named=104750
+INFO lyrid::import::discogs: masters file read records=2579897 artists_with_genres=427042 credits_counted=2429559 titles=520
+INFO lyrid::import::discogs_releases: releases file read releases=19341287 unofficial=595691 not_accepted=0 without_label=1472106 roster_pairs=3986904 label_years=2510611
+INFO lyrid::import::discogs: label descriptions named left_unnamed=1013
 INFO lyrid::import::discogs: labels written rows=2405195 parents=139304
+INFO lyrid::import::discogs: label rosters written rows=3983681 stations=532737
+INFO lyrid::import::discogs: label chronologies written rows=1953114
 ```
 
-`--labels` and `--artists` are both optional. Without `--labels` the labels
-table is left as it was; without `--artists` the import skips checking that the
-ids credited on a master actually exist in the artists file.
+`left_unnamed` counts references in label descriptions that point at an id no
+file of the dump holds; they stay as they are, and the page leaves them out.
+
+`--masters` alone imports genres and leaves labels and rosters as they were.
+`--labels` needs `--releases` and `--artists` beside it: a label without its
+roster is half a station, and a description that points at artists by bare id
+names nobody without the artists file. `--releases` needs `--labels`, the
+labels its rosters hang from.
 
 The version defaults to the date in the masters filename
 (`discogs_20260801_masters.xml.gz` → `20260801`). Pass `--dump-version` if your
 files are named differently.
+
+MusicBrainz's special purpose artists — "Various Artists", "[unknown]",
+"[traditional]" and the rest of its documented set — are not joined to Discogs.
+MusicBrainz links "Various Artists" to Discogs's "Various", and following that
+link would give one star the genres and the labels of every compilation there
+is.
 
 ## Genres are weighted, not boolean
 
@@ -129,7 +142,7 @@ point at label or release pages are ignored.
 An artist with no Discogs link gets no genres. That is expected: it is the same
 dark matter at the map's margins that missing similarity produces.
 
-## Labels
+## Labels and their rosters
 
 Labels are the stations of the map, and they nest:
 
@@ -148,8 +161,39 @@ WHERE l.name = 'Svek';
 Contact blocks are deliberately not imported. They carry postal addresses and
 personal e-mail of small-label owners, and this product has no use for them.
 
+A roster is who released on a label, from the releases file:
+
+```sql
+SELECT l.name, la.releases, la.first_year, la.last_year
+FROM label_artist la
+JOIN label l ON l.id = la.label_id
+JOIN artist a ON a.id = la.artist_id
+WHERE a.name = 'Nirvana' AND a.comment LIKE '%grunge%'
+ORDER BY la.releases DESC
+LIMIT 3;
+```
+
+```
+      name      | releases | first_year | last_year
+----------------+----------+------------+-----------
+ Geffen Records |     1269 |       1991 |      2025
+ DGC            |     1207 |       1991 |      2026
+ Sub Pop        |      820 |       1988 |      2026
+```
+
+Official releases only — a release whose format says "Unofficial Release" names
+a label that never agreed to it — and never "Not On Label", which is Discogs
+saying there was none. A label printed twice on one release counts once;
+pressings count, the way Discogs's own label pages count them. `label_year`
+holds each label's output year by year over all its official releases, not only
+the canon's. See [the schema](/lyrid/reference/canon-schema/#label_artist) and
+[ADR 0017](https://github.com/lacodda/lyrid/blob/main/docs/adr/0017-stations-and-their-dossiers.md).
+
+Descriptions point at artists and labels by id — `[a674]` — and the import
+names them while every file is open, storing `[a674=Stephan Grieder]`.
+
 ## Re-importing
 
-Importing again replaces genres, links and labels wholesale and updates the
+Importing again replaces genres, links, labels and rosters wholesale and updates the
 `dump_import` record rather than adding a second one. Verified against the full
 dumps: a second run produced identical counts with no duplicates.

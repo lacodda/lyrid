@@ -85,6 +85,7 @@ next to the code it constrains:
 - [0014 · The sky is also a list, and the server answers what is in view](https://github.com/lacodda/lyrid/blob/main/docs/adr/0014-the-sky-as-a-list.md)
 - [0015 · The sky carries time and names; the pyramid is cut on its own](https://github.com/lacodda/lyrid/blob/main/docs/adr/0015-the-sky-carries-time-and-names.md)
 - [0016 · Listening to the sky: one player, a player per star, stations read once](https://github.com/lacodda/lyrid/blob/main/docs/adr/0016-listening-to-the-sky.md)
+- [0017 · Stations and their dossiers: labels from the Discogs releases file, scenes from places of origin](https://github.com/lacodda/lyrid/blob/main/docs/adr/0017-stations-and-their-dossiers.md)
 
 ## Releases
 

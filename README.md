@@ -27,7 +27,7 @@ The universe is assembled locally from open dumps and datasets — MusicBrainz, 
 
 ## Status
 
-Pre-alpha, and the sky is on screen: 206,636 artists rendered in WebGL2, with accounts and a privacy charter you can press. The interface speaks English and Russian and can be walked by keyboard. The sky can be read with the observer's instruments — eras, genre names, why neighbours are near, comparisons, routes — and listened to: the radio of any nebula, and a daily signal from a faint star to go and find. Only the creative mode is built; the fog of war comes next. What landed when is in the [CHANGELOG](https://github.com/lacodda/lyrid/blob/main/CHANGELOG.md); how it fits together, in [the architecture](https://lacodda.github.io/lyrid/guides/architecture/).
+Pre-alpha, and the sky is on screen: 206,636 artists in WebGL2, with accounts and a privacy charter, in English and Russian, walkable by keyboard. Instruments read it — eras, genre names, why neighbours are near, comparisons, routes; a nebula's radio and a daily signal let you listen; labels and home towns open into dossiers. Only the creative mode is built; the fog of war comes next. What landed when: the [CHANGELOG](https://github.com/lacodda/lyrid/blob/main/CHANGELOG.md); how it fits together: [the architecture](https://lacodda.github.io/lyrid/guides/architecture/).
 
 ## Documentation
 

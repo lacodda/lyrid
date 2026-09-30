@@ -23,15 +23,28 @@ telling apart.
 
 ## `GET /api/search?q=…`
 
-Finds stars by name. Terms shorter than two characters answer `[]` without
-querying: one letter would match a large share of three million artists.
+Finds stars by name, and the stations they gather at: labels and places. Terms
+shorter than two characters answer three empty lists without querying: one
+letter would match a large share of three million artists. What
+`?q=detroit` answers on the stand's slice, each list cut to its first entries:
 
 ```json
-[
-  { "id": 54, "name": "Nirvana", "comment": "1980s–1990s US grunge band", "x": -59.2, "y": -69.5 },
-  { "id": 2612, "name": "Nirvana", "comment": "60s band from the UK", "x": 193.4, "y": 79.1 }
-]
+{
+  "stars": [
+    { "id": 20134, "name": "Detroit Emeralds", "comment": null, "x": 43.61, "y": -53.48 },
+    { "id": 242839, "name": "Mitch Ryder & The Detroit Wheels", "comment": null, "x": 51.98, "y": 128.04 }
+  ],
+  "labels": [{ "id": 20459, "name": "Detroit Underground", "artists": 27 }],
+  "scenes": [{ "qid": 12439, "name": "Detroit", "artists": 209 }]
+}
 ```
+
+Three lists rather than one ranked mixture: a label called "Motown" and an act
+called "Motown Sound" are different kinds of answer. Labels are those with a
+roster on this sky, places those somebody on this sky comes from; `artists` is
+how many stars each stands for. Each list leads with an exact name, then by
+that count; the search box shows first the list that holds the exact name
+typed.
 
 Two decisions worth knowing, both of them corrections to an obvious first
 attempt:
@@ -119,11 +132,15 @@ each, the neighbours from co-listening.
   ],
   "origin": {
     "place": "Aberdeen",
+    "qid": 233808,
     "country": "United States",
     "is_birth": false,
     "inception_year": 1987
   },
-  "labels": ["DGC Records", "Geffen Records", "Sub Pop"],
+  "labels": [
+    { "id": 821, "name": "Geffen Records", "releases": 1269, "first_year": 1991, "last_year": 2025 },
+    { "id": 86487, "name": "DGC", "releases": 1207, "first_year": 1991, "last_year": 2026 }
+  ],
   "influenced_by": [{ "id": 1419, "name": "Black Sabbath", "score": 6.44 }],
   "influenced": [{ "id": 12068, "name": "Nickelback", "score": 11.05 }],
   "prose": {
@@ -146,6 +163,11 @@ each, the neighbours from co-listening.
 `404` for an unknown id; a non-numeric id is a `400` from routing and never
 reaches the database.
 
+`labels` are the Discogs labels the artist released on — stations, each with a
+dossier — most releases first, with the years of the first and last release on
+each. `origin.qid` is the place's Wikidata item, which is also the scene whose
+dossier the place opens.
+
 ### Why a neighbour is one
 
 Each entry in `similar` carries `why`: the reasons the canon gives for the edge,
@@ -162,6 +184,83 @@ The tenth is a floor measured against a wrong answer: counted by releases,
 Marvin Gaye and Nirvana came out as "both Electronic, Stage & Screen, Electro"
 — one remix and one soundtrack each. A shared genre has to be part of what both
 artists are.
+
+## `GET /api/labels/{id}`
+
+A label as a page: its description, its history year by year, its roster, where
+the roster sits on the sky, and where to go next. `id` is Discogs's own.
+
+```json
+{
+  "id": 1,
+  "name": "Planet E",
+  "discogs_url": "https://www.discogs.com/label/1",
+  "profile": [[{ "text": "Carl Craig's classic techno label founded in 1991." }]],
+  "parent": null,
+  "sublabels": [{ "id": 153760, "name": "Guilty Pleasures", "artists": 3 }],
+  "chronology": [{ "year": 1991, "count": 4 }, { "year": 1992, "count": 11 }],
+  "roster": {
+    "size": 40,
+    "listed": [{ "id": 15390, "name": "Carl Craig", "releases": 65, "first_year": 1997, "last_year": 2025 }],
+    "map": [[15390, -67.9, -215.6, 0.09]]
+  },
+  "sound": [{ "name": "Techno", "is_style": true, "artists": 17 }],
+  "scenes": [{ "qid": 12439, "name": "Detroit", "artists": 5 }]
+}
+```
+
+(Lists cut to one entry each; the stand's slice answers these numbers.)
+
+- **`profile`** is paragraphs of segments. A segment is words and at most one
+  thing they lead to: `star` (an artist the canon links to that Discogs id, on
+  this sky), `label` (a label with a dossier here), or `url` — only ever `http`
+  or `https`, since the text is upstream's and `javascript:` in a link is how
+  upstream text runs code.
+- **`chronology`** counts the label's official releases per year — all of them,
+  not only the canon's, because it is the label's history.
+- **`roster.listed`** is the first sixty by releases on the label; **`roster.map`**
+  is `[id, x, y, brightness]` for every placed member, brightness as the sky
+  draws it (the square root of prominence over the brightest star). `size`
+  counts every placed member.
+- **`sound`** is the roster's main styles — the same "main" the sky's names and
+  the radio read — or its main genres when it has no styles; **`scenes`** is
+  where the roster comes from.
+- Names drop the number Discogs adds to tell namesakes apart: "Antidote (4)" is
+  "Antidote", and the id is the address.
+
+`404` for a label the canon does not hold.
+
+## `GET /api/scenes/{qid}`
+
+A place as a page: everyone on the sky who comes from it. `qid` is the Wikidata
+item without its `Q`.
+
+```json
+{
+  "qid": 18125,
+  "name": "Manchester",
+  "wikidata_url": "https://www.wikidata.org/wiki/Q18125",
+  "formed": 98,
+  "born": 45,
+  "chronology": [{ "year": 1858, "count": 1 }],
+  "roster": {
+    "size": 143,
+    "listed": [{ "id": 12651, "name": "The Hollies", "born": false, "begin_year": 1963, "end_year": null }],
+    "map": [[12651, 6.8, 1.9, 0.79]]
+  },
+  "sound": [{ "name": "Indie Rock", "is_style": true, "artists": 21 }],
+  "labels": [{ "id": 26126, "name": "EMI", "artists": 37 }]
+}
+```
+
+A group's place is where it formed (Wikidata P740), a person's where they were
+born (P19); `formed` and `born` count the two apart, and each member says which.
+The roster is ordered by brightness — a place has no weight of its own to rank
+people by. `chronology` counts members by the year they began: formation for a
+group, birth for a person, as MusicBrainz dates them. `labels` are the labels
+the scene's people released on, by how many of them did.
+
+`404` for a place nobody on this sky comes from.
 
 ## `GET /api/compare?a=…&b=…`
 
@@ -384,7 +483,7 @@ sky_opened      card_opened     listen_opened
 view_shared     charter_read    data_requested
 lens_used       time_travelled  stars_compared
 route_opened    radio_started   signal_heard
-signal_found
+signal_found    dossier_opened
 ```
 
 A name outside the list answers `404`. The list is what stops a client

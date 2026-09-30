@@ -1,6 +1,8 @@
 # 0005 · Genres come from Discogs, not from MusicBrainz tags
 
-Date: 2026-08-17. Status: accepted.
+Date: 2026-08-17. Status: accepted; amended by
+[ADR 0017](0017-stations-and-their-dossiers.md), which reads the releases file
+for label rosters — the one thing only it carries.
 
 ## Context
 
