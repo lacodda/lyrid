@@ -57,7 +57,21 @@ struct Tuned {
 /// Every playable star of one layout.
 pub struct Tuning {
     layout: LayoutKey,
+    /// The similarity metric the layout was drawn from, whose prominence is
+    /// the brightness of its stars.
+    metric: i16,
+    /// The prominence of the layout's brightest star, which every other star
+    /// is dimmed against.
+    brightest: f32,
     stars: Vec<Tuned>,
+}
+
+/// The current layout, as anything placing stars on it needs to know it.
+#[derive(Clone, Copy, Debug)]
+pub struct Sky {
+    pub layout: i16,
+    pub metric: i16,
+    pub brightest: f32,
 }
 
 /// Which layout a tuning was read from. The created-at time rides along with
@@ -86,6 +100,17 @@ impl Dial {
             Ok(None) => tracing::info!("no layout yet, so nothing on the sky can play"),
             Err(error) => tracing::warn!(%error, "the playable stars could not be read ahead of time"),
         }
+    }
+
+    /// The current layout and its brightest star, read with the tuning rather
+    /// than asked of Postgres again: finding the brightest of a hundred
+    /// thousand placed stars is 150 ms, and every dossier needs it.
+    pub async fn sky(&self, pool: &PgPool) -> sqlx::Result<Option<Sky>> {
+        Ok(self.tuning(pool).await?.map(|tuning| Sky {
+            layout: tuning.layout.id,
+            metric: tuning.metric,
+            brightest: tuning.brightest,
+        }))
     }
 
     async fn tuning(&self, pool: &PgPool) -> sqlx::Result<Option<Arc<Tuning>>> {
@@ -129,6 +154,11 @@ async fn latest_layout(connection: &mut PgConnection) -> sqlx::Result<Option<Lay
 /// them in the tile order -- brightness down, then id up, the order the tiles
 /// are cut in -- is dark.
 async fn tune(connection: &mut PgConnection, layout: LayoutKey, drawn: usize) -> sqlx::Result<Tuning> {
+    let metric: i16 = sqlx::query_scalar("SELECT metric_id FROM sky_layout WHERE id = $1")
+        .bind(layout.id)
+        .fetch_one(&mut *connection)
+        .await?;
+
     // The brightest star of all, to normalise against the way the tiles do.
     let brightest: f32 = sqlx::query_scalar(
         "SELECT COALESCE(max(pr.weight), 0)::real
@@ -204,7 +234,12 @@ async fn tune(connection: &mut PgConnection, layout: LayoutKey, drawn: usize) ->
             })
         })
         .collect();
-    Ok(Tuning { layout, stars })
+    Ok(Tuning {
+        layout,
+        metric,
+        brightest,
+        stars,
+    })
 }
 
 /// A nebula a radio can play: a genre or a style, by the name the sky writes.
@@ -747,6 +782,8 @@ mod tests {
         assert!((hub_star.brightness - 1.0).abs() < 1e-6, "the brightest star is 1");
         assert!(!hub_star.dark);
         assert!(tuning.stars[1].dark, "the third brightest is past the two lit ones");
+        assert_eq!(tuning.metric, metric);
+        assert!((tuning.brightest - 9.0).abs() < 1e-6, "the hub is the brightest placed star");
         assert_eq!(
             queue(&tuning.stars, "Fixture Disco", Kind::Style, 3).iter().map(|s| s.id).collect::<Vec<_>>(),
             vec![faint]

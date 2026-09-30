@@ -19,6 +19,7 @@ use axum::{Json, Router, routing::get};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
+use crate::api::dossiers::{LabelRef, SceneRef, plain_name};
 use crate::api::listening::{Dial, Nebula, radio_here, radio_of};
 use crate::api::relations::{Why, why_many};
 use crate::app::AppState;
@@ -54,8 +55,8 @@ struct Artist {
     similar: Vec<Alongside>,
     /// Where the act comes from, as Wikidata records it.
     origin: Option<Origin>,
-    /// Labels the act has been signed to.
-    labels: Vec<String>,
+    /// Labels the act released on, from Discogs, most releases first.
+    labels: Vec<OnLabel>,
     /// Who shaped this artist, and who they went on to shape. Directed, so
     /// the two directions are different facts and are kept apart.
     influenced_by: Vec<Neighbour>,
@@ -92,11 +93,25 @@ struct Link {
     url: String,
 }
 
+/// One label on a card: enough to name it, weigh it and open its dossier.
+#[derive(Serialize)]
+struct OnLabel {
+    id: i32,
+    name: String,
+    /// How many of the artist's releases carry it.
+    releases: i32,
+    first_year: Option<i16>,
+    last_year: Option<i16>,
+}
+
 /// Where an act comes from, and which question that answers.
 #[derive(Serialize)]
 struct Origin {
     /// The place itself: "Seattle", "Liverpool".
     place: Option<String>,
+    /// The place's Wikidata item, which is also the scene its dossier opens
+    /// on.
+    qid: Option<i32>,
     /// The country, when Wikidata records one separately.
     country: Option<String>,
     /// True when this is a person's birthplace rather than a group's place of
@@ -323,8 +338,8 @@ async fn alongside(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Alongside>> {
 /// captured during the same dump pass precisely so a card does not have to
 /// reach back into a hundred gigabytes to say "Seattle".
 async fn origin(pool: &PgPool, id: i32) -> sqlx::Result<Option<Origin>> {
-    Ok(sqlx::query_as::<_, (Option<String>, Option<String>, Option<bool>, Option<i16>)>(
-        "SELECT place.label, country.label, f.origin_is_birth, f.inception_year
+    Ok(sqlx::query_as::<_, (Option<String>, Option<i32>, Option<String>, Option<bool>, Option<i16>)>(
+        "SELECT place.label, f.origin_qid, country.label, f.origin_is_birth, f.inception_year
          FROM artist_fact f
          LEFT JOIN wikidata_item place ON place.qid = f.origin_qid
          LEFT JOIN wikidata_item country ON country.qid = f.country_qid
@@ -333,26 +348,37 @@ async fn origin(pool: &PgPool, id: i32) -> sqlx::Result<Option<Origin>> {
     .bind(id)
     .fetch_optional(pool)
     .await?
-    .map(|(place, country, is_birth, inception_year)| Origin {
+    .map(|(place, qid, country, is_birth, inception_year)| Origin {
         place,
+        qid,
         country,
         is_birth: is_birth.unwrap_or(false),
         inception_year,
     }))
 }
 
-async fn labels(pool: &PgPool, id: i32) -> sqlx::Result<Vec<String>> {
-    sqlx::query_scalar::<_, String>(
-        "SELECT item.label
-         FROM artist_wikidata_label l
-         JOIN wikidata_item item ON item.qid = l.label_qid
-         WHERE l.artist_id = $1 AND item.label IS NOT NULL
-         ORDER BY item.label
+/// The labels an artist released on, most releases first: the stations this
+/// star belongs to, each a dossier of its own.
+async fn labels(pool: &PgPool, id: i32) -> sqlx::Result<Vec<OnLabel>> {
+    Ok(sqlx::query_as::<_, (i32, String, i32, Option<i16>, Option<i16>)>(
+        "SELECT l.id, l.name, la.releases, la.first_year, la.last_year
+         FROM label_artist la JOIN label l ON l.id = la.label_id
+         WHERE la.artist_id = $1
+         ORDER BY la.releases DESC, l.name
          LIMIT 8",
     )
     .bind(id)
     .fetch_all(pool)
-    .await
+    .await?
+    .into_iter()
+    .map(|(id, name, releases, first_year, last_year)| OnLabel {
+        id,
+        name: plain_name(&name).to_string(),
+        releases,
+        first_year,
+        last_year,
+    })
+    .collect())
 }
 
 /// The Wikipedia lead, selected together with the credit its licence requires.
@@ -642,10 +668,22 @@ struct Hit {
     y: Option<f32>,
 }
 
+/// What a search finds: stars, and the stations they gather at.
+///
+/// Three lists rather than one ranked mixture: a label called "Motown" and an
+/// artist called "Motown Sound" are different kinds of answer, and the box
+/// shows them apart rather than guessing which one was meant.
+#[derive(Serialize, Default)]
+struct Found {
+    stars: Vec<Hit>,
+    labels: Vec<LabelRef>,
+    scenes: Vec<SceneRef>,
+}
+
 async fn search(State(state): State<AppState>, Query(query): Query<SearchQuery>) -> Response {
     let term = query.q.trim();
     if term.len() < 2 {
-        return (StatusCode::OK, Json(Vec::<Hit>::new())).into_response();
+        return (StatusCode::OK, Json(Found::default())).into_response();
     }
 
     match run_search(&state.pool, term).await {
@@ -661,7 +699,7 @@ async fn search(State(state): State<AppState>, Query(query): Query<SearchQuery>)
     }
 }
 
-async fn run_search(pool: &PgPool, term: &str) -> sqlx::Result<Vec<Hit>> {
+async fn run_search(pool: &PgPool, term: &str) -> sqlx::Result<Found> {
     // Substring rather than prefix: an English band as famous as "The
     // Beatles" starts with an article, and a prefix search for "beatles"
     // would find a tribute act called "Beatless" and miss them entirely.
@@ -689,7 +727,51 @@ async fn run_search(pool: &PgPool, term: &str) -> sqlx::Result<Vec<Hit>> {
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(|(id, name, comment, x, y)| Hit { id, name, comment, x, y }).collect())
+    let stars = rows.into_iter().map(|(id, name, comment, x, y)| Hit { id, name, comment, x, y }).collect();
+
+    // Labels with a roster only: a label nobody on this sky released on has
+    // nothing to open. Ranked like the stars -- the exact name first, then by
+    // how many stars gather there.
+    let labels = sqlx::query_as::<_, (i32, String, i32)>(
+        "SELECT l.id, l.name, count(*)::int AS artists
+         FROM label l JOIN label_artist la ON la.label_id = l.id
+         WHERE l.name ILIKE '%' || $1 || '%'
+         GROUP BY l.id, l.name
+         ORDER BY (lower(l.name) = lower($1)) DESC, artists DESC, length(l.name), l.id
+         LIMIT 5",
+    )
+    .bind(term)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|(id, name, artists)| LabelRef {
+        id,
+        name: plain_name(&name).to_string(),
+        artists,
+    })
+    .collect();
+
+    // Places somebody on this sky comes from. Driven from the facts, which
+    // are the few, rather than from every item Wikidata has a name for.
+    let scenes = sqlx::query_as::<_, (i32, String, i32)>(
+        "SELECT i.qid, i.label, count(*)::int AS artists
+         FROM artist_fact f
+         JOIN wikidata_item i ON i.qid = f.origin_qid
+         JOIN artist_position p ON p.artist_id = f.artist_id
+             AND p.layout_id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
+         WHERE i.label ILIKE '%' || $1 || '%'
+         GROUP BY i.qid, i.label
+         ORDER BY (lower(i.label) = lower($1)) DESC, artists DESC, i.label
+         LIMIT 5",
+    )
+    .bind(term)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|(qid, name, artists)| SceneRef { qid, name, artists })
+    .collect();
+
+    Ok(Found { stars, labels, scenes })
 }
 
 #[derive(Deserialize)]
@@ -1060,7 +1142,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = response.into_body().collect().await.unwrap().to_bytes();
-        assert_eq!(&body[..], b"[]");
+        assert_eq!(&body[..], br#"{"stars":[],"labels":[],"scenes":[]}"#);
     }
 
     #[tokio::test]

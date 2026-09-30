@@ -5,6 +5,7 @@
 
 pub mod accounts;
 pub mod artists;
+pub mod dossiers;
 pub mod listening;
 pub mod metrics;
 pub mod relations;

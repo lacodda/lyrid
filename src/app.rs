@@ -45,6 +45,7 @@ pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
     let api = Router::new()
         .route("/health", get(health))
         .merge(crate::api::artists::routes())
+        .merge(crate::api::dossiers::routes())
         .merge(crate::api::accounts::routes())
         .merge(crate::api::metrics::routes())
         .merge(crate::api::relations::routes())
