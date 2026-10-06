@@ -13,7 +13,8 @@ import { Track, TrackScale } from '@/components/ui/track'
  * measured is "relaxed" by their reckoning — so a raw figure would put nearly
  * every star at the same end of the same line; a rank says where this one
  * stands among the others, which is what a reader looks at a spectrum for.
- * The hairline in the middle of each line is the middle of all of them.
+ * The hairline in the middle of each line is the middle of all of them, and
+ * the stretch from it to the star is filled.
  */
 export function Spectrum({ spectrum }: { spectrum: SpectrumData }) {
   const { t } = useTranslation()
@@ -51,13 +52,20 @@ function Line({ band, bpm }: { band: SpectrumBand; bpm: number | null }) {
         {bpm !== null && <span className="text-2xs text-faint">{t('spectrum.bpm', { bpm: Math.round(bpm) })}</span>}
       </span>
       <span className="flex flex-col gap-0.5 pt-1">
+        {/* The stretch from the middle of all stars to this one is filled, so
+            the line says which way the star leans and how far before the
+            marker is even found; the hairline keeps the middle visible when
+            the stretch is short. `md`, because the marker is as tall as an
+            `md` track and a shorter one would clip it. */}
         <Track
-          size="sm"
           from={0}
           to={100}
           minWidth={0}
-          segments={[{ key: 'middle', start: 49.75, end: 50.25, tone: 'idle', label: t('spectrum.middle') }]}
-          marker={band.rank * 100}
+          segments={[
+            { key: 'lean', start: Math.min(50, percent), end: Math.max(50, percent), tone: 'past' },
+            { key: 'middle', start: 49.75, end: 50.25, tone: 'idle', label: t('spectrum.middle') },
+          ]}
+          marker={percent}
           label={t('spectrum.place', { band: name, percent })}
         />
         <TrackScale>
