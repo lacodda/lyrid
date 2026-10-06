@@ -15,7 +15,7 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group }}
 {% for commit in commits %}\
-- {{ commit.message | upper_first }}
+- {% if commit.breaking %}**Breaking:** {% endif %}{{ commit.message | upper_first }}
 {% endfor %}\
 {% endfor %}
 """
@@ -39,4 +39,7 @@ commit_parsers = [
   { message = "^build", group = "Build" },
   { message = "^ci", group = "CI" },
   { message = "^chore", skip = true },
+  # Formatting and line ends change no behaviour a reader of the changelog
+  # could notice, which is the same reason chores are left out.
+  { message = "^style", skip = true },
 ]
