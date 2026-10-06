@@ -34,6 +34,24 @@ function placeholders(text) {
   return new Set([...text.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)].map((match) => match[1]))
 }
 
+/** `<0>` … `</0>`: the numbered tags `Trans` swaps for its components, in order. */
+function tags(text) {
+  if (typeof text !== 'string') return new Set()
+  return new Set([...text.matchAll(/<(\d+)>/g)].map((match) => Number(match[1])))
+}
+
+// `Trans` finds a tag's component by its number in the array it is given, and a
+// number past the end is not an error: the text inside renders bare. That is
+// how the Wikipedia credit lost the link to its article — `<1>` against a
+// one-component array — and nothing on screen said so. Numbers counted from 0
+// without a gap are the only shape an array can satisfy.
+function tagProblems(locale, key, text) {
+  const numbers = [...tags(text)].sort((a, b) => a - b)
+  return numbers.every((number, index) => number === index)
+    ? []
+    : [`${locale}: tags must run <0>, <1>… without a gap, got ${numbers.map((n) => `<${String(n)}>`).join(' ')}  ${key}`]
+}
+
 // i18next appends a plural category to the key; those are alternates of one
 // message, not keys the other locale has to mirror one for one. English has two
 // forms, Russian has four.
@@ -63,6 +81,8 @@ if (!locales.includes(SOURCE)) {
 const source = read(SOURCE)
 const sourceStems = new Set([...source.keys()].map(stem))
 const problems = []
+
+for (const [key, text] of source) problems.push(...tagProblems(SOURCE, key, text))
 
 for (const locale of locales.filter((name) => name !== SOURCE)) {
   const target = read(locale)
@@ -98,6 +118,10 @@ for (const locale of locales.filter((name) => name !== SOURCE)) {
     for (const name of actual) {
       if (!expected.has(name)) problems.push(`${locale}: invents {{${name}}}  ${key}`)
     }
+
+    problems.push(...tagProblems(locale, key, text))
+    const expectedTags = [...tags(original)].sort().join()
+    if ([...tags(text)].sort().join() !== expectedTags) problems.push(`${locale}: tags differ from ${SOURCE}  ${key}`)
   }
 }
 

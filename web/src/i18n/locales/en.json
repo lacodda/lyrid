@@ -58,7 +58,7 @@
     "close": "close",
     "reading": "reading…",
     "failed": "could not read this star",
-    "credit": "From <1>{{title}}</1> on Wikipedia, licensed {{licence}}",
+    "credit": "From <0>{{title}}</0> on Wikipedia, licensed {{licence}}",
     "more": "more ({{count}} more paragraph)",
     "more_other": "more ({{count}} more paragraphs)",
     "less": "less",
