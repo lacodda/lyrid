@@ -372,7 +372,7 @@ mod tests {
     fn survives_an_empty_record() {
         let records = read("<artists><artist/><artist><id>2</id></artist></artists>");
         assert_eq!(records.len(), 2);
-        assert!(records[0].fields.is_empty());
+        assert_eq!(records[0].fields, Vec::new());
     }
 
     #[test]

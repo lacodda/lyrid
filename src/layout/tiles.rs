@@ -247,10 +247,6 @@ pub fn path(id: TileId) -> String {
 
 #[cfg(test)]
 #[expect(clippy::cast_precision_loss, reason = "test fixtures build coordinates from small loop counters")]
-#[expect(
-    clippy::float_cmp,
-    reason = "these assert an exact byte layout: the values are written and read back with no arithmetic between"
-)]
 mod tests {
     use super::*;
 

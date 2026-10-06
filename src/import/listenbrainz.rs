@@ -347,14 +347,14 @@ mod tests {
     #[test]
     fn drops_self_edges() {
         let (edges, stats) = read(r#"{"id_0":10,"id_1":11,"score":0.9}"#, 0.0);
-        assert!(edges.is_empty());
+        assert_eq!(edges, Vec::new());
         assert_eq!(stats.self_edge, 1);
     }
 
     #[test]
     fn drops_unknown_credits() {
         let (edges, stats) = read(r#"{"id_0":10,"id_1":9999,"score":0.9}"#, 0.0);
-        assert!(edges.is_empty());
+        assert_eq!(edges, Vec::new());
         assert_eq!(stats.unknown_credit, 1);
     }
 

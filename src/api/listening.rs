@@ -553,7 +553,7 @@ mod tests {
         assert_eq!(ids.len(), 2);
         assert!(!ids.contains(&2), "Disco is not Soul: {ids:?}");
         // The same name as a genre is a different nebula.
-        assert!(queue(&stars, "Soul", Kind::Genre, 7).is_empty());
+        assert_eq!(queue(&stars, "Soul", Kind::Genre, 7), Vec::new());
         assert_eq!(queue(&stars, "Funk / Soul", Kind::Genre, 7).len(), 3);
     }
 

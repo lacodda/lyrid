@@ -420,7 +420,7 @@ mod tests {
     fn a_label_the_labels_file_does_not_hold_is_dropped() {
         let spans = HashMap::from([((6, 700), Span::default())]);
         let mapping = HashMap::from([(700, vec![42])]);
-        assert!(roster_rows(&spans, &mapping, &HashSet::from([5])).is_empty());
+        assert_eq!(roster_rows(&spans, &mapping, &HashSet::from([5])), Vec::new());
     }
 
     #[test]

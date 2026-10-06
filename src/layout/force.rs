@@ -452,6 +452,6 @@ mod tests {
         let graph = Graph::from_edges(&[]);
         assert!(graph.is_empty());
         let positions = run(&graph, &params(10), |_, _| {});
-        assert!(positions.xs.is_empty());
+        assert_eq!(positions.xs, Vec::<f32>::new());
     }
 }
