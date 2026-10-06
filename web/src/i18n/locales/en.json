@@ -80,6 +80,44 @@
     "pinned": "held for comparing — open another star",
     "compareWith": "compare with {{name}}"
   },
+  "spectrum": {
+    "heading": "spectrum",
+    "measured_one": "measured from the audio of {{count}} recording by <0>AcousticBrainz</0>",
+    "measured_other": "measured from the audio of {{count}} recordings by <0>AcousticBrainz</0>",
+    "place": "{{band}}: above {{percent}}% of measured stars",
+    "bpm": "{{bpm}} BPM",
+    "middle": "the middle of all measured stars",
+    "tempo": {
+      "name": "tempo",
+      "low": "slow",
+      "high": "fast"
+    },
+    "energy": {
+      "name": "energy",
+      "low": "calm",
+      "high": "intense"
+    },
+    "mood": {
+      "name": "mood",
+      "low": "dark",
+      "high": "bright"
+    },
+    "danceable": {
+      "name": "dance",
+      "low": "not for dancing",
+      "high": "for dancing"
+    },
+    "sound": {
+      "name": "sound",
+      "low": "acoustic",
+      "high": "electronic"
+    },
+    "voice": {
+      "name": "voice",
+      "low": "instrumental",
+      "high": "sung"
+    }
+  },
   "embed": {
     "missing": "That star is not in this sky.",
     "loading": "One moment.",
@@ -226,7 +264,7 @@
     "failed": "could not compare these two",
     "joins": "what joins them",
     "nothing": "Nothing the canon records — they sit apart on the map.",
-    "spectrum": "spectrum",
+    "genreMix": "genre mix",
     "styles": "styles",
     "shared": "both listened to alongside",
     "share": "{{name}}: {{share}} {{genre}}",

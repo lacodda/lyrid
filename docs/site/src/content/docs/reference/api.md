@@ -105,7 +105,7 @@ card's own position query does.
 Everything a card shows. This is where the import pipelines meet — the name
 and years from MusicBrainz, the lead paragraphs from Wikipedia, origin and
 influence from Wikidata, the genres from Discogs with a release count behind
-each, the neighbours from co-listening.
+each, the spectrum from AcousticBrainz, the neighbours from co-listening.
 
 ```json
 {
@@ -122,6 +122,18 @@ each, the neighbours from co-listening.
     { "name": "Rock", "is_style": false, "releases": 314 },
     { "name": "Grunge", "is_style": true, "releases": 303 }
   ],
+  "spectrum": {
+    "recordings": 62,
+    "bpm": 121.4,
+    "bands": [
+      { "name": "tempo", "rank": 0.55 },
+      { "name": "energy", "rank": 0.83 },
+      { "name": "mood", "rank": 0.61 },
+      { "name": "danceable", "rank": 0.42 },
+      { "name": "sound", "rank": 0.38 },
+      { "name": "voice", "rank": 0.79 }
+    ]
+  },
   "similar": [
     {
       "id": 12389,
@@ -159,6 +171,13 @@ each, the neighbours from co-listening.
   "radio": { "name": "Rock", "kind": "genre" }
 }
 ```
+
+`spectrum` is `null` for a star AcousticBrainz never measured on at least three
+recordings — most of them. Each band's `rank` is the star's place among every
+measured star, from 0 (below all of them) to 1 (above all of them), not the
+number a model gave; `bpm` is the one figure carried as itself, because beats
+per minute mean something on their own. The bands arrive in the order a card
+draws them, every one measured on the same `recordings`.
 
 `404` for an unknown id; a non-numeric id is a `400` from routing and never
 reaches the database.
@@ -270,7 +289,7 @@ own discography, and the stars both are listened alongside.
 ```json
 {
   "why": { "genres": ["Soul", "Rhythm & Blues", "Funk / Soul"], "co_listening": 0.388, "influence": null },
-  "spectrum": [
+  "genre_mix": [
     { "name": "Funk / Soul", "is_style": false, "a": 0.811, "b": 0.832 },
     { "name": "Pop", "is_style": false, "a": 0.073, "b": 0.098 }
   ],
@@ -281,8 +300,8 @@ own discography, and the stars both are listened alongside.
 **Shares, not counts**: a prolific act and a sparse one are compared by what
 their work is, not by how much of it there is. Genres and styles are shared out
 separately — Discogs tags a release with both, and summing across the two would
-count one record twice. Up to six genre bands and eight style bands, the ones
-that matter most to either star; a band one star is all about and the other has
+count one record twice. Up to six genre lines and eight style lines, the ones
+that matter most to either star; a line one star is all about and the other has
 none of is kept, because that difference is what a comparison is for.
 
 A shared neighbour's `score` is the weaker of its two edges. `404` when either

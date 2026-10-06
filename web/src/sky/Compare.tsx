@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { fetchComparison, type Comparison, type SpectrumLine } from '@/api'
+import { fetchComparison, type Comparison, type GenreMixLine } from '@/api'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -64,7 +64,7 @@ export function Compare({ a, b, onClose, onOpen }: Props) {
       }}
     >
       {/* The header and the close button stay put; only the body scrolls,
-          so a long spectrum never carries the way out off the screen. */}
+          so a long genre mix never carries the way out off the screen. */}
       <DialogPopup size="lg">
         <DialogHeader>
           <DialogTitle>{t('compare.title', { a: a.name, b: b.name })}</DialogTitle>
@@ -89,13 +89,13 @@ export function Compare({ a, b, onClose, onOpen }: Props) {
               <SectionLabel>{t('compare.joins')}</SectionLabel>
               <p className="m-0 text-sm text-text">{said.length > 0 ? said.join(' · ') : t('compare.nothing')}</p>
 
-              <SectionLabel>{t('compare.spectrum')}</SectionLabel>
+              <SectionLabel>{t('compare.genreMix')}</SectionLabel>
               <Key a={a} b={b} />
-              <Spectrum lines={comparison.spectrum.filter(line => !line.is_style)} a={a} b={b} />
-              {comparison.spectrum.some(line => line.is_style) && (
+              <GenreMix lines={comparison.genre_mix.filter(line => !line.is_style)} a={a} b={b} />
+              {comparison.genre_mix.some(line => line.is_style) && (
                 <>
                   <p className="m-0 mt-1 text-2xs text-dim">{t('compare.styles')}</p>
-                  <Spectrum lines={comparison.spectrum.filter(line => line.is_style)} a={a} b={b} />
+                  <GenreMix lines={comparison.genre_mix.filter(line => line.is_style)} a={a} b={b} />
                 </>
               )}
 
@@ -153,10 +153,10 @@ const A_FILL = 'bg-accent'
 const B_FILL = 'bg-[#e0a040]'
 
 /**
- * The bands, one row each: the name, then a thin bar per star with its share
+ * The genres, one row each: the name, then a thin bar per star with its share
  * written beside it.
  */
-function Spectrum({ lines, a, b }: { lines: SpectrumLine[]; a: Side; b: Side }) {
+function GenreMix({ lines, a, b }: { lines: GenreMixLine[]; a: Side; b: Side }) {
   const { t } = useTranslation()
   const percent = (share: number) => `${String(Math.round(share * 100))}%`
   return (

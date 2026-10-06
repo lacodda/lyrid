@@ -106,6 +106,8 @@ export interface Artist {
   end_year: number | null
   position: { x: number; y: number; brightness: number } | null
   genres: Genre[]
+  /** What the star sounds like, from AcousticBrainz. `null` for the many stars never measured. */
+  spectrum: Spectrum | null
   similar: Alongside[]
   origin: Origin | null
   /** The labels the act released on, most releases first. */
@@ -125,6 +127,23 @@ export interface Artist {
    * a channel to play.
    */
   radio: Nebula | null
+}
+
+/** The bands a spectrum is drawn in, in the order the server sends them. */
+export type SpectrumBandName = 'tempo' | 'energy' | 'mood' | 'danceable' | 'sound' | 'voice'
+
+/** Where a star stands on one band, among all the stars AcousticBrainz measured: 0 below every one, 1 above. */
+export interface SpectrumBand {
+  name: SpectrumBandName
+  rank: number
+}
+
+/** A star's spectrum: every band measured on the same recordings. */
+export interface Spectrum {
+  recordings: number
+  /** Beats per minute, the median of the recordings' tempos. */
+  bpm: number
+  bands: SpectrumBand[]
 }
 
 /** A label on a card: a station this star belongs to. */
@@ -276,8 +295,8 @@ export async function fetchScene(qid: number, signal?: AbortSignal): Promise<Sce
   return (await response.json()) as SceneDossier
 }
 
-/** One band of a comparison: how much of each star's work carries a genre. */
-export interface SpectrumLine {
+/** One line of a comparison's genre mix: how much of each star's work carries a genre. */
+export interface GenreMixLine {
   name: string
   is_style: boolean
   a: number
@@ -287,7 +306,7 @@ export interface SpectrumLine {
 /** Two stars side by side. */
 export interface Comparison {
   why: Why
-  spectrum: SpectrumLine[]
+  genre_mix: GenreMixLine[]
   shared_neighbours: Neighbour[]
 }
 

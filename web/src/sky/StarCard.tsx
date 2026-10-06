@@ -9,6 +9,7 @@ import { panelVariants, SectionLabel } from '@/components/ui/panel'
 import { Spinner } from '@/components/ui/spinner'
 import type { Side } from './Compare'
 import type { Dossier } from './location'
+import { Spectrum } from './Spectrum'
 import { reasons } from './why'
 
 interface Props {
@@ -40,9 +41,9 @@ interface Props {
  *
  * Every block comes from a different source — the name and years from
  * MusicBrainz, the lead from Wikipedia, origin and influence from Wikidata,
- * genres from Discogs with a release count behind each, the neighbours from
- * co-listening — which is the point: the card is where the import pipelines
- * meet on one screen.
+ * genres from Discogs with a release count behind each, the spectrum from
+ * AcousticBrainz, the neighbours from co-listening — which is the point: the
+ * card is where the import pipelines meet on one screen.
  *
  * Each block hides itself when its source has nothing. Most artists in a canon
  * of three million have no encyclopaedia article and no influence links, so an
@@ -159,6 +160,8 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
               ))}
             </ul>
           )}
+
+          {artist.spectrum && <Spectrum spectrum={artist.spectrum} />}
 
           <Labels labels={artist.labels} onOpen={id => onDossier({ kind: 'label', id })} />
 

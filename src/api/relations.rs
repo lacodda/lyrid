@@ -165,12 +165,12 @@ struct CompareQuery {
 struct Comparison {
     why: Why,
     /// Each star's genres as shares of its own discography, lined up.
-    spectrum: Vec<Line>,
+    genre_mix: Vec<Line>,
     /// Stars both are listened alongside, strongest for both first.
     shared_neighbours: Vec<Shared>,
 }
 
-/// One band of the spectrum: how much of each star's work carries a genre.
+/// One line of the genre mix: how much of each star's work carries a genre.
 #[derive(Serialize, PartialEq, Debug)]
 struct Line {
     name: String,
@@ -244,7 +244,7 @@ async fn load_comparison(pool: &PgPool, a: i32, b: i32) -> sqlx::Result<Option<C
         .bind(id)
         .fetch_all(pool)
     };
-    let spectrum = spectrum(&genres(a).await?, &genres(b).await?);
+    let genre_mix = genre_mix(&genres(a).await?, &genres(b).await?);
 
     let shared_neighbours = sqlx::query_as::<_, (i32, String, f32)>(
         "WITH metric AS (SELECT max(id) AS id FROM similarity_metric),
@@ -275,14 +275,14 @@ async fn load_comparison(pool: &PgPool, a: i32, b: i32) -> sqlx::Result<Option<C
 
     Ok(Some(Comparison {
         why,
-        spectrum,
+        genre_mix,
         shared_neighbours,
     }))
 }
 
-/// How many bands of each kind the spectrum shows.
-const SPECTRUM_GENRES: usize = 6;
-const SPECTRUM_STYLES: usize = 8;
+/// How many lines of each kind the genre mix shows.
+const MIX_GENRES: usize = 6;
+const MIX_STYLES: usize = 8;
 
 /// Lines up two discographies genre by genre.
 ///
@@ -292,12 +292,12 @@ const SPECTRUM_STYLES: usize = 8;
 /// separately, because Discogs tags a release with both and summing across the
 /// two would count one record twice.
 ///
-/// The bands kept are the ones that matter to either star, largest first --
+/// The lines kept are the ones that matter to either star, largest first --
 /// so a genre one of them is all about is shown even when the other has none
 /// of it, which is exactly the difference a comparison is for.
-fn spectrum(a: &[(String, bool, i32)], b: &[(String, bool, i32)]) -> Vec<Line> {
+fn genre_mix(a: &[(String, bool, i32)], b: &[(String, bool, i32)]) -> Vec<Line> {
     let mut out = Vec::new();
-    for (is_style, keep) in [(false, SPECTRUM_GENRES), (true, SPECTRUM_STYLES)] {
+    for (is_style, keep) in [(false, MIX_GENRES), (true, MIX_STYLES)] {
         let shares = |rows: &[(String, bool, i32)]| -> HashMap<String, f32> {
             let total: i64 = rows.iter().filter(|r| r.1 == is_style).map(|r| i64::from(r.2.max(0))).sum();
             #[expect(clippy::cast_precision_loss, reason = "release counts are far below f32's exact range")]
@@ -379,12 +379,12 @@ mod tests {
     }
 
     #[test]
-    fn the_spectrum_compares_shares_not_counts() {
+    fn the_genre_mix_compares_shares_not_counts() {
         // A has 400 releases, B has 4; both are three-quarters rock. Counts
         // would draw A as a hundred times more rock than B.
         let a = vec![("Rock".to_string(), false, 300), ("Pop".to_string(), false, 100)];
         let b = vec![("Rock".to_string(), false, 3), ("Jazz".to_string(), false, 1)];
-        let lines = spectrum(&a, &b);
+        let lines = genre_mix(&a, &b);
         let rock = lines.iter().find(|l| l.name == "Rock").unwrap();
         assert_eq!((rock.a, rock.b), (0.75, 0.75));
         // What one star is and the other is not is kept: that is the difference.
@@ -397,16 +397,16 @@ mod tests {
         // One record tagged Electronic / Techno must be all electronic and all
         // techno, not half of each.
         let a = vec![("Electronic".to_string(), false, 10), ("Techno".to_string(), true, 10)];
-        let lines = spectrum(&a, &[]);
+        let lines = genre_mix(&a, &[]);
         assert!(lines.iter().all(|l| l.a == 1.0), "{lines:?}");
     }
 
     #[test]
-    fn the_spectrum_keeps_the_bands_that_matter_most() {
+    fn the_genre_mix_keeps_the_lines_that_matter_most() {
         let a: Vec<(String, bool, i32)> = (0..20).map(|i| (format!("G{i:02}"), false, 20 - i)).collect();
-        let lines = spectrum(&a, &[]);
-        assert_eq!(lines.len(), SPECTRUM_GENRES);
-        assert_eq!(lines[0].name, "G00", "the largest band leads");
+        let lines = genre_mix(&a, &[]);
+        assert_eq!(lines.len(), MIX_GENRES);
+        assert_eq!(lines[0].name, "G00", "the largest line leads");
     }
 
     /// Runs the real reasons query over rows of its own, then rolls them back.
