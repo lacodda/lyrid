@@ -2,10 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.16.0] - 2026-10-06
+
+### Bug Fixes
+- Link the Wikipedia credit to its article again
+- Fill each spectrum band from the middle and keep its marker whole
+
+### Documentation
+- Record spectra, the collapses they are kept from, and the import
+
+### Features
+- Measure star spectra from the AcousticBrainz dumps
+- **Breaking:** Draw a star's spectrum on its card
+- Report the listed collapses the spike search finds, not only unknown ones
+
 ## [0.15.0] - 2026-09-30
 
 ### Documentation
 - Record stations, dossiers and the rosters they rest on
+- Generate for v0.15.0
 
 ### Features
 - Read label rosters from the Discogs releases file
@@ -71,9 +86,6 @@ All notable changes to this project are documented in this file.
 ### Features
 - Confirm an address, and give back a lost password
 - Open the doors, and say what is kept
-
-### style
-- Run rustfmt over the brand gate
 
 ## [0.10.0] - 2026-09-01
 
