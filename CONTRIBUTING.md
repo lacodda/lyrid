@@ -24,6 +24,9 @@ cargo run -- import wikidata
 # Add prose, reached through the multistream index (1.9 MB per article, not 27 GB):
 cargo run -- import wikipedia --dump ./enwiki-multistream.xml.bz2 --index ./enwiki-index.txt.bz2
 
+# Add spectra from the frozen AcousticBrainz dump (~43 GB, CC0) and the same mbdump:
+cargo run --release -- import acousticbrainz --dir ./acousticbrainz --musicbrainz ./mbdump.tar.bz2
+
 # Project the graph into a sky and cut the tile pyramid:
 cargo run --release -- layout --tiles ./tiles
 

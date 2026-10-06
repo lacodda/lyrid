@@ -285,6 +285,39 @@ ratio far from the usual one is the signature of a template it did not know.
 See [Importing prose](/lyrid/guides/importing-prose/) and
 [ADR 0007](https://github.com/lacodda/lyrid/blob/main/docs/adr/0007-prose-parsed-from-wikitext.md).
 
+## `artist_spectrum`
+
+What a star sounds like, as AcousticBrainz measured its recordings: one row per
+artist with at least three measured recordings.
+
+| Column | Meaning |
+| --- | --- |
+| `recordings` | How many recordings every column below is measured on |
+| `tempo` | Beats per minute: the median over the recordings, each the median of its own submissions |
+| `danceable` … `voice` | The mean, over the recordings, of what each model said — nine probabilities: `danceable`, `acoustic`, `electronic`, `aggressive`, `happy`, `party`, `relaxed`, `sad`, `voice` |
+| `energy` | Generated: `(aggressive + party + 1 − relaxed) / 3` — arousal, calm to intense |
+| `mood` | Generated: `(happy + 1 − sad) / 2` — valence, dark to bright |
+| `sound` | Generated: `(electronic + 1 − acoustic) / 2` — acoustic to electronic |
+
+The measured columns are stored as measured; the three bands built from them
+are generated columns, so each formula exists once, in the schema, and can be
+revised without reading the dump again. A spectrum on fewer than three
+recordings is one song's mood rather than a star's, and the table refuses it.
+
+## `spectrum_scale`
+
+Each band's percentiles, 0th to 100th, over every star in `artist_spectrum` at
+import time: `(band, quantiles real[101])` for `tempo`, `energy`, `mood`,
+`danceable`, `sound` and `voice`.
+
+A card shows a star's place on a band among all measured stars, read off this
+table, rather than the model's number: the models are poorly calibrated, and
+"relaxed 0.81" is the commonest reading there is. The table references no
+artist, so cutting a slice leaves it whole — a stand places a star among all
+measured stars, not only the ones it kept. See
+[Importing spectra](/lyrid/guides/importing-spectra/) and
+[ADR 0018](https://github.com/lacodda/lyrid/blob/main/docs/adr/0018-spectra-from-acousticbrainz.md).
+
 ## `sky_layout`
 
 One row per layout run: where the stars were put, and by what.

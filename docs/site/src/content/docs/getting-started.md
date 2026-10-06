@@ -47,7 +47,7 @@ If the database is unreachable the same endpoint answers `503` with `"status": "
 
 ## The universe
 
-An empty database is a sky with no stars. Filling it takes five imports, in this order:
+An empty database is a sky with no stars. Filling it takes six imports, in this order:
 
 ```sh
 cargo run -- import musicbrainz  --dump ./mbdump.tar.bz2                   # the stars
@@ -55,7 +55,10 @@ cargo run -- import listenbrainz --dump ./artist-credit-relations.tar.bz2  # the
 cargo run -- import discogs      --masters ./discogs_masters.xml.gz \
                                  --labels  ./discogs_labels.xml.gz         # what each star is made of
 cargo run -- import wikidata                                               # where it came from, and who it followed
-cargo run -- import wikipedia --dump ./enwiki-multistream.xml.bz2 \n                              --index ./enwiki-index.txt.bz2               # the words on the card
+cargo run -- import wikipedia    --dump ./enwiki-multistream.xml.bz2 \
+                                 --index ./enwiki-index.txt.bz2            # the words on the card
+cargo run --release -- import acousticbrainz --dir ./acousticbrainz \
+                                 --musicbrainz ./mbdump.tar.bz2            # what it sounds like
 ```
 
 MusicBrainz comes first in every case: every later import resolves against the canon it builds.
@@ -68,7 +71,7 @@ Once the canon is filled, the sky is built from it:
 cargo run --release -- layout --tiles ./tiles   # coordinates, then the tile pyramid
 ```
 
-See [Importing MusicBrainz](/lyrid/guides/importing-musicbrainz/), [Importing similarity](/lyrid/guides/importing-similarity/), [Importing genres and labels](/lyrid/guides/importing-genres/) [Importing facts and influence](/lyrid/guides/importing-facts/) [Importing prose](/lyrid/guides/importing-prose/) and [Building the sky](/lyrid/guides/building-the-sky/). Everything else runs fine without them; there is simply nothing to look at yet.
+See [Importing MusicBrainz](/lyrid/guides/importing-musicbrainz/), [Importing similarity](/lyrid/guides/importing-similarity/), [Importing genres and labels](/lyrid/guides/importing-genres/) [Importing facts and influence](/lyrid/guides/importing-facts/) [Importing prose](/lyrid/guides/importing-prose/), [Importing spectra](/lyrid/guides/importing-spectra/) and [Building the sky](/lyrid/guides/building-the-sky/). Everything else runs fine without them; there is simply nothing to look at yet.
 
 :::note[Adding a migration]
 Migrations are embedded into the binary at compile time, so a newly added `.sql` file needs a rebuild before it will apply — `cargo build` after adding one, or the server will happily run the old set.
