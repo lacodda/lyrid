@@ -102,8 +102,18 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
     );
     // The list of collapses was drawn from this dump; a spike it does not
     // explain means a broken model is still being averaged into the spectra.
-    for (output, value, submissions) in unexplained(&read) {
-        tracing::warn!(output, value, submissions, "a value no music produces is not in the list of collapses");
+    for Spike {
+        output,
+        value,
+        submissions,
+        known,
+    } in collapses(&read)
+    {
+        if known {
+            tracing::info!(output, value, submissions, "a listed collapse, found where the list says");
+        } else {
+            tracing::warn!(output, value, submissions, "a value no music produces is not in the list of collapses");
+        }
     }
 
     let tempos = read_rhythm(&dumps.rhythm, &mut heard)?;
@@ -483,17 +493,34 @@ fn spikes(histogram: &[u32], total: u64) -> Vec<(usize, u32)> {
     found
 }
 
-/// Spikes in the outputs that the list of collapses does not explain.
-fn unexplained(stats: &ReadStats) -> Vec<(&'static str, f32, u32)> {
+/// A value no music produces, found in the outputs.
+#[derive(Debug, PartialEq)]
+struct Spike {
+    output: &'static str,
+    value: f32,
+    submissions: u32,
+    /// Whether the list of collapses names it.
+    known: bool,
+}
+
+/// Every spike in the outputs, each said to be known or not.
+///
+/// The known ones are reported too: a run that finds every listed collapse
+/// where the list says it is shows the search is looking, and a list entry
+/// it stops finding is one to question.
+fn collapses(stats: &ReadStats) -> Vec<Spike> {
     let mut out = Vec::new();
     for (output, histogram) in stats.histograms.iter().enumerate() {
-        for (index, count) in spikes(histogram, stats.submissions) {
+        for (index, submissions) in spikes(histogram, stats.submissions) {
             #[allow(clippy::cast_precision_loss, reason = "a bin index below 100,001")]
             let value = index as f32 / 100_000.0;
             let known = COLLAPSED.iter().any(|&(o, v)| o == output && (v - value).abs() <= COLLAPSE_TOLERANCE);
-            if !known {
-                out.push((OUTPUT_NAMES[output], value, count));
-            }
+            out.push(Spike {
+                output: OUTPUT_NAMES[output],
+                value,
+                submissions,
+                known,
+            });
         }
     }
     out
@@ -886,14 +913,30 @@ mod tests {
     }
 
     #[test]
-    fn a_known_collapse_is_explained_and_an_unknown_one_is_reported() {
+    fn every_spike_is_reported_and_said_to_be_listed_or_not() {
         let mut stats = ReadStats {
             submissions: 1_000_000,
             ..ReadStats::default()
         };
         stats.histograms[RELAXED][bin(0.808_82)] = 50_000;
         stats.histograms[HAPPY][bin(0.25)] = 50_000;
-        assert_eq!(unexplained(&stats), vec![("happy", 0.25, 50_000)]);
+        assert_eq!(
+            collapses(&stats),
+            vec![
+                Spike {
+                    output: "happy",
+                    value: 0.25,
+                    submissions: 50_000,
+                    known: false
+                },
+                Spike {
+                    output: "relaxed",
+                    value: 0.808_82,
+                    submissions: 50_000,
+                    known: true
+                },
+            ]
+        );
     }
 
     #[test]
