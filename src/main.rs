@@ -7,6 +7,7 @@ mod layout;
 mod mail;
 mod markup;
 mod slice;
+mod spectrum;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -67,6 +68,11 @@ enum ImportCommand {
     /// from its sitelinks.
     #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
     Wikipedia(import::wikipedia::Args),
+    /// Import star spectra -- tempo, energy, mood -- from the AcousticBrainz
+    /// dumps. Requires the MusicBrainz import to have run first, and a
+    /// MusicBrainz full export to match recordings to artists.
+    #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
+    Acousticbrainz(import::acousticbrainz::Args),
 }
 
 #[tokio::main]
@@ -108,6 +114,10 @@ async fn main() -> Result<()> {
         Some(Command::Import(ImportCommand::Wikipedia(args))) => {
             let pool = connect(&config).await?;
             import::wikipedia::run(&pool, &args).await
+        }
+        Some(Command::Import(ImportCommand::Acousticbrainz(args))) => {
+            let pool = connect(&config).await?;
+            import::acousticbrainz::run(&pool, &args).await
         }
         Some(Command::Slice(args)) => {
             let pool = connect(&config).await?;

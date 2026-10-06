@@ -4,8 +4,8 @@
 //! endpoints serve only what a click or a search box needs. For the card that
 //! means the whole canon meeting on one screen: the name and years from
 //! `MusicBrainz`, genres from Discogs with a release count behind each, origin
-//! and influence from Wikidata, the lead paragraphs from Wikipedia, and the
-//! neighbours from co-listening.
+//! and influence from Wikidata, the lead paragraphs from Wikipedia, the
+//! neighbours from co-listening, and the spectrum from `AcousticBrainz`.
 //!
 //! One rule here is not a matter of taste. Wikipedia prose arrives under
 //! CC BY-SA, and its attribution is stored in the same row as the text; this
@@ -22,6 +22,7 @@ use sqlx::PgPool;
 use crate::api::dossiers::{LabelRef, SceneRef, plain_name};
 use crate::api::listening::{Dial, Nebula, radio_here, radio_of};
 use crate::api::relations::{Why, why_many};
+use crate::api::spectrum::{self, Spectrum};
 use crate::app::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -50,6 +51,10 @@ struct Artist {
     position: Option<Position>,
     /// Genres by weight, strongest first.
     genres: Vec<Genre>,
+    /// What the star sounds like, as `AcousticBrainz` measured its recordings:
+    /// tempo, energy, mood and the rest, each as a place among all measured
+    /// stars. Most stars were never measured, and then there is none.
+    spectrum: Option<Spectrum>,
     /// Nearest neighbours in the similarity graph, each with the reasons the
     /// canon can give for the edge.
     similar: Vec<Alongside>,
@@ -251,6 +256,7 @@ async fn load_artist(pool: &PgPool, dial: &Dial, id: i32) -> sqlx::Result<Option
     .map(|(name, is_style, releases)| Genre { name, is_style, releases })
     .collect();
 
+    let spectrum = spectrum::of(pool, id).await?;
     let similar = alongside(pool, id).await?;
 
     let (listen, youtube_uploads) = listen(pool, id).await?;
@@ -280,6 +286,7 @@ async fn load_artist(pool: &PgPool, dial: &Dial, id: i32) -> sqlx::Result<Option
         end_year,
         position,
         genres,
+        spectrum,
         similar,
         origin,
         labels,
