@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.17.0] - 2026-10-10
+
+### CI
+- Run the binary's database tests in the database job
+
+### Documentation
+- Record how listening is read from ListenBrainz and what it pays
+
+### Features
+- Read ListenBrainz listening into a ledger of light
+- Link ListenBrainz and show what the listening opened
+
 ## [0.16.0] - 2026-10-06
 
 ### Bug Fixes
@@ -10,6 +22,7 @@ All notable changes to this project are documented in this file.
 
 ### Documentation
 - Record spectra, the collapses they are kept from, and the import
+- Generate for v0.16.0
 
 ### Features
 - Measure star spectra from the AcousticBrainz dumps
