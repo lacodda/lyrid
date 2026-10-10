@@ -36,15 +36,23 @@
  * panel sits on the map, and hiding the map behind it would hide the product.
  * Mixed from `--raise` rather than written as its own hex, so it still follows
  * the accent's tint like the rest of the chrome does.
+ *
+ * `--light` is the colour of the currency, and only of the currency: the
+ * reference design gives azure to everything that can be pressed and gold to
+ * light alone, so a gold number always means "this is what your listening
+ * gathered". Dowel has no word for money, and borrowing `--warn` for it would
+ * make every balance look like a problem.
  */
 :root.dark {
   --void: #05060e;
   --glass: color-mix(in srgb, var(--raise) 72%, transparent);
+  --light: #f2c35b;
 }
 
 @theme inline {
   --color-void: var(--void);
   --color-glass: var(--glass);
+  --color-light: var(--light);
 }
 
 /*

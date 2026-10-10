@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { panelVariants, SectionLabel } from '@/components/ui/panel'
 import { Spinner } from '@/components/ui/spinner'
+import { useLanguage } from '@/lib/language'
+import { fetchHeard, type Heard } from '@/scrobbling'
 import type { Side } from './Compare'
 import type { Dossier } from './location'
 import { Spectrum } from './Spectrum'
@@ -34,6 +36,12 @@ interface Props {
   onDossier: (dossier: Dossier) => void
   /** The star the player is sounding, so the card can say it is this one. */
   sounding: number | null
+  /**
+   * Whether the person looking has listening to ask about -- signed in, with
+   * ListenBrainz linked or once linked. Without it the card asks nothing
+   * personal at all.
+   */
+  listener: boolean
 }
 
 /**
@@ -49,7 +57,7 @@ interface Props {
  * of three million have no encyclopaedia article and no influence links, so an
  * empty section is the normal case, not a failure to render.
  */
-export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare, onListen, onRadio, onDossier, sounding }: Props) {
+export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare, onListen, onRadio, onDossier, sounding, listener }: Props) {
   const { t } = useTranslation()
   const [artist, setArtist] = useState<Artist | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -103,6 +111,8 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
           {artist.comment && <p className="m-0 text-xs text-dim">{artist.comment}</p>}
 
           {facts && <Facts facts={facts} scene={artist.origin?.place ? (artist.origin.qid ?? null) : null} onScene={qid => onDossier({ kind: 'scene', qid })} />}
+
+          {listener && <HeardLine artistId={artist.id} />}
 
           {/* The two instruments that act on this star and another: walking
               to it as part of a route, and holding it up against a second. */}
@@ -196,6 +206,38 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
         </>
       )}
     </aside>
+  )
+}
+
+/**
+ * What your own listening says about this star, when it says anything.
+ *
+ * Asked for separately from the card, by the person it concerns: the card
+ * itself is the same for everybody and stays that way. A star never heard
+ * shows nothing rather than "not heard yet" -- in a sky of two hundred
+ * thousand stars that would be the line on almost every card.
+ */
+function HeardLine({ artistId }: { artistId: number }) {
+  const { t } = useTranslation()
+  const { resolved } = useLanguage()
+  const [heard, setHeard] = useState<Heard | null>(null)
+
+  useEffect(() => {
+    const abort = new AbortController()
+    fetchHeard(artistId, abort.signal)
+      .then(setHeard)
+      // Personal and optional: a card that could not say what you heard is
+      // still the whole card.
+      .catch(() => undefined)
+    return () => abort.abort()
+  }, [artistId])
+
+  if (!heard || heard.listens === 0 || !heard.first_at) return null
+  const since = new Date(heard.first_at).toLocaleDateString(resolved, { day: 'numeric', month: 'long', year: 'numeric' })
+  return (
+    <p className="m-0 text-xs text-light">
+      {t('card.heard', { count: heard.listens, number: heard.listens.toLocaleString(resolved), since })}
+    </p>
   )
 }
 

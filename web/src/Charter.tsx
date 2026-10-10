@@ -24,7 +24,9 @@ import {
  *
  * Written before the scrobbling (v0.17) rather than after, deliberately. The
  * moment this service starts reading what someone actually listens to is the
- * wrong moment to be deciding what it promises about it.
+ * wrong moment to be deciding what it promises about it. When the scrobbling
+ * came, the page grew one entry naming exactly what it keeps -- and the one
+ * line that would no longer have been true was rewritten rather than left.
  */
 
 interface Props {
@@ -61,6 +63,9 @@ export function Charter({ me, onSignedOut, onClose }: Props) {
           </li>
           <li>
             <strong>{t('charter.withAccount.sessions')}</strong> {t('charter.withAccount.sessionsBody')}
+          </li>
+          <li>
+            <strong>{t('charter.withAccount.listening')}</strong> {t('charter.withAccount.listeningBody')}
           </li>
         </ul>
 

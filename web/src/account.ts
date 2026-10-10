@@ -170,7 +170,7 @@ async function send(path: string, body: Record<string, string>): Promise<Me> {
  * a proxy's HTML error page, a truncated body — falls back to something
  * honest rather than showing "undefined" to the user.
  */
-async function messageOf(response: Response): Promise<string> {
+export async function messageOf(response: Response): Promise<string> {
   try {
     const body: unknown = await response.json()
     if (typeof body === 'object' && body !== null) {

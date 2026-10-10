@@ -78,7 +78,9 @@
     "addedToRoute": "added to route",
     "pin": "compare with…",
     "pinned": "held for comparing — open another star",
-    "compareWith": "compare with {{name}}"
+    "compareWith": "compare with {{name}}",
+    "heard": "you have heard them once, on {{since}}",
+    "heard_other": "you have heard them {{number}} times, first on {{since}}"
   },
   "spectrum": {
     "heading": "spectrum",
@@ -167,7 +169,7 @@
   "charter": {
     "title": "What lyrid keeps",
     "back": "back to the sky",
-    "lede": "The sky is public and works without an account. An account exists to remember three things across your machines, and this page is the whole list — not a summary of one.",
+    "lede": "The sky is public and works without an account. An account remembers what is listed below across your machines, and this page is the whole list — not a summary of one.",
     "noAccount": {
       "heading": "If you have no account",
       "body": "Nothing about you is stored on the server. Your marker's shape and colour live in your own browser, and the view you are looking at lives in the address bar. Neither reaches us."
@@ -179,12 +181,14 @@
       "place": "Where you left the sky, and how you like your marked star drawn.",
       "placeBody": "The reason an account is worth having.",
       "sessions": "Your open sessions.",
-      "sessionsBody": "A random token per browser, so signing out actually ends the session rather than waiting for it to expire."
+      "sessionsBody": "A random token per browser, so signing out actually ends the session rather than waiting for it to expire.",
+      "listening": "If you link ListenBrainz: its account name, and every listen from then on.",
+      "listeningBody": "For each listen, when it was, which artists it was by (their MusicBrainz ids), how long it ran and the light it gathered — no track or album names. Your listens are already public on ListenBrainz; this copy exists only so your own sky can show what you have heard. The token you paste to link is checked once and never kept. Unlinking stops the reading; what was gathered stays until you delete the account."
     },
     "counted": {
       "heading": "What is counted, and what is not",
       "body": "How often each part of lyrid gets used is counted — how many times the radio was opened on a given day, not who opened it. The counters are numbers that go up. There is no row per event, so there is nothing to join back to a person, and no clever query later can turn these into a history of what you looked at.",
-      "never": "What lyrid does not do: build a profile of your taste, sell or share anything with anyone, run third-party analytics or advertising, or track you across other sites."
+      "never": "What lyrid does not do: use your listening for anything but your own sky, sell or share anything with anyone, run third-party analytics or advertising, or track you across other sites."
     },
     "whose": {
       "heading": "Whose sky is it",
@@ -198,7 +202,7 @@
       "delete": "delete my account",
       "deleteFailed": "the account could not be deleted",
       "confirmTitle": "Delete this account?",
-      "confirmBody": "This removes the account, the profile and every session, right now. It cannot be undone and there is no copy to restore from — download your data first if you want it.",
+      "confirmBody": "This removes the account, the profile, every session and all your listening, right now. It cannot be undone and there is no copy to restore from — download your data first if you want it.",
       "confirmAction": "delete it all",
       "cancel": "keep it"
     }
@@ -321,5 +325,45 @@
     "heading_other": "{{name}} · {{number}} stars",
     "back": "back to the dossier",
     "clear": "clear the marks"
+  },
+  "listening": {
+    "heading": "Listening",
+    "link": "link ListenBrainz",
+    "pitch": "What you listen to anywhere opens its stars here and gathers light.",
+    "linkHeading": "Link ListenBrainz",
+    "linkBody": "Whatever you play that scrobbles to ListenBrainz opens its stars here and gathers light — new music far more than old favourites. Reading starts from the moment you link.",
+    "tokenWhere": "your user token is on the ListenBrainz settings page",
+    "token": "ListenBrainz user token",
+    "showToken": "show token",
+    "hideToken": "hide token",
+    "linkAction": "link",
+    "tokenKept": "The token only proves the account is yours: lyrid checks it once and does not keep it.",
+    "light": "{{number}} light",
+    "stars": "{{number}} star",
+    "stars_other": "{{number}} stars",
+    "listens": "{{number}} listen",
+    "listens_other": "{{number}} listens",
+    "readAt": "{{name}} on ListenBrainz · read {{when}}",
+    "justNow": "just now",
+    "notReadYet": "{{name}} on ListenBrainz · not read yet",
+    "failure": {
+      "unreachable": "ListenBrainz did not answer the last read — trying again soon.",
+      "unknown_user": "ListenBrainz no longer knows {{name}}. If the account was renamed, unlink it and link it again.",
+      "throttled": "ListenBrainz asked us to wait — reading again soon.",
+      "malformed": "ListenBrainz answered in a shape lyrid cannot read, so nothing was counted from it."
+    },
+    "fromNowOn": "Nothing heard yet. What you play from now on opens its stars here.",
+    "latest": "latest:",
+    "readNow": "read now",
+    "showOnSky": "show on the sky",
+    "heardName": "Heard",
+    "unlink": "unlink",
+    "nothingNew": "nothing new since the last read",
+    "gathered": "new listens: {{number}} · light +{{light}} · stars opened: {{opened}}",
+    "unlinkTitle": "Stop reading {{name}}?",
+    "unlinkBody": "lyrid stops reading your listening. What it has already opened and gathered stays with your account, and goes only when the account does.",
+    "keepLinked": "keep reading",
+    "unlinkAction": "unlink",
+    "cancel": "not now"
   }
 }

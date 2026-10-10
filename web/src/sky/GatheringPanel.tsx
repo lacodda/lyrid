@@ -10,8 +10,9 @@ interface Props {
   name: string
   /** How many of them. */
   size: number
-  /** Opens the station's dossier again. */
-  onBack: () => void
+  /** Leads back to where the marks came from -- a station's dossier -- or
+   * `null` when they did not come from anywhere to go back to. */
+  onBack: (() => void) | null
   onClear: () => void
   className?: string
 }
@@ -37,9 +38,11 @@ export function GatheringPanel({ name, size, onBack, onClear, className }: Props
           ×
         </Button>
       </div>
-      <Button size="sm" className="self-start" onClick={onBack}>
-        {t('gathering.back')}
-      </Button>
+      {onBack && (
+        <Button size="sm" className="self-start" onClick={onBack}>
+          {t('gathering.back')}
+        </Button>
+      )}
     </section>
   )
 }

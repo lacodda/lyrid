@@ -69,7 +69,10 @@ export function NearbyStars({ visible, onPick, className }: Props) {
   }, [key])
 
   return (
-    <section className={cn(panelVariants(), 'glass flex w-56 flex-col gap-1 p-2', className)} aria-labelledby="nearby-heading">
+    // `overflow-hidden`: this is the piece of the corner stack that yields,
+    // and a panel squeezed below its own content must cut it off at its edge
+    // rather than spill it over the panel underneath.
+    <section className={cn(panelVariants(), 'glass flex w-56 flex-col gap-1 overflow-hidden p-2', className)} aria-labelledby="nearby-heading">
       {/* `text-dim` over dowel's own `text-faint`. SectionLabel is faint by
           design, which measures 3.16:1 on the glass -- AA wants 4.5:1. The
           primitive is not wrong: it is checked against the opaque surfaces the

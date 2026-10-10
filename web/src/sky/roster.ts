@@ -72,6 +72,12 @@ export function peak(counts: readonly YearCount[]): YearCount | null {
 export type Member = [number, number, number, number]
 
 /**
+ * Anything placed on the sky as `[id, x, y, ...]`: a roster member, or a star
+ * someone has heard. Framing a set of them asks for nothing more.
+ */
+export type Placed = readonly [number, number, number, ...number[]]
+
+/**
  * The view that shows a roster on the big sky: centred on its middle and wide
  * enough for most of it.
  *
@@ -81,7 +87,7 @@ export type Member = [number, number, number, number]
  * The scale is worked out the way the compass works out the whole sky's:
  * `visible` and `view` together say how many world units the canvas is wide.
  */
-export function fitView(members: readonly Member[], visible: Bounds, view: View): View | null {
+export function fitView(members: readonly Placed[], visible: Bounds, view: View): View | null {
   if (members.length === 0) return null
   const xs = members.map(member => member[1]).sort((a, b) => a - b)
   const ys = members.map(member => member[2]).sort((a, b) => a - b)

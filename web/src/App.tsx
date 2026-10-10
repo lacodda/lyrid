@@ -23,6 +23,8 @@ import { follows, localDay, newSeed, refill, sounding, stepRadio, type Listening
 import { useRegion } from '@/sky/region'
 import { fetchArtist, fetchRadio, fetchSignal, fetchStars, type Hit, type Nebula, type Station } from '@/api'
 import { AccountPanel } from '@/AccountPanel'
+import { ListeningPanel } from '@/ListeningPanel'
+import { fetchHeardStars, fetchListening, type Listening as Scrobbles } from '@/scrobbling'
 import { fetchMe, saveProfile, worthSaving, type Me } from '@/account'
 import { Charter } from '@/Charter'
 import { Embed } from '@/Embed'
@@ -344,9 +346,10 @@ export function App() {
     setDossier(next)
   }, [])
 
-  // A station's stars marked on the sky, with the dossier they came from so
-  // the panel can lead back to it.
-  const [gathering, setGathering] = useState<{ from: DossierTarget; name: string; points: { x: number; y: number }[] } | null>(null)
+  // Stars marked on the sky: a station's roster, with the dossier it came
+  // from so the panel can lead back to it, or the stars someone has heard,
+  // which came from no page and have nowhere to lead back to.
+  const [gathering, setGathering] = useState<{ back: DossierTarget | null; name: string; points: { x: number; y: number }[] } | null>(null)
   const gatheringPoints = useMemo(() => gathering?.points ?? [], [gathering])
 
   // One count for a dossier arrived at by link, as for one opened by hand.
@@ -460,6 +463,56 @@ export function App() {
       setTarget(profile.camera)
     }
   }, [opened])
+
+  // What the signed-in person's listening has come to. Read when someone signs
+  // in, and again every few minutes while they stay: the server reads
+  // ListenBrainz in the background, so the light can grow with nobody
+  // pressing anything.
+  //
+  // Kept with the account it belongs to, so that signing out -- or in as
+  // someone else -- shows nothing of the previous person's listening even for
+  // the moment before the next summary arrives.
+  const [heldScrobbles, setHeldScrobbles] = useState<{ user: number; listening: Scrobbles } | null>(null)
+  const signedIn = me?.id ?? null
+  const scrobbles = heldScrobbles && heldScrobbles.user === signedIn ? heldScrobbles.listening : null
+  const setScrobbles = useCallback(
+    (listening: Scrobbles) => {
+      if (signedIn !== null) setHeldScrobbles({ user: signedIn, listening })
+    },
+    [signedIn]
+  )
+  useEffect(() => {
+    if (signedIn === null) return
+    const abort = new AbortController()
+    const refresh = () => {
+      fetchListening(abort.signal)
+        .then(listening => setHeldScrobbles({ user: signedIn, listening }))
+        // The panel waits rather than shows an error: the account and the
+        // sky work without it, and the next refresh will try again.
+        .catch(() => undefined)
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 5 * 60_000)
+    return () => {
+      abort.abort()
+      window.clearInterval(timer)
+    }
+  }, [signedIn])
+
+  // Rings every star the listening has named, and frames them.
+  const showHeard = useCallback(() => {
+    if (!state) return
+    count('heard_shown')
+    fetchHeardStars()
+      .then(stars => {
+        const view = fitView(stars, state.visible, state.view)
+        if (!view) return
+        setGathering({ back: null, name: t('listening.heardName'), points: stars.map(([, x, y]) => ({ x, y })) })
+        setPicked(null)
+        setTarget(view)
+      })
+      .catch(() => undefined)
+  }, [state, t])
 
   // One count for the visit, not one per render: a mechanic opened twice in a
   // session is two uses, but a component re-rendering is not.
@@ -608,6 +661,7 @@ export function App() {
             onRadio={startRadio}
             onDossier={openDossier}
             sounding={playing?.id ?? null}
+            listener={scrobbles !== null && (scrobbles.link !== null || scrobbles.listens > 0)}
           />
         )}
         {gathering && (
@@ -615,7 +669,7 @@ export function App() {
             className="shrink-0"
             name={gathering.name}
             size={gathering.points.length}
-            onBack={() => openDossier(gathering.from)}
+            onBack={gathering.back ? () => gathering.back && openDossier(gathering.back) : null}
             onClear={() => setGathering(null)}
           />
         )}
@@ -698,22 +752,13 @@ export function App() {
               if (!state) return
               const view = fitView(members, state.visible, state.view)
               if (!view) return
-              setGathering({ from: dossier, name, points: members.map(([, x, y]) => ({ x, y })) })
+              setGathering({ back: dossier, name, points: members.map(([, x, y]) => ({ x, y })) })
               setDossier(null)
               setPicked(null)
               setTarget(view)
             }}
           />
         </Suspense>
-      )}
-
-      {state && (
-        // Not on a phone's width: there the card already covers the stack,
-        // and two more panels would bury the sky. A narrow layout of its own
-        // is a stage of its own.
-        <div className="pointer-events-none absolute left-6 top-20 hidden md:block [&>*]:pointer-events-auto">
-          <Instruments value={instruments} onChange={setInstruments} />
-        </div>
       )}
 
       {state && (
@@ -730,7 +775,24 @@ export function App() {
         // there is room for", and `justify-end` keeps it growing upward from
         // the corner it belongs to. Pointer events are handed back per child
         // so the full-height box does not swallow drags meant for the sky.
-        <div className="pointer-events-none absolute bottom-4 left-6 top-4 flex md:top-72 flex-col items-start justify-end gap-2 [&>*]:pointer-events-auto">
+        //
+        // The instruments joined the same column in v0.17. They used to sit
+        // apart at the top, with the stack held down at `top-72` to leave
+        // them room to open -- room that was empty unless they did, about
+        // 110 px at 1280x720. The listening lines then took the nearby list
+        // below its own heading, and the list spilled its text over the
+        // account (measured, not guessed). In one column the instruments sit
+        // at the top by `mb-auto`, the empty room goes to the list, and when
+        // the time machine opens it pushes rather than overlaps.
+        <div className="pointer-events-none absolute bottom-4 left-6 top-4 flex md:top-20 flex-col items-start justify-end gap-2 [&>*]:pointer-events-auto">
+          {/* Not on a phone's width: there the card already covers the stack,
+              and two more panels would bury the sky. A narrow layout of its
+              own is a stage of its own. The second piece that yields, after
+              the nearby list: with both instruments open on a short window
+              there is not room for everything, and the two share the squeeze
+              by scrolling inside themselves instead of one of them vanishing
+              and the column running off the top. */}
+          <Instruments className="mb-auto hidden min-h-0 overflow-y-auto md:flex" value={instruments} onChange={setInstruments} />
           {/* The keyboard's way into the sky, first in the stack because it is
               the one piece here that is not optional: without it the canvas has
               no reachable content at all. It is also the only piece that can
@@ -738,6 +800,7 @@ export function App() {
               because a flex child will not shrink below its content otherwise. */}
           <NearbyStars className="min-h-0" visible={state.visible} onPick={goTo} />
           <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} onCharter={openCharter} />
+          {me && <ListeningPanel className="shrink-0" listening={scrobbles} onChange={setScrobbles} onShowOnSky={showHeard} onOpen={openById} />}
           <HaloPicker shape={shape} colour={colour} onShape={chooseShape} onColour={chooseColour} />
           <Share capture={captureRef} artistId={picked?.artistId ?? null} />
           <div className="flex items-center gap-2">
