@@ -61,8 +61,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # `--bins` as well: the binary's own tests include the queries checked
+      # against Postgres -- the radio's tuning, the label cut, the listening
+      # ledger -- which skip themselves without a database, and so until
+      # v0.17 never ran in CI at all.
       - name: Test against a real database
-        run: cargo test --test accounts
+        run: cargo test --bins --test accounts
 
   # rust-version is a promise to anyone building this. Without a job that
   # actually builds on it, the number silently rots the first time a newer API
