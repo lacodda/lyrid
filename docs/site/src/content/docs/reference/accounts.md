@@ -20,6 +20,12 @@ An account adds memory to the sky and takes nothing away from it. The map, the s
 | `PATCH` | `/api/me` | Save part of the profile. |
 | `DELETE` | `/api/me` | Destroy the account and everything it holds. |
 | `GET` | `/api/me/export` | Everything held about the account, as a JSON file. |
+| `GET` | `/api/me/listening` | What the account's listening has come to: the ListenBrainz link, light, stars, latest openings. |
+| `PUT` | `/api/me/listenbrainz` | Link a ListenBrainz account. Body: `token` — checked once, never stored. |
+| `DELETE` | `/api/me/listenbrainz` | Stop reading. What was gathered stays. |
+| `POST` | `/api/me/listenbrainz/read` | Read ListenBrainz now. At most once a minute. |
+| `GET` | `/api/me/heard` | Every heard star of the current sky, as `[id, x, y]`. |
+| `GET` | `/api/me/heard/{id}` | How often and since when one star has been heard. |
 
 All answer JSON. A refusal carries `{"error": "..."}` written for a person to read, and the client shows those words as they are rather than substituting its own.
 
@@ -84,13 +90,35 @@ Reset links last 1 hour, shorter than confirmation links, because a reset link i
 
 ## The privacy charter: export and delete
 
-`GET /api/me/export` needs a session and returns the whole account as a JSON file, sent with `Content-Disposition: attachment` so a browser saves it rather than displaying it — the point is to hand the data over, not show it. It holds `exported_at`, a short `note`, `account` (id, email, when it was confirmed, when it was created), `profile` (mode, marker shape and colour, the camera and the layout key it belongs to) and `sessions` (only their creation and expiry times). Session tokens are left out on purpose: a token is a live credential, and an export is a file that gets mailed around and left in a downloads folder — handing over working keys to the account is not the same as handing over the data about it.
+`GET /api/me/export` needs a session and returns the whole account as a JSON file, sent with `Content-Disposition: attachment` so a browser saves it rather than displaying it — the point is to hand the data over, not show it. It holds `exported_at`, a short `note`, `account` (id, email, when it was confirmed, when it was created), `profile` (mode, marker shape and colour, the camera and the layout key it belongs to), `sessions` (only their creation and expiry times), `listenbrainz` (the linked name, when it was linked and last read, or `null`) and `listens` — every row of the listening ledger, with its time, msid, artist MBIDs, length and light. Session tokens are left out on purpose: a token is a live credential, and an export is a file that gets mailed around and left in a downloads folder — handing over working keys to the account is not the same as handing over the data about it.
 
-`DELETE /api/me` needs a session and destroys the account immediately and completely: one `DELETE FROM app_user`, and the profile, sessions and tokens go with it through `ON DELETE CASCADE`. Not a flag, not a queue, not a promise to remove it within 30 days — a promise kept by a background job is a promise the user cannot check.
+`DELETE /api/me` needs a session and destroys the account immediately and completely: one `DELETE FROM app_user`, and the profile, sessions, tokens, the ListenBrainz link and every listen go with it through `ON DELETE CASCADE`. Not a flag, not a queue, not a promise to remove it within 30 days — a promise kept by a background job is a promise the user cannot check.
 
 The usage counters described [below](/lyrid/reference/api/#usage-metrics) are untouched by a deletion, and correctly so: they hold no row about that person to delete.
 
 The web page for both is at `/charter`.
+
+## Listening
+
+How linking works, what pays what and when listening is read is told in [Scrobbling](/lyrid/concepts/scrobbling/). The shapes:
+
+```json
+{
+  "link": { "name": "ada", "linked_at": "2026-10-10T12:00:00Z", "read_at": "2026-10-10T12:15:02Z", "failure": null },
+  "light": 5330,
+  "listens": 349,
+  "stars": 25,
+  "recent": [{ "id": 676690, "name": "Kiasmos", "opened_at": "2026-02-04T16:45:37Z" }]
+}
+```
+
+`GET /api/me/listening` answers this; `PUT` and `DELETE /api/me/listenbrainz` answer it as it stands after the change, with `link: null` once unlinked. `failure` is a code — `unreachable`, `unknown_user`, `throttled` or `malformed` — for the interface to put into words, or `null` when the last read worked.
+
+`PUT /api/me/listenbrainz` refuses a token that does not look like one with `400` before asking anyone, answers `400` when ListenBrainz does not recognise it, `409` when that ListenBrainz account already feeds another lyrid account, and `502` when ListenBrainz did not answer. Linking the account already linked changes nothing.
+
+`POST /api/me/listenbrainz/read` adds what the read brought, beside the summary: `{"listens": 3, "light": 45, "opened": 2, "listening": {...}}`. A second read within a minute is `429`. A failure on ListenBrainz's side is not an error of this request: the summary carries its code like any other state of the link.
+
+`GET /api/me/heard/{id}` answers `{"listens": 0, "first_at": null, "last_at": null}` for a star never heard — the star exists, and not having heard it is a fact about it.
 
 ## What the two failures of signing in have in common
 
@@ -118,4 +146,4 @@ The camera is not saved on every frame. The client sends one only when the view 
 
 - **No exploration mode to choose.** Only the creative mode is built; the choice arrives with the fog in v0.22 and is offered once, then, to every profile that predates it.
 - **No third-party sign-in.** It would put a rate-limited external service in the path of signing in, against the spirit of [ADR 0002](https://github.com/lacodda/lyrid/blob/main/docs/adr/0002-universe-from-open-dumps.md), and would not work on a stand with no route to the internet.
-- **Nothing from the game.** Fog, light, contracts and the journal each bring their own tables when their versions arrive. The profile holds a mode, a marker and a camera, and no columns are added ahead of the features that need them.
+- **Nothing from the game.** Fog, contracts and the journal each bring their own tables when their versions arrive; the listening ledger arrived with scrobbling in its own two tables. The profile holds a mode, a marker and a camera, and no columns are added ahead of the features that need them.
