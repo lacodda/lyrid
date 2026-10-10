@@ -6,6 +6,7 @@ mod import;
 mod layout;
 mod mail;
 mod markup;
+mod scrobbling;
 mod slice;
 mod spectrum;
 
@@ -168,12 +169,19 @@ async fn serve(config: &config::Config) -> Result<()> {
     let dial = api::listening::Dial::default();
     tokio::spawn(dial.clone().warm(pool.clone()));
 
+    // Linked accounts are read in the background for as long as the server
+    // runs. Nothing waits on it: a person who wants their listening now has a
+    // button for that, and the sky never asks.
+    let listenbrainz = scrobbling::Client::new(&config.listenbrainz_url);
+    tokio::spawn(scrobbling::run(pool.clone(), listenbrainz.clone()));
+
     let state = app::AppState {
         pool,
         secure_cookie: config.secure_cookie,
         public_url: config.public_url.clone(),
         mailer,
         dial,
+        listenbrainz,
     };
 
     axum::serve(listener, app::router(state, config.static_dir.as_deref()))

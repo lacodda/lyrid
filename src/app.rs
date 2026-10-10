@@ -29,6 +29,9 @@ pub struct AppState {
     /// The playable stars of the current layout, read once and shared by the
     /// radio and the signal.
     pub dial: crate::api::listening::Dial,
+    /// Where linked accounts' listening is read from, for the reads a person
+    /// asks for by hand and for checking whose a token is.
+    pub listenbrainz: crate::scrobbling::Client,
 }
 
 /// The router, optionally serving the built SPA and the tile pyramid.
@@ -50,6 +53,7 @@ pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
         .merge(crate::api::metrics::routes())
         .merge(crate::api::relations::routes())
         .merge(crate::api::listening::routes())
+        .merge(crate::api::scrobbling::routes())
         .with_state(state);
 
     let Some(root) = static_dir else {
@@ -213,6 +217,7 @@ mod tests {
             public_url: "http://localhost:8080".to_string(),
             mailer: crate::mail::Mailer::Log,
             dial: crate::api::listening::Dial::default(),
+            listenbrainz: crate::scrobbling::Client::new("http://127.0.0.1:1"),
         }
     }
 

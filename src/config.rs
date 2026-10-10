@@ -44,6 +44,11 @@ pub struct Config {
     pub smtp_url: Option<String>,
     /// Who the letters come from (`LYRID_MAIL_FROM`).
     pub mail_from: String,
+    /// Where ListenBrainz answers (`LYRID_LISTENBRAINZ_URL`).
+    ///
+    /// The real one unless told otherwise. Set for a stand that should read
+    /// from a stand-in, or for a run where ListenBrainz must not be asked.
+    pub listenbrainz_url: String,
 }
 
 impl Config {
@@ -75,6 +80,10 @@ impl Config {
             .map(|from| from.trim().to_string())
             .filter(|from| !from.is_empty())
             .unwrap_or_else(|| DEFAULT_MAIL_FROM.to_string());
+        let listenbrainz_url = lookup("LYRID_LISTENBRAINZ_URL")
+            .map(|url| url.trim().trim_end_matches('/').to_string())
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(|| crate::scrobbling::client::DEFAULT_URL.to_string());
 
         Ok(Self {
             addr,
@@ -84,6 +93,7 @@ impl Config {
             public_url,
             smtp_url,
             mail_from,
+            listenbrainz_url,
         })
     }
 }
@@ -202,6 +212,19 @@ mod tests {
         // "no server", not "a server called empty string".
         let config = Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid"), ("LYRID_SMTP_URL", "   ")])).unwrap();
         assert!(config.smtp_url.is_none());
+    }
+
+    #[test]
+    fn listenbrainz_is_the_real_one_unless_told_otherwise() {
+        let config = Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid")])).unwrap();
+        assert_eq!(config.listenbrainz_url, "https://api.listenbrainz.org");
+
+        let config = Config::from_lookup(env(&[
+            ("DATABASE_URL", "postgres://localhost/lyrid"),
+            ("LYRID_LISTENBRAINZ_URL", "http://stand-in:9000/ "),
+        ]))
+        .unwrap();
+        assert_eq!(config.listenbrainz_url, "http://stand-in:9000");
     }
 
     #[test]

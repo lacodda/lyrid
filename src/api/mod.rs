@@ -9,4 +9,5 @@ pub mod dossiers;
 pub mod listening;
 pub mod metrics;
 pub mod relations;
+pub mod scrobbling;
 pub mod spectrum;

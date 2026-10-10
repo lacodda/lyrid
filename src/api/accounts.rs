@@ -1,10 +1,11 @@
 //! Accounts, sessions and the profile behind them.
 //!
 //! What an account is for, at this version: it remembers the mode you chose,
-//! where you left the sky and how you like your marked star drawn. That is a
-//! small thing to log in for, and deliberately so -- fog, light and a journal
-//! arrive with the game, and each brings its own tables. What is settled here
-//! is the shape everything after it hangs from.
+//! where you left the sky and how you like your marked star drawn, and -- once
+//! ListenBrainz is linked -- what your listening has opened and gathered
+//! (`api::scrobbling`, with its own tables). Fog and a journal arrive with the
+//! game and bring theirs. What is settled here is the shape everything after
+//! it hangs from.
 //!
 //! Two rules in this module are product rules rather than implementation
 //! detail, and both are enforced on the server:
@@ -112,8 +113,8 @@ struct Me {
 }
 
 /// A session that has been checked against the database.
-struct Session {
-    user_id: i32,
+pub(crate) struct Session {
+    pub(crate) user_id: i32,
 }
 
 /// Reads the session cookie and confirms it is a live session.
@@ -121,7 +122,7 @@ struct Session {
 /// Expiry is checked in the query rather than in Rust: the database owns
 /// `now()`, and a server whose clock has drifted should not be the thing
 /// deciding whether a session is still valid.
-async fn current_session(pool: &PgPool, headers: &HeaderMap) -> sqlx::Result<Option<Session>> {
+pub(crate) async fn current_session(pool: &PgPool, headers: &HeaderMap) -> sqlx::Result<Option<Session>> {
     let Some(token) = headers
         .get(header::COOKIE)
         .and_then(|value| value.to_str().ok())
@@ -150,15 +151,15 @@ async fn start_session(pool: &PgPool, user_id: i32, secure: bool) -> sqlx::Resul
     Ok(auth::set_cookie(&token, secure))
 }
 
-fn bad_request(message: &str) -> Response {
+pub(crate) fn bad_request(message: &str) -> Response {
     (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": message }))).into_response()
 }
 
-fn server_error(message: &str) -> Response {
+pub(crate) fn server_error(message: &str) -> Response {
     (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": message }))).into_response()
 }
 
-fn unauthorised() -> Response {
+pub(crate) fn unauthorised() -> Response {
     (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "not signed in" }))).into_response()
 }
 
@@ -808,6 +809,22 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             .fetch_all(pool)
             .await?;
 
+    let listenbrainz =
+        sqlx::query_as::<_, (String, OffsetDateTime, Option<OffsetDateTime>)>("SELECT name, linked_at, read_at FROM listenbrainz_link WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?;
+
+    // Every listen, as the ledger holds it. This can be long -- it is the
+    // whole of what the account has heard since linking -- and that is the
+    // point: the export is the rows, not a summary of them.
+    let listens = sqlx::query_as::<_, (OffsetDateTime, uuid::Uuid, Vec<uuid::Uuid>, Option<i32>, i32)>(
+        "SELECT listened_at, recording_msid, artist_mbids, seconds, light FROM listen WHERE user_id = $1 ORDER BY listened_at, recording_msid",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
     Ok(Some(serde_json::json!({
         "exported_at": stamp(OffsetDateTime::now_utc()),
         "note": "Everything lyrid holds about this account. The sky itself is built from public data and belongs to nobody.",
@@ -830,6 +847,21 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             .into_iter()
             .map(|(created, expires)| serde_json::json!({ "created_at": stamp(created), "expires_at": stamp(expires) }))
             .collect::<Vec<_>>(),
+        "listenbrainz": listenbrainz.map(|(name, linked_at, read_at)| serde_json::json!({
+            "name": name,
+            "linked_at": stamp(linked_at),
+            "read_at": read_at.map(stamp),
+        })),
+        "listens": listens
+            .into_iter()
+            .map(|(listened_at, msid, artists, seconds, light)| serde_json::json!({
+                "listened_at": stamp(listened_at),
+                "recording_msid": msid,
+                "artist_mbids": artists,
+                "seconds": seconds,
+                "light": light,
+            }))
+            .collect::<Vec<_>>(),
     })))
 }
 
@@ -845,9 +877,9 @@ fn stamp(at: OffsetDateTime) -> String {
 /// Destroys the account and everything hanging off it.
 ///
 /// One DELETE, because the schema was built for this: every personal table
-/// references `app_user` with `ON DELETE CASCADE` (migrations 0008 and 0009),
-/// so the row going away takes the profile, the sessions and the tokens with
-/// it. Not a flag, not a queue, not a "we will remove it within 30 days" --
+/// references `app_user` with `ON DELETE CASCADE` (migrations 0008, 0009 and
+/// 0013), so the row going away takes the profile, the sessions, the tokens,
+/// the ListenBrainz link and every listen with it. Not a flag, not a queue, not a "we will remove it within 30 days" --
 /// the charter promises one press, and a promise kept by a background job is
 /// a promise the user cannot check.
 ///
@@ -940,6 +972,7 @@ mod tests {
             public_url: "http://localhost:8080".to_string(),
             mailer: crate::mail::Mailer::Log,
             dial: crate::api::listening::Dial::default(),
+            listenbrainz: crate::scrobbling::Client::new("http://127.0.0.1:1"),
         })
     }
 

@@ -1058,6 +1058,7 @@ mod tests {
             public_url: "http://localhost:8080".to_string(),
             mailer: crate::mail::Mailer::Log,
             dial: crate::api::listening::Dial::default(),
+            listenbrainz: crate::scrobbling::Client::new("http://127.0.0.1:1"),
         })
     }
 

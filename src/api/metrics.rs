@@ -42,7 +42,7 @@ use crate::app::AppState;
 /// something that identifies a person -- an artist id, a search term. A closed
 /// list cannot carry a payload, which is the property that makes the promise
 /// hold against a hostile client rather than a polite one.
-const MECHANICS: [&str; 14] = [
+const MECHANICS: [&str; 16] = [
     // The sky opened at all, once per visit.
     "sky_opened",
     // A star's card was opened.
@@ -71,6 +71,10 @@ const MECHANICS: [&str; 14] = [
     "signal_found",
     // A label's or a scene's dossier was opened.
     "dossier_opened",
+    // A ListenBrainz account was linked.
+    "listening_linked",
+    // The stars a person has heard were marked on the sky.
+    "heard_shown",
 ];
 
 pub fn routes() -> Router<AppState> {
@@ -129,6 +133,7 @@ mod tests {
             public_url: "http://localhost:8080".to_string(),
             mailer: crate::mail::Mailer::Log,
             dial: crate::api::listening::Dial::default(),
+            listenbrainz: crate::scrobbling::Client::new("http://127.0.0.1:1"),
         })
     }
 
@@ -165,5 +170,26 @@ mod tests {
                 "{mechanic} is not a plain constant name"
             );
         }
+    }
+
+    #[test]
+    fn the_browser_counts_exactly_the_mechanics_the_server_accepts() {
+        // Two closed lists in two languages. A name only the browser knows is
+        // counted as a 404 nobody reads; a name only the server knows is a
+        // mechanic nothing ever counts. Neither fails anything on its own.
+        let client = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/web/src/metrics.ts")).expect("web/src/metrics.ts");
+        let union = client
+            .split("export type Mechanic =")
+            .nth(1)
+            // The union ends at the first blank line. Windows line endings
+            // are folded first, or that line is never found.
+            .map(|rest| rest.replace("\r\n", "\n"))
+            .and_then(|rest| rest.split("\n\n").next().map(str::to_string))
+            .expect("the Mechanic union in metrics.ts");
+        let mut named: Vec<&str> = union.split('\'').skip(1).step_by(2).collect();
+        named.sort_unstable();
+        let mut accepted = MECHANICS.to_vec();
+        accepted.sort_unstable();
+        assert_eq!(named, accepted);
     }
 }
