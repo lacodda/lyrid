@@ -24,7 +24,7 @@ pub struct AppState {
     /// A letter is read in a mail client, where there is no page for a
     /// relative link to be relative to.
     pub public_url: String,
-    /// How the two letters leave the building, or the log they go to instead.
+    /// How the letters leave the building, or the log they go to instead.
     pub mailer: crate::mail::Mailer,
     /// The playable stars of the current layout, read once and shared by the
     /// radio and the signal.
@@ -54,6 +54,8 @@ pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
         .merge(crate::api::relations::routes())
         .merge(crate::api::listening::routes())
         .merge(crate::api::scrobbling::routes())
+        .merge(crate::api::letter::routes())
+        .merge(crate::api::youth::routes())
         .with_state(state);
 
     let Some(root) = static_dir else {

@@ -4,6 +4,7 @@ mod auth;
 mod config;
 mod import;
 mod layout;
+mod letter;
 mod mail;
 mod markup;
 mod scrobbling;
@@ -154,7 +155,7 @@ async fn serve(config: &config::Config) -> Result<()> {
     // registration in front of a user.
     let mailer = mail::Mailer::from_url(config.smtp_url.as_deref(), config.mail_from.clone())?;
     if matches!(mailer, mail::Mailer::Log) {
-        tracing::warn!("no LYRID_SMTP_URL: confirmation and password-reset letters will be written to this log instead of sent");
+        tracing::warn!("no LYRID_SMTP_URL: confirmation, password-reset and weekly letters will be written to this log instead of sent");
     }
 
     let pool = connect(config).await?;
@@ -174,6 +175,10 @@ async fn serve(config: &config::Config) -> Result<()> {
     // button for that, and the sky never asks.
     let listenbrainz = scrobbling::Client::new(&config.listenbrainz_url);
     tokio::spawn(scrobbling::run(pool.clone(), listenbrainz.clone()));
+
+    // The weekly letters go out within an hour of a week's end, to those who
+    // asked for them.
+    tokio::spawn(letter::run(pool.clone(), mailer.clone(), config.public_url.clone()));
 
     let state = app::AppState {
         pool,

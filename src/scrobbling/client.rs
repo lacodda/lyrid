@@ -21,7 +21,8 @@ pub const DEFAULT_URL: &str = "https://api.listenbrainz.org";
 /// The most listens ListenBrainz hands out per request.
 const PAGE: usize = 1000;
 
-/// The span of time one request asks about, in seconds: three days.
+/// The span of time the first request of a read asks about, in seconds: three
+/// days.
 ///
 /// Measured on 2026-10-10, not assumed. Asked for listens after a moment and
 /// nothing else, ListenBrainz scans forward until it has filled the page or
@@ -31,6 +32,17 @@ const PAGE: usize = 1000;
 /// answered in eight. Three days holds the usual read -- the two-day overlap
 /// and what came since -- in one request.
 pub(crate) const WINDOW: i64 = 3 * 24 * 60 * 60;
+
+/// The widest a window grows, in seconds: ninety days.
+///
+/// A history is mostly quiet stretches, and twenty years in three-day windows
+/// is two and a half thousand requests. So each window that comes back done
+/// doubles the next, up to this. Measured on 2026-10-13 against a twenty-year
+/// history of 220,000 listens: bounded windows of 30, 60, 90, 180 and 365 days
+/// answered a full page in 3.4 to 6.2 seconds -- the time follows the page,
+/// not the span -- and ninety days keeps well clear of the forty-second edge
+/// on a slow day.
+pub(crate) const MAX_WINDOW: i64 = 90 * 24 * 60 * 60;
 
 /// How many requests one read makes before stopping where it got to.
 ///
@@ -176,6 +188,32 @@ impl Client {
         }
     }
 
+    /// Where `name`'s listening on ListenBrainz begins: the moment of their
+    /// oldest listen, or `None` for someone who has not listened to anything
+    /// yet.
+    ///
+    /// ListenBrainz says it beside any page of listens (`oldest_listen_ts`),
+    /// and a page of one with no bounds is the cheapest page there is: the
+    /// newest listen, found by an index rather than a scan.
+    pub fn history_start(&self, name: &str) -> Result<Option<OffsetDateTime>, Failure> {
+        #[derive(Deserialize)]
+        struct Answer {
+            payload: Payload,
+        }
+        #[derive(Deserialize)]
+        struct Payload {
+            oldest_listen_ts: Option<i64>,
+        }
+
+        let body = self.ask(name, &[("count", "1".to_string())])?;
+        let answer: Answer = serde_json::from_str(&body).map_err(|_| Failure::Malformed)?;
+        match answer.payload.oldest_listen_ts {
+            // Nothing heard yet is said as a missing field or as zero.
+            None | Some(0) => Ok(None),
+            Some(seconds) => OffsetDateTime::from_unix_timestamp(seconds).map(Some).map_err(|_| Failure::Malformed),
+        }
+    }
+
     /// Every listen `name` has from `from` until now, oldest first.
     ///
     /// Read window by window, each bounded on both sides, and paged forwards
@@ -183,7 +221,9 @@ impl Client {
     /// listens after it, newest first within the page -- measured on
     /// 2026-10-10 with and without `max_ts` -- so a full page means the window
     /// holds more after its newest listen, and a short one means the window is
-    /// done.
+    /// done. Each window that is done doubles the next, up to `MAX_WINDOW`:
+    /// the usual read is one window, and a history crosses its quiet years in
+    /// a few requests instead of hundreds.
     pub fn listens(&self, name: &str, from: OffsetDateTime) -> Result<Fetched, Failure> {
         let began = OffsetDateTime::now_utc();
         let end = began.unix_timestamp();
@@ -193,8 +233,9 @@ impl Client {
         // wanted, so a listen at exactly `from` is read rather than lost
         // between two reads; `before` is one past the window's last second.
         let start = from.unix_timestamp() - 1;
+        let mut window = WINDOW;
         let mut after = start;
-        let mut before = (after + 1 + WINDOW).min(end + 1);
+        let mut before = (after + 1 + window).min(end + 1);
 
         for _ in 0..MAX_REQUESTS {
             let page = match self.page_between(name, after, before) {
@@ -240,8 +281,9 @@ impl Client {
                     stopped: None,
                 });
             }
+            window = (window * 2).min(MAX_WINDOW);
             after = before - 1;
-            before = (after + 1 + WINDOW).min(end + 1);
+            before = (after + 1 + window).min(end + 1);
         }
 
         // Stopped at the request limit: complete only up to where it got.
@@ -252,20 +294,26 @@ impl Client {
         })
     }
 
-    /// One page of the listens between `after` and `before`, both exclusive,
-    /// waiting out the rate limit once.
+    /// One page of the listens between `after` and `before`, both exclusive.
     fn page_between(&self, name: &str, after: i64, before: i64) -> Result<Vec<Listen>, Failure> {
+        let body = self.ask(
+            name,
+            &[("min_ts", after.to_string()), ("max_ts", before.to_string()), ("count", self.page.to_string())],
+        )?;
+        parse_page(&body)
+    }
+
+    /// The body of one request for `name`'s listens, waiting out the rate
+    /// limit once.
+    fn ask(&self, name: &str, query: &[(&str, String)]) -> Result<String, Failure> {
         let url = format!("{}/1/user/{}/listens", self.base, encode_path(name));
         let mut waited = false;
         loop {
-            let mut response = self
-                .agent
-                .get(&url)
-                .query("min_ts", after.to_string())
-                .query("max_ts", before.to_string())
-                .query("count", self.page.to_string())
-                .call()
-                .map_err(|error| unreachable(&error))?;
+            let mut request = self.agent.get(&url);
+            for (key, value) in query {
+                request = request.query(key, value);
+            }
+            let mut response = request.call().map_err(|error| unreachable(&error))?;
 
             let status = response.status().as_u16();
             let wait = reset_in(response.headers());
@@ -293,7 +341,6 @@ impl Client {
             }
 
             let body = response.body_mut().read_to_string().map_err(|error| unreachable(&error))?;
-            let page = parse_page(&body)?;
 
             // Spent the last request of this window: wait for the next one
             // before the caller asks again, rather than collecting a 429.
@@ -302,7 +349,7 @@ impl Client {
             {
                 std::thread::sleep(wait.min(MAX_WAIT));
             }
-            return Ok(page);
+            return Ok(body);
         }
     }
 }

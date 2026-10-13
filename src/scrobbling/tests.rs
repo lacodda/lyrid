@@ -1,11 +1,12 @@
 //! Reading listening end to end: a ListenBrainz that answers over real HTTP,
 //! and the ledger in a real database.
 //!
-//! The ListenBrainz here is a small axum server with the one behaviour that
-//! matters copied from the real one as measured on 2026-10-10: asked for
-//! listens after `min_ts`, it returns the *oldest* `count` of them, newest
-//! first. Paging, the overlap and the pending rule are all checked against
-//! that, not against a description of it.
+//! The ListenBrainz here is a small axum server with the behaviour that
+//! matters copied from the real one as measured on 2026-10-10 and 2026-10-13:
+//! asked for listens after `min_ts`, it returns the *oldest* `count` of them,
+//! newest first; asked with no bounds, the newest, beside `oldest_listen_ts`.
+//! Paging, the overlap, the history and the pending rule are all checked
+//! against that, not against a description of it.
 //!
 //! The database half needs `LYRID_TEST_DATABASE_URL` and says so when it is
 //! missing; every test that writes does it inside a transaction it rolls back.
@@ -52,7 +53,7 @@ type Asked = (i64, Option<i64>);
 
 #[derive(serde::Deserialize)]
 struct Window {
-    min_ts: i64,
+    min_ts: Option<i64>,
     max_ts: Option<i64>,
     count: usize,
 }
@@ -66,12 +67,6 @@ async fn fake_listens(State(fake): State<Fake>, Path(name): Path<String>, Query(
         )
             .into_response();
     }
-    fake.asked.lock().unwrap().push((window.min_ts, window.max_ts));
-    if let Some(broken) = *fake.broken_after.lock().unwrap()
-        && window.min_ts >= broken
-    {
-        return (StatusCode::SERVICE_UNAVAILABLE, "upstream timed out").into_response();
-    }
     let listens = fake.listens.lock().unwrap();
     let Some(all) = listens.get(&name) else {
         return (
@@ -80,11 +75,26 @@ async fn fake_listens(State(fake): State<Fake>, Path(name): Path<String>, Query(
         )
             .into_response();
     };
+    let oldest = all.iter().filter_map(|listen| listen["listened_at"].as_i64()).min();
+    let Some(min_ts) = window.min_ts else {
+        // No bounds: the newest listen, and where the history begins.
+        let mut newest: Vec<serde_json::Value> = all.clone();
+        newest.sort_by_key(|listen| std::cmp::Reverse(listen["listened_at"].as_i64().unwrap()));
+        newest.truncate(window.count);
+        return Json(serde_json::json!({ "payload": { "count": newest.len(), "user_id": name, "listens": newest, "oldest_listen_ts": oldest } }))
+            .into_response();
+    };
+    fake.asked.lock().unwrap().push((min_ts, window.max_ts));
+    if let Some(broken) = *fake.broken_after.lock().unwrap()
+        && min_ts >= broken
+    {
+        return (StatusCode::SERVICE_UNAVAILABLE, "upstream timed out").into_response();
+    }
     let mut after: Vec<serde_json::Value> = all
         .iter()
         .filter(|listen| {
             let at = listen["listened_at"].as_i64().unwrap();
-            at > window.min_ts && window.max_ts.is_none_or(|max| at < max)
+            at > min_ts && window.max_ts.is_none_or(|max| at < max)
         })
         .cloned()
         .collect();
@@ -175,13 +185,22 @@ async fn linked(tx: &mut Transaction<'_, Postgres>, name: &str, linked_at: Offse
 }
 
 async fn claim(tx: &mut Transaction<'_, Postgres>, user: i32) -> Claim {
-    let row: (i32, String, OffsetDateTime, Option<OffsetDateTime>) =
-        sqlx::query_as("SELECT user_id, name, linked_at, read_through FROM listenbrainz_link WHERE user_id = $1")
-            .bind(user)
-            .fetch_one(&mut **tx)
-            .await
-            .unwrap();
+    let row: ClaimRow = sqlx::query_as("SELECT user_id, name, linked_at, read_through, history_from FROM listenbrainz_link WHERE user_id = $1")
+        .bind(user)
+        .fetch_one(&mut **tx)
+        .await
+        .unwrap();
     claim_of(row)
+}
+
+/// Marks a link as having read everything up to now, as a link that has
+/// caught up with its history has.
+async fn caught_up(tx: &mut Transaction<'_, Postgres>, user: i32) {
+    sqlx::query("UPDATE listenbrainz_link SET read_through = now(), history_from = linked_at WHERE user_id = $1")
+        .bind(user)
+        .execute(&mut **tx)
+        .await
+        .unwrap();
 }
 
 /// Reads a link as it stands in the database.
@@ -236,8 +255,9 @@ async fn every_page_is_read_and_a_listen_on_two_pages_is_one_listen() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_long_stretch_is_read_a_bounded_window_at_a_time() {
     // Twelve days, listens scattered across them. Every request names both
-    // ends and spans no more than a window: asked with a start alone,
-    // ListenBrainz scans to the present and is cut off at forty seconds.
+    // ends: asked with a start alone, ListenBrainz scans to the present and is
+    // cut off at forty seconds. The first window is three days, and each
+    // after it no wider than the widest.
     let fake = Fake::default();
     for days in [11, 7, 3, 0] {
         fake.add("Fixture", listen(ago(days * 24 * 60 + 30), &[STAR]));
@@ -251,11 +271,51 @@ async fn a_long_stretch_is_read_a_bounded_window_at_a_time() {
     assert_eq!(fetched.stopped, None);
 
     let asked = fake.asked.lock().unwrap().clone();
-    assert!(asked.len() >= 4, "twelve days in three-day windows: {asked:?}");
+    assert!(asked.len() >= 2, "{asked:?}");
+    assert!(
+        asked[0].1.unwrap() - asked[0].0 <= client::WINDOW + 1,
+        "the first window is the routine read's: {asked:?}"
+    );
     for (after, before) in asked {
         let before = before.expect("a request without an end scans to the present");
-        assert!(before - after <= client::WINDOW + 1, "a window of {} seconds", before - after);
+        assert!(before - after <= client::MAX_WINDOW + 1, "a window of {} seconds", before - after);
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quiet_decade_is_crossed_in_a_few_requests() {
+    // A listen ten years ago and one today, nothing between. In three-day
+    // windows that is over twelve hundred requests -- more than a read makes,
+    // so the history would crawl fifty requests at a time. Windows that widen
+    // over the quiet cross it in a few dozen.
+    let fake = Fake::default();
+    fake.add("Fixture", listen(ago(10 * 365 * 24 * 60), &[STAR]));
+    fake.add("Fixture", listen(ago(5), &[STAR]));
+    let client = listenbrainz(fake.clone()).await;
+    let fetched = tokio::task::spawn_blocking(move || client.listens("Fixture", ago(10 * 365 * 24 * 60 + 1)))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(fetched.listens.len(), 2, "the whole decade in one read");
+    let asked = fake.asked.lock().unwrap().len();
+    assert!(asked <= 50, "{asked} requests");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn where_a_history_begins_is_asked_without_bounds() {
+    let fake = Fake::default();
+    let oldest = ago(400 * 24 * 60);
+    fake.add("Fixture", listen(oldest, &[STAR]));
+    fake.add("Fixture", listen(ago(5), &[STAR]));
+    fake.listens.lock().unwrap().insert("Silent".to_string(), Vec::new());
+    let client = listenbrainz(fake.clone()).await;
+
+    let reader = client.clone();
+    let start = tokio::task::spawn_blocking(move || reader.history_start("Fixture")).await.unwrap();
+    assert_eq!(start, Ok(Some(oldest)));
+    let start = tokio::task::spawn_blocking(move || client.history_start("Silent")).await.unwrap();
+    assert_eq!(start, Ok(None), "someone who has heard nothing has no history");
+    assert!(fake.asked.lock().unwrap().is_empty(), "no bounded window was asked for");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -269,8 +329,10 @@ async fn a_read_that_breaks_halfway_keeps_what_it_read() {
     for days in [11, 10, 2] {
         fake.add("Fixture", listen(ago(days * 24 * 60), &[STAR]));
     }
-    // ListenBrainz stops answering for anything from six days ago on.
-    *fake.broken_after.lock().unwrap() = Some(ago(6 * 24 * 60).unix_timestamp());
+    // ListenBrainz stops answering for anything from nine days ago on: the
+    // first window, three days from the first listen, is answered, and the
+    // second is not.
+    *fake.broken_after.lock().unwrap() = Some(ago(9 * 24 * 60).unix_timestamp());
 
     let partial = read_link(&mut tx, &client, user).await.unwrap();
     assert_eq!(partial.listens, 2, "the two listens before the break are kept");
@@ -317,22 +379,22 @@ async fn each_listen_is_paid_once_however_often_it_is_read() {
     let mut tx = pool.begin().await.unwrap();
 
     let user = linked(&mut tx, "Fixture", ago(120)).await;
-    // Before the link: not this link's to read.
+    // Before the link: read with the history, and paid nothing.
     fake.add("Fixture", listen(ago(180), &[STAR]));
     fake.add("Fixture", listen(ago(90), &[STAR]));
     fake.add("Fixture", listen(ago(60), &[STAR, GUEST]));
     fake.add("Fixture", listen(ago(30), &[GUEST]));
 
     let first = read_link(&mut tx, &client, user).await.unwrap();
-    assert_eq!(first.listens, 3);
+    assert_eq!(first.listens, 4);
     assert_eq!(first.opened, 2, "the star and its guest");
-    // Three minutes each, every star still new.
+    // Three minutes each after the link, every star still new.
     assert_eq!(first.light, 3 * 3 * i64::from(light::NEW_RATE));
 
     // The same window again: nothing new, nothing paid.
     let again = read_link(&mut tx, &client, user).await.unwrap();
     assert_eq!(again, Read::default());
-    assert_eq!(ledger(&mut tx, user).await, (3, first.light));
+    assert_eq!(ledger(&mut tx, user).await, (4, first.light));
 
     tx.rollback().await.unwrap();
 }
@@ -474,6 +536,16 @@ async fn a_read_by_hand_waits_a_minute_after_the_last_one() {
     let mut tx = pool.begin().await.unwrap();
     let user = linked(&mut tx, "Fixture", ago(60)).await;
 
+    // A link still reading its history is read by the background, as fast
+    // as ListenBrainz allows; a button would be a second reader of it.
+    assert!(matches!(claim_now(&mut tx, user).await.unwrap(), ByHand::ReadingHistory));
+    caught_up(&mut tx, user).await;
+    sqlx::query("UPDATE listenbrainz_link SET tried_at = NULL WHERE user_id = $1")
+        .bind(user)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
     assert!(matches!(claim_now(&mut tx, user).await.unwrap(), ByHand::Claimed(_)));
     // `now()` stands still inside a transaction, so this is "a moment later".
     assert!(matches!(claim_now(&mut tx, user).await.unwrap(), ByHand::TooSoon));
@@ -555,24 +627,277 @@ async fn the_ledger_refuses_a_listen_worth_nothing_and_a_listen_twice() {
     let Some(pool) = database().await else { return };
     let mut tx = pool.begin().await.unwrap();
     let user = linked(&mut tx, "Fixture", ago(60)).await;
-    let insert = |light: i32, msid: Uuid, at: OffsetDateTime| {
-        sqlx::query("INSERT INTO listen (user_id, listened_at, recording_msid, artist_mbids, seconds, light) VALUES ($1, $2, $3, '{}', NULL, $4)")
+    let insert = |light: Option<i32>, msid: Uuid, at: OffsetDateTime, source: &'static str| {
+        sqlx::query("INSERT INTO listen (user_id, listened_at, recording, artist_mbids, seconds, light, source) VALUES ($1, $2, $3, '{}', NULL, $4, $5)")
             .bind(user)
             .bind(at)
             .bind(msid)
             .bind(light)
+            .bind(source)
     };
 
     let mut savepoint = tx.begin().await.unwrap();
-    assert!(insert(0, fresh(), ago(5)).execute(&mut *savepoint).await.is_err());
+    assert!(insert(Some(0), fresh(), ago(5), "listenbrainz").execute(&mut *savepoint).await.is_err());
+    savepoint.rollback().await.unwrap();
+
+    let mut savepoint = tx.begin().await.unwrap();
+    assert!(
+        insert(Some(3), fresh(), ago(5), "lastfm").execute(&mut *savepoint).await.is_err(),
+        "a file paid light"
+    );
     savepoint.rollback().await.unwrap();
 
     let msid = fresh();
     let at = ago(5);
-    insert(3, msid, at).execute(&mut *tx).await.unwrap();
+    insert(Some(3), msid, at, "listenbrainz").execute(&mut *tx).await.unwrap();
     let mut savepoint = tx.begin().await.unwrap();
-    assert!(insert(3, msid, at).execute(&mut *savepoint).await.is_err(), "one listen was written twice");
+    assert!(
+        insert(Some(3), msid, at, "listenbrainz").execute(&mut *savepoint).await.is_err(),
+        "one listen was written twice"
+    );
     savepoint.rollback().await.unwrap();
+    insert(None, fresh(), ago(6), "listenbrainz").execute(&mut *tx).await.unwrap();
+
+    tx.rollback().await.unwrap();
+}
+
+// ---------------------------------------------------------------- history
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_history_from_before_the_link_opens_stars_pays_nothing_and_makes_them_familiar() {
+    let Some(pool) = database().await else { return };
+    let fake = Fake::default();
+    let client = listenbrainz(fake.clone()).await;
+    let mut tx = pool.begin().await.unwrap();
+
+    let user = linked(&mut tx, "Fixture", ago(60)).await;
+    // A star heard twelve times a year ago, then once after the link.
+    for day in 0..12 {
+        fake.add("Fixture", listen(ago((400 - day) * 24 * 60), &[STAR]));
+    }
+    fake.add("Fixture", listen(ago(10), &[STAR]));
+
+    let read = read_link(&mut tx, &client, user).await.unwrap();
+    assert_eq!(read.listens, 13, "the whole history, in one read");
+    assert_eq!(read.opened, 1);
+    // Three minutes at the familiar rate: the history used up its newness.
+    assert_eq!(read.light, 3 * i64::from(light::FAMILIAR_RATE));
+    let unpaid: i64 = sqlx::query_scalar("SELECT count(*) FROM listen WHERE user_id = $1 AND light IS NULL")
+        .bind(user)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(unpaid, 12);
+
+    let (from, through, linked_at): (Option<OffsetDateTime>, Option<OffsetDateTime>, OffsetDateTime) =
+        sqlx::query_as("SELECT history_from, read_through, linked_at FROM listenbrainz_link WHERE user_id = $1")
+            .bind(user)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert!(
+        from.is_some_and(|from| from <= ago(399 * 24 * 60)),
+        "where the history begins is kept: {from:?}"
+    );
+    assert!(through.unwrap() >= linked_at, "caught up with the link");
+
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_history_read_after_paid_listens_leaves_their_price_alone() {
+    // An account linked under v0.17 has paid listens and no history. Its
+    // history arrives later, under them in time: it pays nothing, it does not
+    // pay the old listens again, and they keep what they were paid.
+    let Some(pool) = database().await else { return };
+    let fake = Fake::default();
+    let client = listenbrainz(fake.clone()).await;
+    let mut tx = pool.begin().await.unwrap();
+
+    let user = linked(&mut tx, "Fixture", ago(600)).await;
+    fake.add("Fixture", listen(ago(300), &[STAR]));
+    let first = read_link(&mut tx, &client, user).await.unwrap();
+    assert_eq!(first.light, 3 * i64::from(light::NEW_RATE));
+
+    // Then the history: ten listens of the same star a month earlier.
+    for day in 0..10 {
+        fake.add("Fixture", listen(ago((40 - day) * 24 * 60), &[STAR]));
+    }
+    sqlx::query("UPDATE listenbrainz_link SET read_through = NULL, history_from = NULL WHERE user_id = $1")
+        .bind(user)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let history = read_link(&mut tx, &client, user).await.unwrap();
+    assert_eq!(history.listens, 10);
+    assert_eq!(history.light, 0);
+    assert_eq!(history.opened, 0, "the star was already open");
+    assert_eq!(ledger(&mut tx, user).await, (11, first.light));
+
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_reading_its_history_is_taken_again_at_once_unless_its_read_failed() {
+    let Some(pool) = database().await else { return };
+    let mut tx = pool.begin().await.unwrap();
+    let user = linked(&mut tx, "Fixture", ago(60)).await;
+    assert_eq!(taken(&mut tx, user).await, 1);
+
+    // The read finished well and got as far as a year ago: still history, so
+    // it is due again without waiting a quarter of an hour.
+    // The claim above stamped `tried_at` with this transaction's `now()`; a
+    // read that finished after it is stamped later, which here means
+    // stepping the claim back a minute.
+    sqlx::query(
+        "UPDATE listenbrainz_link SET read_through = now() - interval '1 year', read_at = now(), tried_at = now() - interval '1 minute'
+         WHERE user_id = $1",
+    )
+    .bind(user)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(taken(&mut tx, user).await, 1);
+
+    // The same, but the read failed: it waits like any other.
+    sqlx::query("UPDATE listenbrainz_link SET tried_at = now() - interval '1 minute', failure = 'unreachable' WHERE user_id = $1")
+        .bind(user)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(taken(&mut tx, user).await, 0);
+
+    tx.rollback().await.unwrap();
+}
+
+/// How many times the background takes `user`'s link before nothing is due.
+async fn taken(tx: &mut PgConnection, user: i32) -> usize {
+    let mut ours = 0;
+    while let Some(claimed) = claim_due(tx).await.unwrap() {
+        ours += usize::from(claimed.user_id == user);
+    }
+    ours
+}
+
+// ---------------------------------------------------------------- Last.fm
+
+/// An artist of the canon made for the test, by a name nobody else has.
+async fn artist_named(tx: &mut Transaction<'_, Postgres>, name: &str) -> Uuid {
+    let mbid = fresh();
+    let id: i32 = rand::random_range(1_500_000_000..2_000_000_000);
+    sqlx::query("INSERT INTO artist (id, mbid, name, sort_name) VALUES ($1, $2, $3, $3)")
+        .bind(id)
+        .bind(mbid)
+        .bind(name)
+        .execute(&mut **tx)
+        .await
+        .unwrap();
+    mbid
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_opens_its_stars_once_and_pays_nothing() {
+    let Some(pool) = database().await else { return };
+    let mut tx = pool.begin().await.unwrap();
+    let user = linked(&mut tx, "Fixture", ago(60)).await;
+    let name = format!("Fixture Band {}", fresh());
+    let named = artist_named(&mut tx, &name).await;
+
+    let file = format!(
+        "uts,artist,artist_mbid,track\n\
+         {first},{upper},,One\n\
+         {second},{name},,Two\n\
+         {third},Nobody Anywhere {nobody},,Three\n",
+        first = ago(3000).unix_timestamp(),
+        second = ago(2000).unix_timestamp(),
+        third = ago(1000).unix_timestamp(),
+        upper = name.to_uppercase(),
+        nobody = fresh(),
+    );
+    let parsed = lastfm::parse(&file).unwrap();
+    let imported = lastfm::import(&mut tx, user, parsed.clone()).await.unwrap();
+    assert_eq!(imported.listens, 3);
+    assert_eq!(imported.named, 2, "the name in any case; the stranger stays unnamed");
+    assert_eq!(imported.opened, 1);
+    assert_eq!(ledger(&mut tx, user).await, (3, 0));
+    let credited: Vec<Uuid> = sqlx::query_scalar("SELECT DISTINCT unnest(artist_mbids) FROM listen WHERE user_id = $1")
+        .bind(user)
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(credited, vec![named]);
+
+    let again = lastfm::import(&mut tx, user, parsed).await.unwrap();
+    assert_eq!(again.listens, 0, "the same file twice is the same rows");
+
+    assert_eq!(lastfm::forget(&mut tx, user).await.unwrap(), 3);
+    assert_eq!(ledger(&mut tx, user).await, (0, 0));
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_listen_told_by_a_file_and_by_listenbrainz_is_one_listen() {
+    let Some(pool) = database().await else { return };
+    let fake = Fake::default();
+    let client = listenbrainz(fake.clone()).await;
+    let mut tx = pool.begin().await.unwrap();
+    let user = linked(&mut tx, "Fixture", ago(10)).await;
+    let name = format!("Fixture Band {}", fresh());
+    artist_named(&mut tx, &name).await;
+
+    // The file first: a listen at one moment. Then ListenBrainz reports the
+    // same moment, with the artist by id: its telling stands.
+    let moment = ago(300);
+    let file = format!("uts,artist,track\n{},{name},Song\n", moment.unix_timestamp());
+    lastfm::import(&mut tx, user, lastfm::parse(&file).unwrap()).await.unwrap();
+    fake.add("Fixture", listen(moment, &[STAR]));
+    read_link(&mut tx, &client, user).await.unwrap();
+    let sources: Vec<String> = sqlx::query_scalar("SELECT source FROM listen WHERE user_id = $1")
+        .bind(user)
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(sources, vec!["listenbrainz".to_string()]);
+
+    // And the other way round: a file uploaded after ListenBrainz told the
+    // moment adds nothing.
+    let imported = lastfm::import(&mut tx, user, lastfm::parse(&file).unwrap()).await.unwrap();
+    assert_eq!(imported.listens, 0);
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_listen_read_late_is_priced_as_of_its_own_moment() {
+    // Nine listens of a star, then a tenth an hour later, all paid. A phone
+    // comes back online with a listen from between them: it was the star's
+    // tenth listen at its own moment, so it is still new -- whatever the
+    // ledger holds after it.
+    let Some(pool) = database().await else { return };
+    let fake = Fake::default();
+    let client = listenbrainz(fake.clone()).await;
+    let mut tx = pool.begin().await.unwrap();
+
+    let user = linked(&mut tx, "Fixture", ago(600)).await;
+    caught_up(&mut tx, user).await;
+    sqlx::query("UPDATE listenbrainz_link SET read_through = now() - interval '5 hours' WHERE user_id = $1")
+        .bind(user)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    for minutes in 0..9 {
+        fake.add("Fixture", listen(ago(240 - minutes), &[STAR]));
+    }
+    fake.add("Fixture", listen(ago(60), &[STAR]));
+    assert_eq!(read_link(&mut tx, &client, user).await.unwrap().listens, 10);
+
+    fake.add("Fixture", listen(ago(120), &[STAR]));
+    let late = read_link(&mut tx, &client, user).await.unwrap();
+    assert_eq!(late.listens, 1);
+    assert_eq!(
+        late.light,
+        3 * i64::from(light::NEW_RATE),
+        "priced against the nine before it, not the ten in the ledger"
+    );
 
     tx.rollback().await.unwrap();
 }

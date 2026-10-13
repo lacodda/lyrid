@@ -1,11 +1,12 @@
 //! Accounts, sessions and the profile behind them.
 //!
 //! What an account is for, at this version: it remembers the mode you chose,
-//! where you left the sky and how you like your marked star drawn, and -- once
-//! ListenBrainz is linked -- what your listening has opened and gathered
-//! (`api::scrobbling`, with its own tables). Fog and a journal arrive with the
-//! game and bring theirs. What is settled here is the shape everything after
-//! it hangs from.
+//! where you left the sky, how you like your marked star drawn and -- if you
+//! say -- the year you were born; what your listening has opened and gathered
+//! (`api::scrobbling`, with its own tables); and whether you asked for the
+//! weekly letter (`api::letter`). Fog and a journal arrive with the game and
+//! bring theirs. What is settled here is the shape everything after it hangs
+//! from.
 //!
 //! Two rules in this module are product rules rather than implementation
 //! detail, and both are enforced on the server:
@@ -79,7 +80,23 @@ struct ProfileUpdate {
     halo_shape: Option<String>,
     halo_colour: Option<String>,
     camera: Option<Camera>,
+    /// The year of birth: absent leaves it, `null` forgets it, a year sets it.
+    #[serde(default, deserialize_with = "present")]
+    #[allow(
+        clippy::option_option,
+        reason = "absent, null and a year are three different requests, and serde reads them as these three"
+    )]
+    born: Option<Option<i16>>,
 }
+
+/// A field that is there, even as `null`, as opposed to one left out: the
+/// difference between "forget my birth year" and "I did not mention it".
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(deserializer: D) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+/// The earliest year of birth the profile takes; the column's own floor.
+const BORN_FROM: i16 = 1900;
 
 /// Where the sky was left, and in which layout it means anything.
 ///
@@ -107,9 +124,21 @@ struct Me {
     /// Whether the address has been confirmed.
     ///
     /// Shown rather than enforced: an unconfirmed account works in every way
-    /// except being able to reset its password, and the interface says so
-    /// where that matters instead of barring the door.
+    /// except being able to reset its password or receive the weekly letter,
+    /// and the interface says so where that matters instead of barring the
+    /// door.
     email_confirmed: bool,
+    /// The year of birth, if given: what the stars of one's youth are
+    /// counted from.
+    born: Option<i16>,
+    /// The weekly letter, if asked for.
+    letter: Option<Letter>,
+}
+
+/// The weekly letter as an account sees it.
+#[derive(Serialize)]
+struct Letter {
+    language: String,
 }
 
 /// A session that has been checked against the database.
@@ -269,6 +298,8 @@ async fn create_account(pool: &PgPool, email: &str, hash: &str, secure: bool) ->
         halo_colour: None,
         camera: None,
         email_confirmed: false,
+        born: None,
+        letter: None,
     };
     Ok(Some((me, auth::set_cookie(&session, secure), confirmation)))
 }
@@ -380,15 +411,17 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
     // Dropped by the query rather than by a second one: the profile itself
     // must come back either way, and a WHERE clause on the layout would hide
     // the whole account behind a camera it no longer needs.
-    let Some((id, email, mode, halo_shape, halo_colour, x, y, scale, confirmed)) =
-        sqlx::query_as::<_, (i32, String, String, Option<String>, Option<String>, Option<f32>, Option<f32>, Option<f32>, bool)>(
-            "SELECT u.id, u.email, p.mode, p.halo_shape, p.halo_colour,
+    let Some((id, email, mode, halo_shape, halo_colour, x, y, scale, confirmed, born, letter)) = sqlx::query_as::<_, MeRow>(
+        "SELECT u.id, u.email, p.mode, p.halo_shape, p.halo_colour,
                     CASE WHEN current.keep THEN p.camera_x END,
                     CASE WHEN current.keep THEN p.camera_y END,
                     CASE WHEN current.keep THEN p.camera_scale END,
-                    u.email_confirmed_at IS NOT NULL
+                    u.email_confirmed_at IS NOT NULL,
+                    p.born,
+                    w.language
              FROM app_user u
              JOIN user_profile p ON p.user_id = u.id
+             LEFT JOIN weekly_letter w ON w.user_id = u.id
              CROSS JOIN LATERAL (
                  -- Both sides must be a real layout. `IS NOT DISTINCT FROM`
                  -- would call NULL = NULL a match, so a camera orphaned by a
@@ -399,10 +432,10 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
                     AND p.layout_id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1) AS keep
              ) AS current
              WHERE u.id = $1",
-        )
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?
     else {
         return Ok(None);
     };
@@ -422,8 +455,24 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
         halo_colour,
         camera,
         email_confirmed: confirmed,
+        born,
+        letter: letter.map(|language| Letter { language }),
     }))
 }
+
+type MeRow = (
+    i32,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<f32>,
+    Option<f32>,
+    Option<f32>,
+    bool,
+    Option<i16>,
+    Option<String>,
+);
 
 /// Saves what the client asks to be remembered.
 ///
@@ -455,6 +504,11 @@ async fn update_profile(State(state): State<AppState>, headers: HeaderMap, Json(
         // A non-finite coordinate is not a position, and Postgres would take
         // NaN happily -- leaving a profile that opens the sky nowhere.
         return bad_request("that is not a place on the map");
+    }
+    if let Some(Some(born)) = body.born
+        && !(BORN_FROM..=current_year()).contains(&born)
+    {
+        return bad_request("that is not a year someone listening now was born in");
     }
 
     match save_profile(&state.pool, session.user_id, &body).await {
@@ -782,6 +836,25 @@ async fn export_account(State(state): State<AppState>, headers: HeaderMap) -> Re
     }
 }
 
+type ProfileRow = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<f32>,
+    Option<f32>,
+    Option<f32>,
+    Option<String>,
+    Option<i16>,
+);
+
+type ListenRow = (OffsetDateTime, uuid::Uuid, Vec<uuid::Uuid>, Option<i32>, Option<i32>, String);
+
+/// This year, by the server's clock: the latest year someone can have been
+/// born in.
+fn current_year() -> i16 {
+    i16::try_from(OffsetDateTime::now_utc().year()).unwrap_or(i16::MAX)
+}
+
 async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde_json::Value>> {
     let account = sqlx::query_as::<_, (i32, String, Option<OffsetDateTime>, OffsetDateTime)>(
         "SELECT id, email, email_confirmed_at, created_at FROM app_user WHERE id = $1",
@@ -794,8 +867,8 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
         return Ok(None);
     };
 
-    let profile = sqlx::query_as::<_, (String, Option<String>, Option<String>, Option<f32>, Option<f32>, Option<f32>, Option<String>)>(
-        "SELECT p.mode, p.halo_shape, p.halo_colour, p.camera_x, p.camera_y, p.camera_scale, l.key
+    let profile = sqlx::query_as::<_, ProfileRow>(
+        "SELECT p.mode, p.halo_shape, p.halo_colour, p.camera_x, p.camera_y, p.camera_scale, l.key, p.born
          FROM user_profile p LEFT JOIN sky_layout l ON l.id = p.layout_id
          WHERE p.user_id = $1",
     )
@@ -809,17 +882,25 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             .fetch_all(pool)
             .await?;
 
-    let listenbrainz =
-        sqlx::query_as::<_, (String, OffsetDateTime, Option<OffsetDateTime>)>("SELECT name, linked_at, read_at FROM listenbrainz_link WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_optional(pool)
-            .await?;
+    let listenbrainz = sqlx::query_as::<_, (String, OffsetDateTime, Option<OffsetDateTime>, Option<OffsetDateTime>)>(
+        "SELECT name, linked_at, read_at, history_from FROM listenbrainz_link WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    // Without its token: the token stops the letter, and an export is a file
+    // that travels.
+    let letter = sqlx::query_as::<_, (String, OffsetDateTime)>("SELECT language, subscribed_at FROM weekly_letter WHERE user_id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
 
     // Every listen, as the ledger holds it. This can be long -- it is the
-    // whole of what the account has heard since linking -- and that is the
-    // point: the export is the rows, not a summary of them.
-    let listens = sqlx::query_as::<_, (OffsetDateTime, uuid::Uuid, Vec<uuid::Uuid>, Option<i32>, i32)>(
-        "SELECT listened_at, recording_msid, artist_mbids, seconds, light FROM listen WHERE user_id = $1 ORDER BY listened_at, recording_msid",
+    // whole of what the account has heard, history and files included -- and
+    // that is the point: the export is the rows, not a summary of them.
+    let listens = sqlx::query_as::<_, ListenRow>(
+        "SELECT listened_at, recording, artist_mbids, seconds, light, source FROM listen WHERE user_id = $1 ORDER BY listened_at, recording",
     )
     .bind(user_id)
     .fetch_all(pool)
@@ -834,10 +915,11 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             "email_confirmed_at": confirmed_at.map(stamp),
             "created_at": stamp(created_at),
         },
-        "profile": profile.map(|(mode, halo_shape, halo_colour, x, y, scale, layout)| serde_json::json!({
+        "profile": profile.map(|(mode, halo_shape, halo_colour, x, y, scale, layout, born)| serde_json::json!({
             "mode": mode,
             "halo_shape": halo_shape,
             "halo_colour": halo_colour,
+            "born": born,
             "camera": match (x, y, scale) {
                 (Some(x), Some(y), Some(scale)) => serde_json::json!({ "x": x, "y": y, "scale": scale, "layout": layout }),
                 _ => serde_json::Value::Null,
@@ -847,16 +929,22 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             .into_iter()
             .map(|(created, expires)| serde_json::json!({ "created_at": stamp(created), "expires_at": stamp(expires) }))
             .collect::<Vec<_>>(),
-        "listenbrainz": listenbrainz.map(|(name, linked_at, read_at)| serde_json::json!({
+        "listenbrainz": listenbrainz.map(|(name, linked_at, read_at, history_from)| serde_json::json!({
             "name": name,
             "linked_at": stamp(linked_at),
             "read_at": read_at.map(stamp),
+            "history_from": history_from.map(stamp),
+        })),
+        "weekly_letter": letter.map(|(language, subscribed_at)| serde_json::json!({
+            "language": language,
+            "subscribed_at": stamp(subscribed_at),
         })),
         "listens": listens
             .into_iter()
-            .map(|(listened_at, msid, artists, seconds, light)| serde_json::json!({
+            .map(|(listened_at, recording, artists, seconds, light, source)| serde_json::json!({
                 "listened_at": stamp(listened_at),
-                "recording_msid": msid,
+                "source": source,
+                "recording": recording,
                 "artist_mbids": artists,
                 "seconds": seconds,
                 "light": light,
@@ -877,9 +965,10 @@ fn stamp(at: OffsetDateTime) -> String {
 /// Destroys the account and everything hanging off it.
 ///
 /// One DELETE, because the schema was built for this: every personal table
-/// references `app_user` with `ON DELETE CASCADE` (migrations 0008, 0009 and
-/// 0013), so the row going away takes the profile, the sessions, the tokens,
-/// the ListenBrainz link and every listen with it. Not a flag, not a queue, not a "we will remove it within 30 days" --
+/// references `app_user` with `ON DELETE CASCADE` (migrations 0008, 0009,
+/// 0013 and 0014), so the row going away takes the profile, the sessions, the
+/// tokens, the ListenBrainz link, every listen and the weekly letter with it.
+/// Not a flag, not a queue, not a "we will remove it within 30 days" --
 /// the charter promises one press, and a promise kept by a background job is
 /// a promise the user cannot check.
 ///
@@ -925,6 +1014,14 @@ async fn save_profile(pool: &PgPool, user_id: i32, update: &ProfileUpdate) -> sq
         .bind(update.halo_colour.as_deref())
         .execute(pool)
         .await?;
+    }
+
+    if let Some(born) = update.born {
+        sqlx::query("UPDATE user_profile SET born = $2 WHERE user_id = $1")
+            .bind(user_id)
+            .bind(born)
+            .execute(pool)
+            .await?;
     }
 
     if let Some(camera) = update.camera {

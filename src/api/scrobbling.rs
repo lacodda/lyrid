@@ -1,11 +1,13 @@
-//! Scrobbling, as the signed-in person sees it: linking ListenBrainz, what
-//! their listening has opened and gathered, and the stars it has lit.
+//! Scrobbling, as the signed-in person sees it: linking ListenBrainz, a
+//! Last.fm history brought in a file, what the listening has opened and
+//! gathered, where it is at home, and the stars it has lit.
 //!
 //! Every route here is behind the session. The sky and the card stay
 //! anonymous and cacheable; what is personal about a star is asked for
 //! separately, by the person it is personal to.
 
-use axum::extract::{Path, State};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router, routing::get, routing::post, routing::put};
@@ -16,19 +18,28 @@ use time::format_description::well_known::Rfc3339;
 
 use super::accounts::{bad_request, current_session, server_error, unauthorised};
 use crate::app::AppState;
-use crate::scrobbling::{self, ByHand, Failure, ReadError};
+use crate::scrobbling::{self, ByHand, Failure, ReadError, home, lastfm};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/me/listening", get(listening))
         .route("/api/me/listenbrainz", put(link).delete(unlink))
         .route("/api/me/listenbrainz/read", post(read_now))
+        .route(
+            "/api/me/lastfm",
+            post(import_lastfm).delete(forget_lastfm).layer(DefaultBodyLimit::max(LASTFM_FILE_LIMIT)),
+        )
         .route("/api/me/heard", get(heard_stars))
         .route("/api/me/heard/{id}", get(heard_star))
 }
 
+/// How large a Last.fm file may be: about half a million scrobbles, twenty
+/// years of someone who listens all day. The body is read whole, so the limit
+/// is also what one upload can cost the server in memory.
+const LASTFM_FILE_LIMIT: usize = 64 * 1024 * 1024;
+
 /// How many of the latest openings the summary names.
-const RECENT: i64 = 5;
+const RECENT: usize = 5;
 
 /// The current layout, as every query of the sky's coordinates picks it.
 const CURRENT_LAYOUT: &str = "(SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)";
@@ -40,12 +51,17 @@ struct Listening {
     link: Option<Link>,
     /// All the light the ledger holds for this account.
     light: i64,
-    /// Listens counted.
+    /// Listens counted, from every source.
     listens: i64,
+    /// Of those, the ones a Last.fm file brought: what "forget the file"
+    /// would take back.
+    from_file: i64,
     /// Stars on the current sky that a listen has named.
-    stars: i64,
+    stars: usize,
     /// The latest of those, newest first.
     recent: Vec<Opening>,
+    /// Where the listening is at home on the sky, once anything is heard.
+    home: Option<Star>,
 }
 
 #[derive(Serialize)]
@@ -57,6 +73,17 @@ struct Link {
     /// Why the last read failed, as a code the interface puts into words, or
     /// `None` when it did not.
     failure: Option<String>,
+    /// Where reading the history from before the link stands, while it is
+    /// still being read; `None` once the reading has caught up with the link.
+    history: Option<History>,
+}
+
+#[derive(Serialize)]
+struct History {
+    /// Where the person's listening on ListenBrainz begins, once known.
+    from: Option<String>,
+    /// How far it has been read, once the first read has finished.
+    through: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -67,11 +94,36 @@ struct Opening {
     opened_at: String,
 }
 
+/// A star, and where the sky puts it.
+#[derive(Serialize)]
+struct Star {
+    id: i32,
+    name: String,
+    x: f32,
+    y: f32,
+}
+
 /// What a read by hand added, beside the summary it leaves.
 #[derive(Serialize)]
 struct ReadNow {
     listens: usize,
     light: i64,
+    opened: usize,
+    listening: Listening,
+}
+
+/// What a Last.fm file brought, beside the summary it leaves.
+#[derive(Serialize)]
+struct Brought {
+    /// Scrobbles read from the file.
+    scrobbles: usize,
+    /// Rows that were not a scrobble.
+    unreadable: usize,
+    /// Listens new to the ledger.
+    listens: usize,
+    /// Of those, the ones whose artist lyrid could name.
+    named: usize,
+    /// Artists heard for the first time.
     opened: usize,
     listening: Listening,
 }
@@ -94,7 +146,7 @@ fn stamp(at: OffsetDateTime) -> String {
 }
 
 /// Why a request was turned away before it began.
-enum Refused {
+pub(crate) enum Refused {
     NotSignedIn,
     SessionUnreadable,
 }
@@ -109,7 +161,7 @@ impl IntoResponse for Refused {
 }
 
 /// The session's account.
-async fn signed_in(pool: &PgPool, headers: &HeaderMap) -> Result<i32, Refused> {
+pub(crate) async fn signed_in(pool: &PgPool, headers: &HeaderMap) -> Result<i32, Refused> {
     match current_session(pool, headers).await {
         Ok(Some(session)) => Ok(session.user_id),
         Ok(None) => Err(Refused::NotSignedIn),
@@ -125,8 +177,13 @@ async fn listening(State(state): State<AppState>, headers: HeaderMap) -> Respons
         Ok(user) => user,
         Err(refused) => return refused.into_response(),
     };
-    match summary(&state.pool, user).await {
-        Ok(listening) => Json(listening).into_response(),
+    answer(&state.pool, user, |listening| listening).await
+}
+
+/// The summary after whatever a route did, wrapped as the route needs it.
+async fn answer<T: Serialize>(pool: &PgPool, user: i32, wrap: impl FnOnce(Listening) -> T) -> Response {
+    match summary(pool, user).await {
+        Ok(listening) => Json(wrap(listening)).into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read a listening summary");
             server_error("the listening could not be read")
@@ -134,55 +191,58 @@ async fn listening(State(state): State<AppState>, headers: HeaderMap) -> Respons
     }
 }
 
+type LinkRow = (
+    String,
+    OffsetDateTime,
+    Option<OffsetDateTime>,
+    Option<String>,
+    Option<OffsetDateTime>,
+    Option<OffsetDateTime>,
+);
+
 async fn summary(pool: &PgPool, user: i32) -> sqlx::Result<Listening> {
-    let link = sqlx::query_as::<_, (String, OffsetDateTime, Option<OffsetDateTime>, Option<String>)>(
-        "SELECT name, linked_at, read_at, failure FROM listenbrainz_link WHERE user_id = $1",
+    let link = sqlx::query_as::<_, LinkRow>("SELECT name, linked_at, read_at, failure, read_through, history_from FROM listenbrainz_link WHERE user_id = $1")
+        .bind(user)
+        .fetch_optional(pool)
+        .await?
+        .map(|(name, linked_at, read_at, failure, read_through, history_from)| Link {
+            name,
+            linked_at: stamp(linked_at),
+            read_at: read_at.map(stamp),
+            failure,
+            history: read_through.is_none_or(|through| through < linked_at).then(|| History {
+                from: history_from.map(stamp),
+                through: read_through.map(stamp),
+            }),
+        });
+
+    let (listens, light, from_file): (i64, i64, i64) = sqlx::query_as(
+        "SELECT count(*), COALESCE(sum(light), 0)::bigint, count(*) FILTER (WHERE source = 'lastfm')
+         FROM listen WHERE user_id = $1",
     )
     .bind(user)
-    .fetch_optional(pool)
-    .await?
-    .map(|(name, linked_at, read_at, failure)| Link {
-        name,
-        linked_at: stamp(linked_at),
-        read_at: read_at.map(stamp),
-        failure,
-    });
-
-    let (listens, light): (i64, i64) = sqlx::query_as("SELECT count(*), COALESCE(sum(light), 0)::bigint FROM listen WHERE user_id = $1")
-        .bind(user)
-        .fetch_one(pool)
-        .await?;
-
-    // Openings are read out of the ledger, not kept beside it: a star is open
-    // from the first listen that names it, and that is a question the ledger
-    // answers. Only stars of the current sky are counted -- an artist the
-    // canon does not place is someone heard, not a star.
-    let opened = sqlx::query_as::<_, (i32, String, OffsetDateTime, i64)>(sqlx::AssertSqlSafe(format!(
-        "WITH heard AS (
-             SELECT artist AS mbid, min(listened_at) AS first_at
-             FROM listen, unnest(artist_mbids) AS artist
-             WHERE user_id = $1
-             GROUP BY artist
-         )
-         SELECT a.id, a.name, h.first_at, count(*) OVER () AS stars
-         FROM heard h
-         JOIN artist a ON a.mbid = h.mbid
-         JOIN artist_position p ON p.artist_id = a.id AND p.layout_id = {CURRENT_LAYOUT}
-         ORDER BY h.first_at DESC, a.id
-         LIMIT $2"
-    )))
-    .bind(user)
-    .bind(RECENT)
-    .fetch_all(pool)
+    .fetch_one(pool)
     .await?;
 
-    let stars = opened.first().map_or(0, |row| row.3);
-    let recent = opened
+    let mut placed = scrobbling::placed(&mut *pool.acquire().await?, user, None).await?;
+    let home = home::home(&placed.iter().map(scrobbling::Placed::heard).collect::<Vec<_>>())
+        .and_then(|home| placed.iter().find(|star| star.id == home.id))
+        .map(|star| Star {
+            id: star.id,
+            name: star.name.clone(),
+            x: star.x,
+            y: star.y,
+        });
+
+    let stars = placed.len();
+    placed.sort_by(|a, b| b.first_at.cmp(&a.first_at).then(a.id.cmp(&b.id)));
+    let recent = placed
         .into_iter()
-        .map(|(id, name, first_at, _)| Opening {
-            id,
-            name,
-            opened_at: stamp(first_at),
+        .take(RECENT)
+        .map(|star| Opening {
+            id: star.id,
+            name: star.name,
+            opened_at: stamp(star.first_at),
         })
         .collect();
 
@@ -190,8 +250,10 @@ async fn summary(pool: &PgPool, user: i32) -> sqlx::Result<Listening> {
         link,
         light,
         listens,
+        from_file,
         stars,
         recent,
+        home,
     })
 }
 
@@ -243,12 +305,14 @@ async fn link(State(state): State<AppState>, headers: HeaderMap, Json(body): Jso
         }
     };
 
-    // Linking another account starts over: reading begins now, for the new
-    // name. The ledger is the lyrid account's and is not touched.
+    // Linking another account starts over: reading begins again from the
+    // start of the new account's history. The ledger is the lyrid account's
+    // and is not touched.
     let linked = sqlx::query(
         "INSERT INTO listenbrainz_link (user_id, name) VALUES ($1, $2)
          ON CONFLICT (user_id) DO UPDATE
-             SET name = EXCLUDED.name, linked_at = now(), read_through = NULL, read_at = NULL, tried_at = NULL, failure = NULL
+             SET name = EXCLUDED.name, linked_at = now(), read_through = NULL, read_at = NULL, tried_at = NULL,
+                 failure = NULL, history_from = NULL
              WHERE lower(listenbrainz_link.name) <> lower(EXCLUDED.name)",
     )
     .bind(user)
@@ -272,13 +336,7 @@ async fn link(State(state): State<AppState>, headers: HeaderMap, Json(body): Jso
         }
     }
 
-    match summary(&state.pool, user).await {
-        Ok(listening) => Json(listening).into_response(),
-        Err(error) => {
-            tracing::error!(%error, "failed to read a listening summary");
-            server_error("the listening could not be read")
-        }
-    }
+    answer(&state.pool, user, |listening| listening).await
 }
 
 /// Stops reading. What the listening gathered stays with the account.
@@ -295,13 +353,7 @@ async fn unlink(State(state): State<AppState>, headers: HeaderMap) -> Response {
         tracing::error!(%error, "failed to unlink a ListenBrainz account");
         return server_error("the account could not be unlinked");
     }
-    match summary(&state.pool, user).await {
-        Ok(listening) => Json(listening).into_response(),
-        Err(error) => {
-            tracing::error!(%error, "failed to read a listening summary");
-            server_error("the listening could not be read")
-        }
-    }
+    answer(&state.pool, user, |listening| listening).await
 }
 
 /// Reads now rather than at the next quarter hour.
@@ -328,6 +380,13 @@ async fn read_now(State(state): State<AppState>, headers: HeaderMap) -> Response
             )
                 .into_response();
         }
+        Ok(ByHand::ReadingHistory) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({ "error": "your history is still being read - it carries on by itself" })),
+            )
+                .into_response();
+        }
         Ok(ByHand::NotLinked) => return bad_request("no ListenBrainz account is linked"),
         Err(error) => {
             tracing::error!(%error, "failed to take a link for reading");
@@ -348,19 +407,82 @@ async fn read_now(State(state): State<AppState>, headers: HeaderMap) -> Response
     };
     drop(conn);
 
-    match summary(&state.pool, user).await {
-        Ok(listening) => Json(ReadNow {
-            listens: read.listens,
-            light: read.light,
-            opened: read.opened,
-            listening,
-        })
-        .into_response(),
+    answer(&state.pool, user, |listening| ReadNow {
+        listens: read.listens,
+        light: read.light,
+        opened: read.opened,
+        listening,
+    })
+    .await
+}
+
+/// Brings in a Last.fm history: the file's text as the body.
+///
+/// Read as text with anything that is not UTF-8 replaced: a stray byte costs
+/// one letter of one name, not the file.
+async fn import_lastfm(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    let user = match signed_in(&state.pool, &headers).await {
+        Ok(user) => user,
+        Err(refused) => return refused.into_response(),
+    };
+
+    let text = String::from_utf8_lossy(&body);
+    let parsed = match lastfm::parse(&text) {
+        Ok(parsed) => parsed,
+        Err(lastfm::Refusal::NotCsv) => return bad_request("that file is not a CSV export"),
+        Err(lastfm::Refusal::NoColumns) => return bad_request("that file has no column with a time or none with an artist"),
+    };
+    drop(text);
+
+    let mut conn = match state.pool.acquire().await {
+        Ok(conn) => conn,
         Err(error) => {
-            tracing::error!(%error, "failed to read a listening summary");
-            server_error("the listening could not be read")
+            tracing::error!(%error, "failed to reach the database");
+            return server_error("the file could not be read in");
         }
+    };
+    let imported = match lastfm::import(&mut conn, user, parsed).await {
+        Ok(imported) => imported,
+        Err(error) => {
+            tracing::error!(%error, "failed to write a Last.fm file");
+            return server_error("the file could not be read in");
+        }
+    };
+    drop(conn);
+    tracing::info!(
+        user,
+        scrobbles = imported.scrobbles,
+        listens = imported.listens,
+        named = imported.named,
+        "Last.fm file read in"
+    );
+
+    answer(&state.pool, user, |listening| Brought {
+        scrobbles: imported.scrobbles,
+        unreadable: imported.unreadable,
+        listens: imported.listens,
+        named: imported.named,
+        opened: imported.opened,
+        listening,
+    })
+    .await
+}
+
+/// Takes back everything a Last.fm file brought.
+async fn forget_lastfm(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = match signed_in(&state.pool, &headers).await {
+        Ok(user) => user,
+        Err(refused) => return refused.into_response(),
+    };
+    let forgotten = match state.pool.acquire().await {
+        Ok(mut conn) => lastfm::forget(&mut conn, user).await,
+        Err(error) => Err(error),
+    };
+    if let Err(error) = forgotten {
+        tracing::error!(%error, "failed to forget a Last.fm history");
+        return server_error("the file's history could not be forgotten");
     }
+    answer(&state.pool, user, |listening| listening).await
 }
 
 /// Every star of the current sky this person's listening has named, as
@@ -452,6 +574,8 @@ mod tests {
             ("PUT", "/api/me/listenbrainz", r#"{"token":"0000-0000-0000"}"#),
             ("DELETE", "/api/me/listenbrainz", ""),
             ("POST", "/api/me/listenbrainz/read", ""),
+            ("POST", "/api/me/lastfm", "uts,artist\n1580474040,Air\n"),
+            ("DELETE", "/api/me/lastfm", ""),
             ("GET", "/api/me/heard", ""),
             ("GET", "/api/me/heard/1", ""),
         ] {
@@ -468,6 +592,20 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{method} {path}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_large_file_is_not_refused_for_its_size_below_the_limit() {
+        // Axum refuses bodies over two megabytes unless a route says
+        // otherwise; a year of scrobbles is larger than that. Past the size
+        // check, the request meets the session check -- which is the proof
+        // the size was let through.
+        let file = "x".repeat(10 * 1024 * 1024);
+        let response = app()
+            .oneshot(Request::builder().method("POST").uri("/api/me/lastfm").body(Body::from(file)).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[test]

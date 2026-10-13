@@ -1,7 +1,9 @@
-//! Sending the two letters this service sends.
+//! Sending the letters this service sends.
 //!
-//! There are exactly two: "confirm this address" and "here is a way back into
-//! your account". Both are short, both carry one link, and both are plain
+//! Two answer something the person just did: "confirm this address" and
+//! "here is a way back into your account". Both are short, both carry one
+//! link. The third is the weekly letter (`crate::letter`), sent only to those
+//! who asked for it and stoppable from its own headers. All three are plain
 //! text — a service that sends you a picture of a button when it means to
 //! send you a link is a service whose mail lands in spam.
 //!
@@ -14,7 +16,7 @@
 //! that is true is the one nobody else can read.
 
 use anyhow::{Context, Result};
-use lettre::message::header::ContentType;
+use lettre::message::header::{ContentType, Header, HeaderName, HeaderValue};
 use lettre::transport::smtp::AsyncSmtpTransport;
 use lettre::{AsyncTransport, Message, Tokio1Executor};
 
@@ -73,23 +75,78 @@ impl Mailer {
     /// confirmation letter must not undo a registration, while a failed reset
     /// letter is the whole of what was asked for.
     pub async fn send(&self, to: &str, subject: &str, body: &str) -> Result<()> {
+        self.deliver(to, subject, body, None).await
+    }
+
+    /// Sends a letter someone asked to receive, with the address that stops
+    /// it in its headers.
+    ///
+    /// `List-Unsubscribe` with `List-Unsubscribe-Post` is RFC 8058's one-click
+    /// stop: the mail client shows its own "unsubscribe" beside the sender and
+    /// posts to the address without opening a page. A letter sent in bulk
+    /// without it is the letter mail providers file as spam.
+    pub async fn send_asked_for(&self, to: &str, subject: &str, body: &str, stop: &str) -> Result<()> {
+        self.deliver(to, subject, body, Some(stop)).await
+    }
+
+    async fn deliver(&self, to: &str, subject: &str, body: &str, stop: Option<&str>) -> Result<()> {
         match self {
             Self::Log => {
                 tracing::info!(to, subject, "no SMTP server configured, so the letter was logged instead of sent:\n\n{body}\n");
                 Ok(())
             }
             Self::Smtp { transport, from } => {
-                let message = Message::builder()
+                let mut builder = Message::builder()
                     .from(from.parse().with_context(|| format!("LYRID_MAIL_FROM is not a usable address: {from}"))?)
                     .to(to.parse().with_context(|| format!("not a usable recipient address: {to}"))?)
                     .subject(subject)
-                    .header(ContentType::TEXT_PLAIN)
-                    .body(body.to_string())
-                    .context("the letter could not be built")?;
+                    .header(ContentType::TEXT_PLAIN);
+                if let Some(stop) = stop {
+                    builder = builder.header(ListUnsubscribe(stop.to_string())).header(ListUnsubscribePost);
+                }
+                let message = builder.body(body.to_string()).context("the letter could not be built")?;
                 transport.send(message).await.context("the letter could not be sent")?;
                 Ok(())
             }
         }
+    }
+}
+
+type HeaderError = Box<dyn std::error::Error + Send + Sync>;
+
+/// `List-Unsubscribe: <https://…>` (RFC 2369).
+#[derive(Clone)]
+struct ListUnsubscribe(String);
+
+impl Header for ListUnsubscribe {
+    fn name() -> HeaderName {
+        HeaderName::new_from_ascii_str("List-Unsubscribe")
+    }
+
+    fn parse(text: &str) -> Result<Self, HeaderError> {
+        Ok(Self(text.trim_matches(['<', '>', ' ']).to_string()))
+    }
+
+    fn display(&self) -> HeaderValue {
+        HeaderValue::new(Self::name(), format!("<{}>", self.0))
+    }
+}
+
+/// `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058).
+#[derive(Clone)]
+struct ListUnsubscribePost;
+
+impl Header for ListUnsubscribePost {
+    fn name() -> HeaderName {
+        HeaderName::new_from_ascii_str("List-Unsubscribe-Post")
+    }
+
+    fn parse(_: &str) -> Result<Self, HeaderError> {
+        Ok(Self)
+    }
+
+    fn display(&self) -> HeaderValue {
+        HeaderValue::new(Self::name(), "List-Unsubscribe=One-Click".to_string())
     }
 }
 

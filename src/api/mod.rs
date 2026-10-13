@@ -6,8 +6,10 @@
 pub mod accounts;
 pub mod artists;
 pub mod dossiers;
+pub mod letter;
 pub mod listening;
 pub mod metrics;
 pub mod relations;
 pub mod scrobbling;
 pub mod spectrum;
+pub mod youth;

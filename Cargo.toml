@@ -19,6 +19,9 @@ argon2 = "0.6.0"
 axum = "0.8.9"
 bzip2 = "0.6.1"
 clap = { version = "4.6.6", features = ["derive"] }
+# Last.fm exports arrive as CSV with quoted fields that may hold commas and
+# line breaks: a reader that gets that right is a library, not twenty lines.
+csv = "1.4"
 dotenvy = "0.15.7"
 flate2 = "1.1"
 # rustls with ring and the platform trust store, to match what sqlx already
@@ -42,7 +45,9 @@ tower-http = { version = "0.7.0", features = ["fs", "trace", "set-header"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ureq = "3.4"
-uuid = { version = "1.26.0", features = ["serde"] }
+# v5: a listen from a Last.fm file is identified by a UUID derived from its
+# names, so the same file uploaded twice is the same rows.
+uuid = { version = "1.26.0", features = ["serde", "v5"] }
 zstd = "0.14.0"
 
 [dev-dependencies]
