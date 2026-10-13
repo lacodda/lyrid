@@ -20,12 +20,17 @@ An account adds memory to the sky and takes nothing away from it. The map, the s
 | `PATCH` | `/api/me` | Save part of the profile. |
 | `DELETE` | `/api/me` | Destroy the account and everything it holds. |
 | `GET` | `/api/me/export` | Everything held about the account, as a JSON file. |
-| `GET` | `/api/me/listening` | What the account's listening has come to: the ListenBrainz link, light, stars, latest openings. |
+| `GET` | `/api/me/listening` | What the account's listening has come to: the ListenBrainz link and its history, light, stars, latest openings, the home star. |
 | `PUT` | `/api/me/listenbrainz` | Link a ListenBrainz account. Body: `token` — checked once, never stored. |
 | `DELETE` | `/api/me/listenbrainz` | Stop reading. What was gathered stays. |
-| `POST` | `/api/me/listenbrainz/read` | Read ListenBrainz now. At most once a minute. |
+| `POST` | `/api/me/listenbrainz/read` | Read ListenBrainz now. At most once a minute, and not while the history is being read. |
+| `POST` | `/api/me/lastfm` | Bring a Last.fm history: the CSV file as the body, up to 64 MB. |
+| `DELETE` | `/api/me/lastfm` | Forget every listen a Last.fm file brought. |
 | `GET` | `/api/me/heard` | Every heard star of the current sky, as `[id, x, y]`. |
 | `GET` | `/api/me/heard/{id}` | How often and since when one star has been heard. |
+| `PUT` | `/api/me/letter` | Ask for the weekly letter. Body: `language` (`en` or `ru`). Needs a confirmed address. |
+| `DELETE` | `/api/me/letter` | Stop the weekly letter. |
+| `POST` | `/api/letter/stop?token=…` | Stop the weekly letter by the token in its link. No session. |
 
 All answer JSON. A refusal carries `{"error": "..."}` written for a person to read, and the client shows those words as they are rather than substituting its own.
 
@@ -39,11 +44,13 @@ All answer JSON. A refusal carries `{"error": "..."}` written for a person to re
   "halo_shape": "ring",
   "halo_colour": "azure",
   "camera": { "x": -59.17, "y": -69.55, "scale": 12.0 },
-  "email_confirmed": true
+  "email_confirmed": true,
+  "born": 1983,
+  "letter": { "language": "en" }
 }
 ```
 
-`PATCH /api/me` accepts `halo_shape`, `halo_colour` and `camera`, each optional. Only the fields present are written, so saving a camera does not clear a marker the client never touched. It returns the whole profile as it now stands.
+`PATCH /api/me` accepts `halo_shape`, `halo_colour`, `camera` and `born`, each optional. Only the fields present are written, so saving a camera does not clear a marker the client never touched. `born` is a year from 1900 to this one; `null` forgets it, and leaving it out leaves it alone. It returns the whole profile as it now stands. `letter` is `null` until the weekly letter is asked for.
 
 ## The mode is chosen once — and only creative exists yet
 
@@ -90,9 +97,9 @@ Reset links last 1 hour, shorter than confirmation links, because a reset link i
 
 ## The privacy charter: export and delete
 
-`GET /api/me/export` needs a session and returns the whole account as a JSON file, sent with `Content-Disposition: attachment` so a browser saves it rather than displaying it — the point is to hand the data over, not show it. It holds `exported_at`, a short `note`, `account` (id, email, when it was confirmed, when it was created), `profile` (mode, marker shape and colour, the camera and the layout key it belongs to), `sessions` (only their creation and expiry times), `listenbrainz` (the linked name, when it was linked and last read, or `null`) and `listens` — every row of the listening ledger, with its time, msid, artist MBIDs, length and light. Session tokens are left out on purpose: a token is a live credential, and an export is a file that gets mailed around and left in a downloads folder — handing over working keys to the account is not the same as handing over the data about it.
+`GET /api/me/export` needs a session and returns the whole account as a JSON file, sent with `Content-Disposition: attachment` so a browser saves it rather than displaying it — the point is to hand the data over, not show it. It holds `exported_at`, a short `note`, `account` (id, email, when it was confirmed, when it was created), `profile` (mode, marker shape and colour, the camera and the layout key it belongs to), `sessions` (only their creation and expiry times), `listenbrainz` (the linked name, when it was linked and last read, where its history begins, or `null`), `weekly_letter` (its language and when it was asked for, or `null`) and `listens` — every row of the listening ledger, with its time, source (`listenbrainz` or `lastfm`), recording id, artist MBIDs, length and light (`null` for a listen that paid nothing). The profile carries `born`. Session tokens and the letter's stop token are left out on purpose:  a token is a live credential, and an export is a file that gets mailed around and left in a downloads folder — handing over working keys to the account is not the same as handing over the data about it.
 
-`DELETE /api/me` needs a session and destroys the account immediately and completely: one `DELETE FROM app_user`, and the profile, sessions, tokens, the ListenBrainz link and every listen go with it through `ON DELETE CASCADE`. Not a flag, not a queue, not a promise to remove it within 30 days — a promise kept by a background job is a promise the user cannot check.
+`DELETE /api/me` needs a session and destroys the account immediately and completely: one `DELETE FROM app_user`, and the profile, sessions, tokens, the ListenBrainz link, every listen and the weekly letter go with it through `ON DELETE CASCADE`. Not a flag, not a queue, not a promise to remove it within 30 days — a promise kept by a background job is a promise the user cannot check.
 
 The usage counters described [below](/lyrid/reference/api/#usage-metrics) are untouched by a deletion, and correctly so: they hold no row about that person to delete.
 
@@ -100,23 +107,35 @@ The web page for both is at `/charter`.
 
 ## Listening
 
-How linking works, what pays what and when listening is read is told in [Scrobbling](/lyrid/concepts/scrobbling/). The shapes:
+How linking works, what pays what and when listening is read is told in [Scrobbling](/lyrid/concepts/scrobbling/); the home star, the stars of your youth, Last.fm files and the letter in [your life on the sky](/lyrid/concepts/your-life-on-the-sky/). The shapes:
 
 ```json
 {
-  "link": { "name": "ada", "linked_at": "2026-10-10T12:00:00Z", "read_at": "2026-10-10T12:15:02Z", "failure": null },
+  "link": {
+    "name": "ada",
+    "linked_at": "2026-10-10T12:00:00Z",
+    "read_at": "2026-10-10T12:15:02Z",
+    "failure": null,
+    "history": { "from": "2006-10-11T20:36:59Z", "through": "2014-05-13T09:12:00Z" }
+  },
   "light": 5330,
   "listens": 349,
+  "from_file": 0,
   "stars": 25,
-  "recent": [{ "id": 676690, "name": "Kiasmos", "opened_at": "2026-02-04T16:45:37Z" }]
+  "recent": [{ "id": 676690, "name": "Kiasmos", "opened_at": "2026-02-04T16:45:37Z" }],
+  "home": { "id": 676690, "name": "Kiasmos", "x": 12.5, "y": -40.1 }
 }
 ```
 
-`GET /api/me/listening` answers this; `PUT` and `DELETE /api/me/listenbrainz` answer it as it stands after the change, with `link: null` once unlinked. `failure` is a code — `unreachable`, `unknown_user`, `throttled` or `malformed` — for the interface to put into words, or `null` when the last read worked.
+`GET /api/me/listening` answers this; `PUT` and `DELETE /api/me/listenbrainz` and both Last.fm routes answer it as it stands after the change, with `link: null` once unlinked. `failure` is a code — `unreachable`, `unknown_user`, `throttled` or `malformed` — for the interface to put into words, or `null` when the last read worked. `history` says where reading the history from before the link stands while it is still being read — `from` once the first read has asked where the listening begins, `through` once a read has finished — and is `null` once the reading has caught up with the link. `from_file` counts the listens a Last.fm file brought: what forgetting it would take back. `home` is `null` until something heard is on the sky.
 
 `PUT /api/me/listenbrainz` refuses a token that does not look like one with `400` before asking anyone, answers `400` when ListenBrainz does not recognise it, `409` when that ListenBrainz account already feeds another lyrid account, and `502` when ListenBrainz did not answer. Linking the account already linked changes nothing.
 
-`POST /api/me/listenbrainz/read` adds what the read brought, beside the summary: `{"listens": 3, "light": 45, "opened": 2, "listening": {...}}`. A second read within a minute is `429`. A failure on ListenBrainz's side is not an error of this request: the summary carries its code like any other state of the link.
+`POST /api/me/listenbrainz/read` adds what the read brought, beside the summary: `{"listens": 3, "light": 45, "opened": 2, "listening": {...}}`. A second read within a minute is `429`; a read while the history is still being read is `409`, because the background is already reading it as fast as ListenBrainz allows. A failure on ListenBrainz's side is not an error of this request: the summary carries its code like any other state of the link.
+
+`POST /api/me/lastfm` takes the exported CSV as the body and answers what it brought beside the summary: `{"scrobbles": 312, "unreadable": 2, "listens": 290, "named": 260, "opened": 45, "listening": {...}}` — scrobbles read, rows that were not one, listens new to the ledger, how many of those have an artist on the sky, and stars heard for the first time. A file with no time or no artist column is `400`. The file is not kept.
+
+`PUT /api/me/letter` answers `{"letter": {"language": "en"}}`; asking again in another language moves the letter there. An unconfirmed address is `403`. `DELETE /api/me/letter` answers `{"letter": null}`. `POST /api/letter/stop?token=…` answers `{"status": "stopped"}` whether or not there was a letter to stop — either way none will come, and an answer that differed would let anyone test tokens. It is also the address in each letter's `List-Unsubscribe` header, so a mail client's own button posts here (RFC 8058).
 
 `GET /api/me/heard/{id}` answers `{"listens": 0, "first_at": null, "last_at": null}` for a star never heard — the star exists, and not having heard it is a fact about it.
 
@@ -146,4 +165,4 @@ The camera is not saved on every frame. The client sends one only when the view 
 
 - **No exploration mode to choose.** Only the creative mode is built; the choice arrives with the fog in v0.22 and is offered once, then, to every profile that predates it.
 - **No third-party sign-in.** It would put a rate-limited external service in the path of signing in, against the spirit of [ADR 0002](https://github.com/lacodda/lyrid/blob/main/docs/adr/0002-universe-from-open-dumps.md), and would not work on a stand with no route to the internet.
-- **Nothing from the game.** Fog, contracts and the journal each bring their own tables when their versions arrive; the listening ledger arrived with scrobbling in its own two tables. The profile holds a mode, a marker and a camera, and no columns are added ahead of the features that need them.
+- **Nothing from the game.** Fog, contracts and the journal each bring their own tables when their versions arrive; the listening ledger arrived with scrobbling in its own two tables, and the weekly letter in its own. The profile holds a mode, a marker, a camera and, if given, a year of birth, and no columns are added ahead of the features that need them.

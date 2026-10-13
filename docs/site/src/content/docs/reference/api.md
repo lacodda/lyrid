@@ -484,6 +484,31 @@ Measured on the full canon: of the **206,636 artists with a place in the sky**,
 better-known names lead the list — it is not a strength of influence, which
 Wikidata does not record.
 
+## `GET /api/youth/{from}`
+
+The stars of a youth: who was putting music out in the six years from `from`,
+the year someone turned fifteen. A question about the canon and not about a
+person, so it needs no session, carries only years and is cached for a day like
+the tiles. What `/api/youth/1998` answers on the stand's slice, cut to its first entries:
+
+```json
+{
+  "from": 1998,
+  "to": 2003,
+  "stars": [
+    { "id": 791, "name": "Britney Spears", "x": -9.3, "y": -7.15 },
+    { "id": 486, "name": "Backstreet Boys", "x": -5.43, "y": -3.47 }
+  ]
+}
+```
+
+An artist counts when an album, an EP or a single of theirs was first released
+in those years and their first record came no more than ten years before them
+-- a reissued catalogue is not music coming out. Brightest first, at most
+sixty, on the current sky. A year before 1900 or after this one answers `400`.
+Why these rules, measured on the full canon: [your life on the
+sky](/lyrid/concepts/your-life-on-the-sky/#stars-of-your-youth).
+
 ## Usage metrics
 
 `POST /api/metrics/{mechanic}` counts one use of a mechanic. It takes no body
@@ -498,11 +523,13 @@ The mechanic is one of a closed list the server holds, not free text from the
 client:
 
 ```
-sky_opened      card_opened     listen_opened
-view_shared     charter_read    data_requested
-lens_used       time_travelled  stars_compared
-route_opened    radio_started   signal_heard
-signal_found    dossier_opened
+sky_opened        card_opened       listen_opened
+view_shared       charter_read      data_requested
+lens_used         time_travelled    stars_compared
+route_opened      radio_started     signal_heard
+signal_found      dossier_opened    listening_linked
+heard_shown       home_flown        youth_shown
+lastfm_brought    letter_asked
 ```
 
 A name outside the list answers `404`. The list is what stops a client
