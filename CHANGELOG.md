@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.18.0] - 2026-10-13
+
+### Documentation
+- Record the history, the files, the youth and the letter
+
+### Features
+- **Breaking:** Read whole histories, bring Last.fm files, and send a weekly letter
+- Show your life on the sky
+
 ## [0.17.0] - 2026-10-10
 
 ### CI
@@ -9,6 +18,7 @@ All notable changes to this project are documented in this file.
 
 ### Documentation
 - Record how listening is read from ListenBrainz and what it pays
+- Generate for v0.17.0
 
 ### Features
 - Read ListenBrainz listening into a ledger of light
