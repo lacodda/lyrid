@@ -60,7 +60,7 @@ export const comboboxInputVariants = cva('', {
       lg: 'h-control-lg text-base',
     },
     bare: {
-      true: 'h-7 w-auto min-w-24 flex-1 bg-transparent px-1 text-sm text-text placeholder:text-faint outline-none',
+      true: 'h-7 w-auto min-w-24 flex-1 bg-transparent px-1 text-sm pointer-coarse:text-lg text-text placeholder:text-faint outline-none',
       false: fieldClasses,
     },
   },

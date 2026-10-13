@@ -1,4 +1,4 @@
-import { useRef, type HTMLAttributes, type ReactNode } from 'react'
+import { useRef, type ComponentProps, type HTMLAttributes, type ReactNode } from 'react'
 import { Dialog as Base } from '@base-ui/react/dialog'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from 'dowel-ui'
@@ -171,8 +171,9 @@ export function DialogHeader({ action, className, children, ...props }: DialogHe
 }
 
 /** The part that scrolls. It takes the height the header and the actions
- * leave, and only it moves when there is more than fits. */
-export function DialogBody({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+ * leave, and only it moves when there is more than fits. It takes a ref, for
+ * a dialog that opens with the focus on what it says rather than on a button. */
+export function DialogBody({ className, ...props }: ComponentProps<'div'>) {
   return (
     <div
       className={cn(

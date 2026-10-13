@@ -1,8 +1,8 @@
 import { useCallback, useRef, type InputHTMLAttributes, type Ref } from 'react'
 import { cn } from 'dowel-ui'
+import { useCommandKeys, useCommands, type Command } from './commands'
 import { fieldClasses } from './input'
 import { Kbd } from './kbd'
-import { useShortcut } from './shortcut'
 
 /*
  * SearchField.
@@ -38,12 +38,19 @@ export interface SearchFieldProps
    */
   clearLabel?: string
   /**
-   * The shortcut that focuses the field, as `['Mod', 'K']`. Shown at the right
-   * of the field, and bound: pressing it focuses and selects, from anywhere
-   * that is not already a field.
+   * The command that focuses the field: `{ id: 'search', label: 'Search',
+   * keys: 'Mod+K' }`. Declared like any other command, so it is listed in the
+   * sheet of shortcuts and the palette, and a rebinding moves the key and the
+   * hint together. The hint at the right of the field shows the keys it
+   * answers to now, not the ones it was written with.
    */
-  shortcut?: string[]
+  shortcut?: SearchShortcut
   ref?: Ref<HTMLInputElement>
+}
+
+/** A command the field runs itself: focus, and select what is there. */
+export type SearchShortcut = Pick<Command, 'id' | 'label' | 'group' | 'whileTyping'> & {
+  keys: string
 }
 
 export function SearchField({
@@ -67,13 +74,14 @@ export function SearchField({
   )
 
   // Focus and select, so the shortcut replaces a stale query rather than
-  // appending to it. Not while someone is typing elsewhere - that is
-  // `useShortcut`'s default, and it is the half of this people forget.
+  // appending to it. Not while someone is typing elsewhere - that is every
+  // command's default, and it is the half of this people forget.
   const focusAndSelect = useCallback(() => {
     own.current?.focus()
     own.current?.select()
   }, [])
-  useShortcut(shortcut ?? [], focusAndSelect, { enabled: shortcut !== undefined })
+  useCommands(shortcut === undefined ? [] : [{ ...shortcut, run: focusAndSelect }])
+  const hint = useCommandKeys(shortcut?.id ?? '')[0]
 
   const showClear = clearLabel !== undefined && value !== ''
 
@@ -92,7 +100,7 @@ export function SearchField({
           // Room on the right for whatever sits there, and none when nothing
           // does - a field with a permanent gap looks broken.
           showClear && 'pr-8',
-          !showClear && shortcut && 'pr-14',
+          !showClear && hint !== undefined && 'pr-14',
           // The browser's own clear affordance, in the operating system's
           // chrome. Ours is below.
           '[&::-webkit-search-cancel-button]:appearance-none',
@@ -118,11 +126,11 @@ export function SearchField({
         </button>
       )}
 
-      {!showClear && shortcut && (
+      {!showClear && hint !== undefined && (
         // Decorative: the shortcut works whether or not it is read out, and a
         // screen reader announcing "Control K" inside a search box is noise.
         <Kbd
-          keys={shortcut}
+          keys={hint}
           aria-hidden
           className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2"
         />

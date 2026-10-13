@@ -78,7 +78,7 @@ export function Search({ onPick, onDossier }: Props) {
         placeholder={t('search.placeholder')}
         aria-label={t('search.label')}
         clearLabel={t('search.clear')}
-        shortcut={['Mod', 'K']}
+        shortcut={{ id: 'search', label: t('search.label'), keys: 'Mod+K' }}
         spellCheck={false}
       />
 

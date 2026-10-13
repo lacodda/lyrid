@@ -86,7 +86,8 @@ export function PasswordField({
         disabled={disabled}
         onChange={(event) => onValueChange?.(event.target.value)}
         className={cn(
-          'w-full min-w-0 bg-transparent px-2.5 text-sm text-text placeholder:text-faint',
+          // 16px under a finger, for the reason `fieldClasses` gives.
+          'w-full min-w-0 bg-transparent px-2.5 text-sm pointer-coarse:text-lg text-text placeholder:text-faint',
           'outline-none disabled:cursor-not-allowed',
         )}
       />

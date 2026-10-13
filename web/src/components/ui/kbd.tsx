@@ -1,5 +1,6 @@
-import type { HTMLAttributes } from 'react'
+import { Fragment, type HTMLAttributes } from 'react'
 import { cn } from 'dowel-ui'
+import { isApplePlatform, parseKeys, strokeParts } from './shortcut'
 
 /*
  * Kbd.
@@ -8,19 +9,20 @@ import { cn } from 'dowel-ui'
  * because that is what the element is for - a screen reader announces it as
  * keyboard input rather than reading a stray capital letter.
  *
- * The platform substitution is the useful part. A shortcut written `Ctrl+K` is
- * wrong on a Mac, where the same shortcut is `⌘K`, and every product either
- * hard-codes one of them or writes the branch again.
+ * It reads the line's own notation, the one a command is bound with, so what
+ * is shown and what is bound are the same string: `Mod+K` is drawn `Ctrl` `K`
+ * here and `⌘` `K` on a Mac, and a product that writes the branch itself is
+ * a product whose hint is wrong on one of them.
+ *
+ * A sequence - `G D` - is drawn as its steps with a mark between them, so
+ * G-then-D does not read as G-with-D, and two sequences side by side do not
+ * read as one of four steps. The mark is `›`, not a word: a word here would be
+ * English the product cannot translate, and the notation has no key by that
+ * name, so it cannot be mistaken for one.
  */
 
-/** Whether this machine writes shortcuts the Apple way. */
-function isApplePlatform(): boolean {
-  if (typeof navigator === 'undefined') return false
-  return /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent)
-}
-
-/** What a key is called here. `Mod` is the one that differs: command on Apple
- * platforms, control everywhere else. */
+/** What a key is called on this platform. `Mod` is the one that differs most:
+ * command on Apple platforms, control everywhere else. */
 export function keyLabel(key: string, apple: boolean = isApplePlatform()): string {
   const shared: Record<string, string> = {
     Enter: '↵',
@@ -30,11 +32,15 @@ export function keyLabel(key: string, apple: boolean = isApplePlatform()): strin
     ArrowLeft: '←',
     ArrowRight: '→',
     Backspace: '⌫',
+    Delete: 'Del',
     Tab: '⇥',
     Space: '␣',
+    PageUp: 'PgUp',
+    PageDown: 'PgDn',
   }
   const perPlatform: Record<string, [apple: string, other: string]> = {
     Mod: ['⌘', 'Ctrl'],
+    Ctrl: ['⌃', 'Ctrl'],
     Alt: ['⌥', 'Alt'],
     Shift: ['⇧', 'Shift'],
   }
@@ -45,9 +51,10 @@ export function keyLabel(key: string, apple: boolean = isApplePlatform()): strin
 }
 
 export interface KbdProps extends HTMLAttributes<HTMLElement> {
-  /** Keys of a shortcut, in order: `['Mod', 'K']`. Given this, the component
-   * writes the separators and the platform's own names. */
-  keys?: string[]
+  /** A shortcut in the line's notation - `Mod+K`, `G D`, `?`. Given this, the
+   * component draws each key under this platform's own name. Without it, the
+   * children are the key. */
+  keys?: string
 }
 
 export function Kbd({ keys, className, children, ...props }: KbdProps) {
@@ -56,7 +63,7 @@ export function Kbd({ keys, className, children, ...props }: KbdProps) {
     'px-1 py-0.5 font-mono text-2xs leading-none text-dim',
   )
 
-  if (!keys) {
+  if (keys === undefined) {
     return (
       <kbd className={cn(cap, className)} {...props}>
         {children}
@@ -64,12 +71,24 @@ export function Kbd({ keys, className, children, ...props }: KbdProps) {
     )
   }
 
+  const apple = isApplePlatform()
   return (
-    <span className={cn('inline-flex items-center gap-0.5', className)} {...props}>
-      {keys.map((key) => (
-        <kbd key={key} className={cap}>
-          {keyLabel(key)}
-        </kbd>
+    <span className={cn('inline-flex items-center gap-1', className)} {...props}>
+      {parseKeys(keys, apple).map((stroke, step) => (
+        <Fragment key={step}>
+          {step > 0 && (
+            <span aria-hidden className="text-2xs leading-none text-dim">
+              ›
+            </span>
+          )}
+          <span data-step={step} className="inline-flex items-center gap-0.5">
+            {strokeParts(stroke).map((key) => (
+              <kbd key={key} className={cap}>
+                {keyLabel(key, apple)}
+              </kbd>
+            ))}
+          </span>
+        </Fragment>
       ))}
     </span>
   )
