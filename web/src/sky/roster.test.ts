@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fitView, memberAt, peak, yearDomain, yearTicks, yearX, type Member } from './roster'
+import { fitView, freeFrame, memberAt, peak, WHOLE, yearDomain, yearTicks, yearX, type Member } from './roster'
 import { toMap } from './minimap'
 import type { Sky } from './tiles'
 
@@ -78,6 +78,27 @@ describe('fitView', () => {
     expect(scale).toBeGreaterThan(view.scale)
   })
 
+  it('puts the roster in the middle of the sky the panels leave free', () => {
+    // The left 40% is under panels: the roster's middle must land in the
+    // middle of the rest, 70% of the way across, and fit the narrower width.
+    const one: Member[] = [[1, 0, 0, 1]]
+    const frame = { left: 0.4, right: 1, top: 0, bottom: 1 }
+    const whole = fitView(one, visible, view) as { x: number; y: number; scale: number }
+    const fitted = fitView(one, visible, view, frame) as { x: number; y: number; scale: number }
+    const canvasWidth = (visible.maxX - visible.minX) * view.scale
+    const screenX = (0 - fitted.x) * fitted.scale + canvasWidth / 2
+    expect(screenX / canvasWidth).toBeCloseTo(0.7, 5)
+    expect(fitted.scale).toBeLessThanOrEqual(whole.scale)
+    expect(fitView(one, visible, view, WHOLE)).toEqual(whole)
+  })
+
+  it('moves the roster down when the top is covered, the layout growing upward', () => {
+    const one: Member[] = [[1, 0, 0, 1]]
+    const fitted = fitView(one, visible, view, { left: 0, right: 1, top: 0.5, bottom: 1 }) as { x: number; y: number; scale: number }
+    // The star is below the canvas's middle on screen: the camera looks above it.
+    expect(fitted.y).toBeGreaterThan(0)
+  })
+
   it('frames a roster of one without zooming to infinity', () => {
     const fitted = fitView([[1, 5, 5, 1]], visible, view)
     expect(fitted?.scale).toBeCloseTo(600 / (20 * 1.3))
@@ -107,5 +128,17 @@ describe('memberAt', () => {
   it('is null over empty sky', () => {
     const at = toMap(sky, 200, -80, 80)
     expect(memberAt(members, sky, 200, at, 8)).toBeNull()
+  })
+})
+
+describe('freeFrame', () => {
+  it('takes the panels off the edges they cover', () => {
+    expect(freeFrame(1200, 700, { left: 300, right: 300, top: 70, bottom: 210 })).toEqual({ left: 0.25, right: 0.75, top: 0.1, bottom: 0.7 })
+  })
+
+  it('gives up on a frame too narrow or too short to show anything and uses the whole canvas', () => {
+    expect(freeFrame(400, 700, { left: 300, right: 0, top: 70, bottom: 0 })).toEqual(WHOLE)
+    expect(freeFrame(1200, 700, { left: 0, right: 0, top: 300, bottom: 300 })).toEqual(WHOLE)
+    expect(freeFrame(0, 0, { left: 0, right: 0, top: 0, bottom: 0 })).toEqual(WHOLE)
   })
 })

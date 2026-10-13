@@ -39,10 +39,14 @@ export interface Me {
    * Whether the address has been confirmed.
    *
    * Nothing is withheld while it is false -- the account works -- except a
-   * password reset, which needs a deliverable address to send to. The panel
-   * says so there rather than nagging about it everywhere.
+   * password reset and the weekly letter, which need a deliverable address to
+   * send to. The interface says so there rather than nagging everywhere.
    */
   email_confirmed: boolean
+  /** The year of birth, if given: what the stars of one's youth count from. */
+  born: number | null
+  /** The weekly letter, if asked for, and the language it is written in. */
+  letter: { language: string } | null
 }
 
 /** What may be saved back. Deliberately without a mode. */
@@ -50,6 +54,8 @@ export interface ProfileUpdate {
   halo_shape?: string
   halo_colour?: string
   camera?: Camera
+  /** A year sets it, `null` forgets it, leaving it out leaves it alone. */
+  born?: number | null
 }
 
 /**

@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { StarCard } from '@/sky/StarCard'
 import { Search } from '@/sky/Search'
 import { readLocation, readPage, writeLocation, type Dossier as DossierTarget, type Page } from '@/sky/location'
-import { fitView, type Member } from '@/sky/roster'
+import { fitView, freeFrame, WHOLE, type Frame, type Member, type Placed } from '@/sky/roster'
 import { HaloPicker, HALO_COLOURS, HALO_DEFAULT } from '@/sky/HaloPicker'
 import { HALO_SHAPES, type HaloShape, type Instruments as InstrumentSettings } from '@/sky/renderer'
 import { Player } from '@/sky/Player'
@@ -24,11 +24,12 @@ import { useRegion } from '@/sky/region'
 import { fetchArtist, fetchRadio, fetchSignal, fetchStars, type Hit, type Nebula, type Station } from '@/api'
 import { AccountPanel } from '@/AccountPanel'
 import { ListeningPanel } from '@/ListeningPanel'
-import { fetchHeardStars, fetchListening, type Listening as Scrobbles } from '@/scrobbling'
+import { fetchHeardStars, fetchListening, type Listening as Scrobbles, type PlacedStar, type Youth } from '@/scrobbling'
 import { fetchMe, saveProfile, worthSaving, type Me } from '@/account'
 import { Charter } from '@/Charter'
 import { Embed } from '@/Embed'
-import { ConfirmPage, ResetPage } from '@/LetterPage'
+import { ConfirmPage, ResetPage, StopLetterPage } from '@/LetterPage'
+import { YourSky } from '@/YourSky'
 import { count } from '@/metrics'
 import { useLanguage } from '@/lib/language'
 import type { Place, Star } from '@/sky/renderer'
@@ -55,8 +56,8 @@ const Dossier = lazy(() => import('@/sky/Dossier').then(module => ({ default: mo
  * as it always was. That is the whole of the public preview — there is no
  * anonymous mode to build, because nothing here was ever behind the account.
  *
- * Three addresses are not the map: `/charter`, and the two a link in a letter
- * lands on. They render instead of the sky rather than over it, so a person
+ * Four addresses are not the map: `/charter`, and the three a link in a
+ * letter lands on. They render instead of the sky rather than over it, so a person
  * arriving from their mail client is not made to wait for a WebGL canvas they
  * did not come for.
  */
@@ -499,20 +500,67 @@ export function App() {
     }
   }, [signedIn])
 
+  // The part of the sky the panels leave free, measured when it is needed:
+  // right of the left column, below the header, above the dock (the compass
+  // and the player, which sit along the bottom), and clear on the right of the
+  // panel that names what is marked -- it appears with the marks, and nothing
+  // else stays in the right column once the card is closed for them.
+  const mainRef = useRef<HTMLElement>(null)
+  const leftRef = useRef<HTMLDivElement>(null)
+  const dockRef = useRef<HTMLDivElement>(null)
+  const headerRef = useRef<HTMLElement>(null)
+  const frame = useCallback((): Frame => {
+    const main = mainRef.current?.getBoundingClientRect()
+    if (!main) return WHOLE
+    const left = leftRef.current ? leftRef.current.getBoundingClientRect().right - main.left + EDGE : 0
+    const top = headerRef.current ? headerRef.current.getBoundingClientRect().bottom - main.top + EDGE : 0
+    const bottom = dockRef.current ? main.bottom - dockRef.current.getBoundingClientRect().top + EDGE : 0
+    return freeFrame(main.width, main.height, { left, right: GATHERING_PANEL + 2 * EDGE, top, bottom })
+  }, [])
+
+  // Rings a set of stars on the sky and frames them in the free part of it.
+  const gather = useCallback(
+    (stars: readonly Placed[], name: string, back: DossierTarget | null) => {
+      if (!state) return
+      const view = fitView(stars, state.visible, state.view, frame())
+      if (!view) return
+      setGathering({ back, name, points: stars.map(([, x, y]) => ({ x, y })) })
+      setPicked(null)
+      setTarget(view)
+    },
+    [state, frame]
+  )
+
   // Rings every star the listening has named, and frames them.
   const showHeard = useCallback(() => {
-    if (!state) return
     count('heard_shown')
     fetchHeardStars()
-      .then(stars => {
-        const view = fitView(stars, state.visible, state.view)
-        if (!view) return
-        setGathering({ back: null, name: t('listening.heardName'), points: stars.map(([, x, y]) => ({ x, y })) })
-        setPicked(null)
-        setTarget(view)
-      })
+      .then(stars => gather(stars, t('listening.heardName'), null))
       .catch(() => undefined)
-  }, [state, t])
+  }, [gather, t])
+
+  // "Your sky": the home, the youth, a Last.fm file, the letter.
+  const [yourSky, setYourSky] = useState(false)
+
+  const flyHome = useCallback(
+    (star: PlacedStar) => {
+      setYourSky(false)
+      goTo({ artistId: star.id, x: star.x, y: star.y })
+    },
+    [goTo]
+  )
+
+  const showYouth = useCallback(
+    (youth: Youth) => {
+      setYourSky(false)
+      gather(
+        youth.stars.map(star => [star.id, star.x, star.y] as const),
+        t('yourSky.youth.ringName', { from: youth.from, to: youth.to }),
+        null
+      )
+    },
+    [gather, t]
+  )
 
   // One count for the visit, not one per render: a mechanic opened twice in a
   // session is two uses, but a component re-rendering is not.
@@ -604,9 +652,12 @@ export function App() {
   if (page?.kind === 'reset') {
     return <ResetPage token={page.token} onClose={leavePage} />
   }
+  if (page?.kind === 'stop') {
+    return <StopLetterPage token={page.token} onClose={leavePage} />
+  }
 
   return (
-    <main className="relative h-full overflow-hidden">
+    <main ref={mainRef} className="relative h-full overflow-hidden">
       <Sky
         onState={onState}
         onPick={onPick}
@@ -621,7 +672,7 @@ export function App() {
         onOverview={onOverview}
       />
 
-      <header className="pointer-events-none absolute left-6 top-5 flex items-center gap-3">
+      <header ref={headerRef} className="pointer-events-none absolute left-6 top-5 flex items-center gap-3">
         <img className="size-9" src="/mark.svg" alt="" />
         <div>
           <h1 className="m-0 text-lg font-semibold tracking-wide text-text">lyrid</h1>
@@ -693,7 +744,7 @@ export function App() {
             stacking them would leave the card a sliver; one above the other
             where the width is not there. The row hands pointer events back
             to its children only, so the gap above the shorter one is sky. */}
-        <div className="pointer-events-none! flex shrink-0 flex-col items-end gap-2 lg:flex-row lg:items-end [&>*]:pointer-events-auto">
+        <div ref={dockRef} className="pointer-events-none! flex shrink-0 flex-col items-end gap-2 lg:flex-row lg:items-end [&>*]:pointer-events-auto">
           {overview && state && (
             <Compass
               className="hidden md:flex"
@@ -722,6 +773,19 @@ export function App() {
         </div>
       </div>
 
+      {me && scrobbles && (
+        <YourSky
+          open={yourSky}
+          onOpenChange={setYourSky}
+          me={me}
+          listening={scrobbles}
+          onMe={setMe}
+          onListening={setScrobbles}
+          onHome={flyHome}
+          onShowYouth={showYouth}
+        />
+      )}
+
       {comparing && (
         <Suspense fallback={null}>
           <Compare
@@ -749,13 +813,8 @@ export function App() {
             }}
             onOpenDossier={openDossier}
             onShowOnSky={(members: Member[], name: string) => {
-              if (!state) return
-              const view = fitView(members, state.visible, state.view)
-              if (!view) return
-              setGathering({ back: dossier, name, points: members.map(([, x, y]) => ({ x, y })) })
               setDossier(null)
-              setPicked(null)
-              setTarget(view)
+              gather(members, name, dossier)
             }}
           />
         </Suspense>
@@ -784,7 +843,10 @@ export function App() {
         // account (measured, not guessed). In one column the instruments sit
         // at the top by `mb-auto`, the empty room goes to the list, and when
         // the time machine opens it pushes rather than overlaps.
-        <div className="pointer-events-none absolute bottom-4 left-6 top-4 flex md:top-20 flex-col items-start justify-end gap-2 [&>*]:pointer-events-auto">
+        <div
+          ref={leftRef}
+          className="pointer-events-none absolute bottom-4 left-6 top-4 flex md:top-20 flex-col items-start justify-end gap-2 [&>*]:pointer-events-auto"
+        >
           {/* Not on a phone's width: there the card already covers the stack,
               and two more panels would bury the sky. A narrow layout of its
               own is a stage of its own. The second piece that yields, after
@@ -800,7 +862,17 @@ export function App() {
               because a flex child will not shrink below its content otherwise. */}
           <NearbyStars className="min-h-0" visible={state.visible} onPick={goTo} />
           <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} onCharter={openCharter} />
-          {me && <ListeningPanel className="shrink-0" listening={scrobbles} onChange={setScrobbles} onShowOnSky={showHeard} onOpen={openById} />}
+          {me && (
+            <ListeningPanel
+              className="shrink-0"
+              listening={scrobbles}
+              onChange={setScrobbles}
+              onShowOnSky={showHeard}
+              onOpen={openById}
+              onHome={flyHome}
+              onYourSky={() => setYourSky(true)}
+            />
+          )}
           <HaloPicker shape={shape} colour={colour} onShape={chooseShape} onColour={chooseColour} />
           <Share capture={captureRef} artistId={picked?.artistId ?? null} />
           <div className="flex items-center gap-2">
@@ -818,6 +890,12 @@ export function App() {
     </main>
   )
 }
+
+/** Room left between a panel and the stars framed beside it, in pixels. */
+const EDGE = 24
+
+/** The width of the panel that names what the sky is marking: `w-64`. */
+const GATHERING_PANEL = 256
 
 /**
  * Stations in a row that may fail before a radio gives up on YouTube. About a

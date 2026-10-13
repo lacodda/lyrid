@@ -28,7 +28,8 @@
  * written the way Wikidata writes it). It opens over the sky rather than
  * instead of it, so the fragment still says where the camera is behind it.
  *
- * Three paths are not the map at all — `/charter`, `/confirm` and `/reset`.
+ * Four paths are not the map at all — `/charter`, `/confirm`, `/reset` and
+ * `/letter/stop`.
  * They are pages, and `readPage` tells them apart from a star. Two of them
  * carry a token in the query string rather than in the fragment, because a
  * fragment never reaches the server and these are links printed in a letter:
@@ -119,6 +120,7 @@ export type Page =
   | { kind: 'charter' }
   | { kind: 'confirm'; token: string }
   | { kind: 'reset'; token: string }
+  | { kind: 'stop'; token: string }
   | { kind: 'embed'; artistId: number }
   | null
 
@@ -142,9 +144,11 @@ export function readPage(pathname: string, search: string): Page {
     return artistId === null ? null : { kind: 'embed', artistId }
   }
 
-  if (path !== '/confirm' && path !== '/reset') return null
   const token = new URLSearchParams(search).get('token') ?? ''
-  return { kind: path === '/confirm' ? 'confirm' : 'reset', token }
+  if (path === '/confirm') return { kind: 'confirm', token }
+  if (path === '/reset') return { kind: 'reset', token }
+  if (path === '/letter/stop') return { kind: 'stop', token }
+  return null
 }
 
 /** `/star/54` -> 54; anything else -> null. */

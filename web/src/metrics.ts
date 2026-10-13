@@ -29,6 +29,10 @@ export type Mechanic =
   | 'dossier_opened'
   | 'listening_linked'
   | 'heard_shown'
+  | 'home_flown'
+  | 'youth_shown'
+  | 'lastfm_brought'
+  | 'letter_asked'
 
 /**
  * Counts one use.

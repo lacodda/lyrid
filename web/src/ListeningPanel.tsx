@@ -17,7 +17,18 @@ import { Dialog, DialogActions, DialogBody, DialogClose, DialogDescription, Dial
 import { Field } from '@/components/ui/field'
 import { PasswordField } from '@/components/ui/password-field'
 import { useLanguage } from '@/lib/language'
-import { ago, linkListenBrainz, readNow, TOKEN_PAGE, unlinkListenBrainz, type Listening, type ReadNow } from '@/scrobbling'
+import {
+  ago,
+  historyRead,
+  linkListenBrainz,
+  readNow,
+  TOKEN_PAGE,
+  unlinkListenBrainz,
+  type ListenBrainzLink,
+  type Listening,
+  type PlacedStar,
+  type ReadNow,
+} from '@/scrobbling'
 
 /**
  * Real listening, brought to the sky: linking ListenBrainz, and what the
@@ -33,7 +44,9 @@ import { ago, linkListenBrainz, readNow, TOKEN_PAGE, unlinkListenBrainz, type Li
  * to everything else in it; a glass panel here, with its padding, took that
  * list down to nothing at 1200x750 -- measured, not guessed. The form that
  * links an account is a dialog for the same reason: it is read once, and it
- * has no business occupying the corner for good.
+ * has no business occupying the corner for good -- and so is "your sky", the
+ * home, the youth, the Last.fm file and the letter, of which the corner keeps
+ * only the home.
  */
 
 interface Props {
@@ -44,13 +57,29 @@ interface Props {
   onShowOnSky: () => void
   /** Opens a star the listening named. */
   onOpen: (id: number) => void
+  /** Flies to the home star and opens it. */
+  onHome: (star: PlacedStar) => void
+  /** Opens "your sky": the home, the youth, a Last.fm file, the letter. */
+  onYourSky: () => void
   className?: string
 }
 
-export function ListeningPanel({ listening, onChange, onShowOnSky, onOpen, className }: Props) {
+export function ListeningPanel({ listening, onChange, onShowOnSky, onOpen, onHome, onYourSky, className }: Props) {
   if (!listening) return null
-  if (!listening.link) return <Unlinked className={className} listening={listening} onChange={onChange} onShowOnSky={onShowOnSky} />
-  return <Linked className={className} listening={listening} onChange={onChange} onShowOnSky={onShowOnSky} onOpen={onOpen} />
+  if (!listening.link) {
+    return <Unlinked className={className} listening={listening} onChange={onChange} onShowOnSky={onShowOnSky} onHome={onHome} onYourSky={onYourSky} />
+  }
+  return (
+    <Linked
+      className={className}
+      listening={listening}
+      onChange={onChange}
+      onShowOnSky={onShowOnSky}
+      onOpen={onOpen}
+      onHome={onHome}
+      onYourSky={onYourSky}
+    />
+  )
 }
 
 const QUIET = 'cursor-pointer text-2xs text-faint underline-offset-2 hover:text-dim hover:underline disabled:cursor-default disabled:opacity-60'
@@ -75,6 +104,44 @@ function Tally({ listening }: { listening: Listening }) {
   )
 }
 
+/**
+ * Where the listening is at home, by name: one press flies there. The one
+ * line of "your sky" the corner keeps, because it is the one that changes as
+ * the listening does.
+ */
+function HomeLine({ home, onHome }: { home: PlacedStar | null; onHome: (star: PlacedStar) => void }) {
+  const { t } = useTranslation()
+  if (!home) return null
+  return (
+    <p className="m-0 truncate text-2xs text-dim">
+      {t('listening.home')}{' '}
+      <button
+        type="button"
+        className="cursor-pointer text-text underline-offset-2 hover:underline"
+        onClick={() => {
+          count('home_flown')
+          onHome(home)
+        }}
+      >
+        {home.name}
+      </button>
+    </p>
+  )
+}
+
+/**
+ * "Reading the history: up to 6 December 2013" while the history is read.
+ * The day is there for the grammar as much as the precision: a month alone
+ * comes out of `Intl` in the nominative, and "до декабрь" is not Russian.
+ */
+function historyLine(link: ListenBrainzLink, language: string, t: (key: string, values?: Record<string, unknown>) => string): string {
+  const through = link.history?.through
+  const share = historyRead(link)
+  if (!through || share === null) return t('listening.historyStarting', { name: link.name })
+  const day = new Intl.DateTimeFormat(language, { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(through))
+  return t('listening.history', { name: link.name, through: day, percent: Math.floor(share * 100) })
+}
+
 /** "5 minutes ago" in the reader's language, or `justNow` under a minute. */
 function since(then: Date, now: Date, language: string, justNow: string): string {
   const [value, unit] = ago(then, now)
@@ -93,11 +160,15 @@ function Unlinked({
   listening,
   onChange,
   onShowOnSky,
+  onHome,
+  onYourSky,
   className,
 }: {
   listening: Listening
   onChange: (listening: Listening) => void
   onShowOnSky: () => void
+  onHome: (star: PlacedStar) => void
+  onYourSky: () => void
   className?: string
 }) {
   const { t } = useTranslation()
@@ -105,6 +176,7 @@ function Unlinked({
   return (
     <div className={cn('flex max-w-64 flex-col items-start gap-1', className)}>
       {listening.listens > 0 && <Tally listening={listening} />}
+      <HomeLine home={listening.home} onHome={onHome} />
       <div className="flex flex-wrap items-center gap-1.5">
         <Button size="sm" onClick={() => setOpen(true)}>
           {t('listening.link')}
@@ -114,6 +186,9 @@ function Unlinked({
             {t('listening.showOnSky')}
           </Button>
         )}
+        <Button size="sm" onClick={onYourSky}>
+          {t('listening.yourSky')}
+        </Button>
       </div>
       <p className="m-0 text-2xs text-faint">{t('listening.pitch')}</p>
       <LinkDialog
@@ -212,12 +287,16 @@ function Linked({
   onChange,
   onShowOnSky,
   onOpen,
+  onHome,
+  onYourSky,
   className,
 }: {
   listening: Listening
   onChange: (listening: Listening) => void
   onShowOnSky: () => void
   onOpen: (id: number) => void
+  onHome: (star: PlacedStar) => void
+  onYourSky: () => void
   className?: string
 }) {
   const { t } = useTranslation()
@@ -238,11 +317,17 @@ function Linked({
   const link = listening.link
   if (!link) return null
 
+  // The history is read by the background as fast as ListenBrainz allows,
+  // and a button would only be a second reader of it: while it lasts, the
+  // panel says how far it has got instead of offering to read.
+  const readingHistory = link.history !== null
   const status = link.failure
     ? t(`listening.failure.${link.failure}`, { name: link.name })
-    : link.read_at
-      ? t('listening.readAt', { name: link.name, when: since(new Date(link.read_at), now, resolved, t('listening.justNow')) })
-      : t('listening.notReadYet', { name: link.name })
+    : readingHistory
+      ? historyLine(link, resolved, t)
+      : link.read_at
+        ? t('listening.readAt', { name: link.name, when: since(new Date(link.read_at), now, resolved, t('listening.justNow')) })
+        : t('listening.notReadYet', { name: link.name })
 
   const read = () => {
     setBusy('read')
@@ -293,7 +378,9 @@ function Linked({
 
       <p className={cn('m-0 text-2xs', link.failure ? 'text-warn' : 'text-faint')}>{status}</p>
 
-      {listening.listens === 0 && !link.failure && <p className="m-0 text-2xs text-dim">{t('listening.fromNowOn')}</p>}
+      {listening.listens === 0 && !link.failure && !readingHistory && <p className="m-0 text-2xs text-dim">{t('listening.fromNowOn')}</p>}
+
+      <HomeLine home={listening.home} onHome={onHome} />
 
       {listening.recent.length > 0 && (
         // The latest openings, by name: the listening's news, and a way to
@@ -313,14 +400,19 @@ function Linked({
       )}
 
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-        <Button size="sm" onClick={read} disabled={busy !== null}>
-          {busy === 'read' ? t('account.working') : t('listening.readNow')}
-        </Button>
+        {!readingHistory && (
+          <Button size="sm" onClick={read} disabled={busy !== null}>
+            {busy === 'read' ? t('account.working') : t('listening.readNow')}
+          </Button>
+        )}
         {listening.stars > 0 && (
           <Button size="sm" onClick={onShowOnSky}>
             {t('listening.showOnSky')}
           </Button>
         )}
+        <Button size="sm" onClick={onYourSky}>
+          {t('listening.yourSky')}
+        </Button>
         <button type="button" className={QUIET} onClick={() => setAsking(true)} disabled={busy !== null}>
           {busy === 'unlink' ? t('account.working') : t('listening.unlink')}
         </button>

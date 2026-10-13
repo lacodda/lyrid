@@ -164,6 +164,13 @@
       "doneTitle": "Password changed",
       "done": "Your password is changed, and every browser signed into this account has been signed out. Sign in again with the new one.",
       "failed": "that link could not be used"
+    },
+    "stop": {
+      "title": "Stop the weekly letter",
+      "body": "One press and the letter stops. Nothing else about your account changes.",
+      "submit": "stop the letter",
+      "done": "The weekly letter is stopped. You can ask for it again from your sky whenever you like.",
+      "failed": "the letter could not be stopped"
     }
   },
   "charter": {
@@ -177,13 +184,19 @@
     "withAccount": {
       "heading": "If you do",
       "address": "Your address.",
-      "addressBody": "To sign you in, and to send you a way back if you lose your password. Two letters, ever: one to confirm the address, one to reset a password. No announcements, no newsletter.",
+      "addressBody": "To sign you in, and to send you a way back if you lose your password. The only other mail is the weekly letter, and only if you ask for it. No announcements.",
       "place": "Where you left the sky, and how you like your marked star drawn.",
       "placeBody": "The reason an account is worth having.",
       "sessions": "Your open sessions.",
       "sessionsBody": "A random token per browser, so signing out actually ends the session rather than waiting for it to expire.",
-      "listening": "If you link ListenBrainz: its account name, and every listen from then on.",
-      "listeningBody": "For each listen, when it was, which artists it was by (their MusicBrainz ids), how long it ran and the light it gathered — no track or album names. Your listens are already public on ListenBrainz; this copy exists only so your own sky can show what you have heard. The token you paste to link is checked once and never kept. Unlinking stops the reading; what was gathered stays until you delete the account."
+      "listening": "If you link ListenBrainz: its account name, and every listen it holds.",
+      "listeningBody": "For each listen, when it was, which artists it was by (their MusicBrainz ids), how long it ran and the light it gathered — none for listens from before the link — and no track or album names. Your listens are already public on ListenBrainz; this copy exists only so your own sky can show what you have heard. The token you paste to link is checked once and never kept. Unlinking stops the reading; what was gathered stays until you delete the account.",
+      "lastfm": "If you bring a Last.fm file: the listens it names.",
+      "lastfmBody": "When each was, and the artist if lyrid can place them; the track's name only to tell one scrobble from another, folded into an id and not kept. The file itself is read and dropped. You can forget everything a file brought at any time.",
+      "born": "If you give it: the year you were born.",
+      "bornBody": "Only the year. It becomes the six years you were fifteen to twenty, and the sky is asked about those years, not about you.",
+      "letter": "If you ask for the weekly letter: that you asked, and in which language.",
+      "letterBody": "And a random key in the link that stops it without signing in. Stopping it removes all of this."
     },
     "counted": {
       "heading": "What is counted, and what is not",
@@ -202,7 +215,7 @@
       "delete": "delete my account",
       "deleteFailed": "the account could not be deleted",
       "confirmTitle": "Delete this account?",
-      "confirmBody": "This removes the account, the profile, every session and all your listening, right now. It cannot be undone and there is no copy to restore from — download your data first if you want it.",
+      "confirmBody": "This removes the account, the profile, every session, all your listening and the weekly letter, right now. It cannot be undone and there is no copy to restore from — download your data first if you want it.",
       "confirmAction": "delete it all",
       "cancel": "keep it"
     }
@@ -331,7 +344,7 @@
     "link": "link ListenBrainz",
     "pitch": "What you listen to anywhere opens its stars here and gathers light.",
     "linkHeading": "Link ListenBrainz",
-    "linkBody": "Whatever you play that scrobbles to ListenBrainz opens its stars here and gathers light — new music far more than old favourites. Reading starts from the moment you link.",
+    "linkBody": "Whatever you play that scrobbles to ListenBrainz opens its stars here and gathers light — new music far more than old favourites. Your whole history is read first, so the sky lights up with everything you have heard; light is gathered from the moment you link.",
     "tokenWhere": "your user token is on the ListenBrainz settings page",
     "token": "ListenBrainz user token",
     "showToken": "show token",
@@ -364,6 +377,57 @@
     "unlinkBody": "lyrid stops reading your listening. What it has already opened and gathered stays with your account, and goes only when the account does.",
     "keepLinked": "keep reading",
     "unlinkAction": "unlink",
-    "cancel": "not now"
+    "cancel": "not now",
+    "home": "home:",
+    "history": "reading the history of {{name}}: up to {{through}} ({{percent}}%)",
+    "historyStarting": "reading the history of {{name}} from its first listen",
+    "yourSky": "your sky"
+  },
+  "yourSky": {
+    "heading": "Your life on the sky",
+    "description": "Where your listening is at home, the stars of your youth, a Last.fm history, and a letter once a week.",
+    "home": {
+      "heading": "Home star",
+      "is": "{{name}} — the star your listening gathers around.",
+      "how": "Of the stars you have heard, the one nearest to all the rest of your listening, each counted as often as you heard it. It moves as your listening does.",
+      "fly": "fly home",
+      "none": "Once something you have heard is on the sky, its home appears here."
+    },
+    "youth": {
+      "heading": "Stars of your youth",
+      "how": "The music that came out while you were fifteen to twenty: artists with a record released in those years, and still new then.",
+      "born": "Year you were born",
+      "notAYear": "a year, four digits",
+      "save": "save",
+      "forget": "forget the year",
+      "ahead": "Your youth is still ahead of the sky: come back the year you turn fifteen.",
+      "empty": "The canon has no stars for {{from}}–{{to}}.",
+      "years": "{{from}}–{{to}}:",
+      "more": "and {{number}} more",
+      "heard": "You have heard {{number}} of {{of}}.",
+      "show": "show on the sky",
+      "ringName": "Youth {{from}}–{{to}}",
+      "heard_other": "You have heard {{number}} of {{of}}."
+    },
+    "lastfm": {
+      "heading": "Last.fm history",
+      "how": "Export your scrobbles as CSV and bring the file here: it opens the stars it names and pays no light. The file itself is not kept.",
+      "tool": "an export tool",
+      "choose": "choose a file",
+      "reading": "reading the file…",
+      "forget": "forget the {{number}} listen from Last.fm",
+      "forget_other": "forget the {{number}} listens from Last.fm",
+      "brought": "{{scrobbles}} scrobbles read: {{listens}} new listens, {{named}} of them placed, {{opened}} stars opened.",
+      "unreadable": "{{number}} row was not a scrobble.",
+      "unreadable_other": "{{number}} rows were not scrobbles."
+    },
+    "letter": {
+      "heading": "Weekly letter",
+      "ask": "a letter each Monday: your week in the sky",
+      "how": "What your week of listening opened, what you heard most, and where your home star stands. A week without listening sends nothing; every letter carries a link that stops it.",
+      "confirmFirst": "Confirm your address first: the letter goes only to an address you have shown is yours.",
+      "otherLanguage": "The letter is written in the language you were reading lyrid in when you asked for it.",
+      "moveHere": "write it in this language"
+    }
   }
 }

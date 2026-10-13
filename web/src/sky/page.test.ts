@@ -10,6 +10,7 @@ describe('telling a page apart from the map', () => {
   it('reads a token out of a link from a letter', () => {
     expect(readPage('/confirm', '?token=abc123')).toEqual({ kind: 'confirm', token: 'abc123' })
     expect(readPage('/reset', '?token=abc123')).toEqual({ kind: 'reset', token: 'abc123' })
+    expect(readPage('/letter/stop', '?token=abc123')).toEqual({ kind: 'stop', token: 'abc123' })
   })
 
   it('tells a missing token apart from a wrong one', () => {

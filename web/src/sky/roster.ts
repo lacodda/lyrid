@@ -78,16 +78,63 @@ export type Member = [number, number, number, number]
 export type Placed = readonly [number, number, number, ...number[]]
 
 /**
+ * The part of the canvas the panels leave free, as fractions of its width
+ * (`left`, `right`) and height (`top`, `bottom`), each measured from the
+ * canvas's left or top edge.
+ */
+export interface Frame {
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+/** The whole canvas. */
+export const WHOLE: Frame = { left: 0, right: 1, top: 0, bottom: 1 }
+
+/** How far in from each edge of the canvas the panels reach, in pixels. */
+export interface Insets {
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+/**
+ * The free part of a canvas `width` by `height` pixels, the panels reaching
+ * `insets` in from its edges.
+ *
+ * The whole canvas when that would leave less than a third of either side: on
+ * a narrow or short screen the panels cover the sky, and a frame squeezed into
+ * a sliver beside them helps nobody -- the panels are the thing to close there.
+ */
+export function freeFrame(width: number, height: number, insets: Insets): Frame {
+  if (width <= 0 || height <= 0) return WHOLE
+  const frame = {
+    left: insets.left / width,
+    right: 1 - insets.right / width,
+    top: insets.top / height,
+    bottom: 1 - insets.bottom / height,
+  }
+  return frame.right - frame.left < 1 / 3 || frame.bottom - frame.top < 1 / 3 ? WHOLE : frame
+}
+
+/**
  * The view that shows a roster on the big sky: centred on its middle and wide
- * enough for most of it.
+ * enough for most of it, inside the part of the canvas the panels leave free.
  *
  * The outer tenth on each side is left out of the frame. A roster almost
  * always has a few members far from the rest — a soul label's one techno act —
  * and framing them would zoom the sky out until the cluster is a dot again.
  * The scale is worked out the way the compass works out the whole sky's:
  * `visible` and `view` together say how many world units the canvas is wide.
+ *
+ * The frame matters because the corners are not sky. Measured on the stand on
+ * 2026-10-10 at 1200x675: of three heard stars framed on the whole canvas, one
+ * landed under the list of nearby stars and one under the minimap, and the
+ * person saw one ring of three.
  */
-export function fitView(members: readonly Placed[], visible: Bounds, view: View): View | null {
+export function fitView(members: readonly Placed[], visible: Bounds, view: View, frame: Frame = WHOLE): View | null {
   if (members.length === 0) return null
   const xs = members.map(member => member[1]).sort((a, b) => a - b)
   const ys = members.map(member => member[2]).sort((a, b) => a - b)
@@ -99,10 +146,16 @@ export function fitView(members: readonly Placed[], visible: Bounds, view: View)
   // A roster of one, or of stars in one spot, still needs a frame around it.
   const width = Math.max(right - left, MIN_FRAME) * MARGIN
   const height = Math.max(top - bottom, MIN_FRAME) * MARGIN
+  const scale = Math.min((canvasWidth * (frame.right - frame.left)) / width, (canvasHeight * (frame.bottom - frame.top)) / height)
+  // The camera is the canvas's middle. The roster's middle belongs at the
+  // free frame's middle instead, which is this far from it in device pixels
+  // -- `y` grows upward in the layout and downward on the screen.
+  const offsetX = canvasWidth * ((frame.left + frame.right) / 2 - 0.5)
+  const offsetY = canvasHeight * (0.5 - (frame.top + frame.bottom) / 2)
   return {
-    x: (left + right) / 2,
-    y: (bottom + top) / 2,
-    scale: Math.min(canvasWidth / width, canvasHeight / height),
+    x: (left + right) / 2 - offsetX / scale,
+    y: (bottom + top) / 2 - offsetY / scale,
+    scale,
   }
 }
 

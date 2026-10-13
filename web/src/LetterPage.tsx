@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { confirmEmail, resetPassword } from '@/account'
+import { stopLetterByLink } from '@/scrobbling'
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/field'
 import { PasswordField } from '@/components/ui/password-field'
 import { Spinner } from '@/components/ui/spinner'
 
 /**
- * The two pages a link in a letter lands on.
+ * The pages a link in a letter lands on.
  *
  * They share a file because they are the same page with a different verb: a
  * token from the address, one request, and one sentence saying what happened.
@@ -125,6 +126,48 @@ export function ResetPage({ token, onClose }: { token: string; onClose: () => vo
         </Button>
       </form>
       <Button onClick={onClose}>{t('letter.toTheSky')}</Button>
+    </Letter>
+  )
+}
+
+/**
+ * The page the link at the bottom of a weekly letter lands on.
+ *
+ * One press rather than none. Mail scanners open the links in a letter before
+ * the person does, and a stop that happened on arrival would be done by a
+ * corporate filter on the morning the letter arrived. The mail client's own
+ * button needs no page at all: it posts to the same address from the
+ * letter's headers.
+ */
+export function StopLetterPage({ token, onClose }: { token: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  const [outcome, setOutcome] = useState<Outcome | null>(token ? null : { state: 'failed', message: t('letter.noToken') })
+
+  const stop = () => {
+    setOutcome({ state: 'working' })
+    stopLetterByLink(token).then(
+      () => setOutcome({ state: 'done', message: t('letter.stop.done') }),
+      (failure: unknown) => setOutcome({ state: 'failed', message: failure instanceof Error ? failure.message : t('letter.stop.failed') })
+    )
+  }
+
+  return (
+    <Letter title={t('letter.stop.title')}>
+      {outcome?.state === 'done' || outcome?.state === 'failed' ? (
+        <p role={outcome.state === 'failed' ? 'alert' : undefined} className={outcome.state === 'failed' ? 'text-bad' : undefined}>
+          {outcome.message}
+        </p>
+      ) : (
+        <p>{t('letter.stop.body')}</p>
+      )}
+      <div className="not-prose flex flex-wrap gap-2">
+        {outcome?.state !== 'done' && outcome?.state !== 'failed' && (
+          <Button variant="primary" onClick={stop} disabled={outcome?.state === 'working'}>
+            {outcome?.state === 'working' ? t('account.working') : t('letter.stop.submit')}
+          </Button>
+        )}
+        <Button onClick={onClose}>{t('letter.toTheSky')}</Button>
+      </div>
     </Letter>
   )
 }

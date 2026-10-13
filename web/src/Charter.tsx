@@ -67,6 +67,15 @@ export function Charter({ me, onSignedOut, onClose }: Props) {
           <li>
             <strong>{t('charter.withAccount.listening')}</strong> {t('charter.withAccount.listeningBody')}
           </li>
+          <li>
+            <strong>{t('charter.withAccount.lastfm')}</strong> {t('charter.withAccount.lastfmBody')}
+          </li>
+          <li>
+            <strong>{t('charter.withAccount.born')}</strong> {t('charter.withAccount.bornBody')}
+          </li>
+          <li>
+            <strong>{t('charter.withAccount.letter')}</strong> {t('charter.withAccount.letterBody')}
+          </li>
         </ul>
 
         <h2>{t('charter.counted.heading')}</h2>
