@@ -118,6 +118,7 @@ export function readRoute(pathname: string): number[] | null {
 /** A page that is not the map. */
 export type Page =
   | { kind: 'charter' }
+  | { kind: 'admin' }
   | { kind: 'confirm'; token: string }
   | { kind: 'reset'; token: string }
   | { kind: 'stop'; token: string }
@@ -135,6 +136,9 @@ export type Page =
 export function readPage(pathname: string, search: string): Page {
   const path = pathname.replace(/\/$/, '')
   if (path === '/charter') return { kind: 'charter' }
+  // The stand's own state. Anyone may open the address; only an admin is
+  // shown anything, and the server is what decides that.
+  if (path === '/admin') return { kind: 'admin' }
 
   // An embed is a star seen through someone else's page. It reuses the star
   // reader so `/embed/star/54` and `/star/54` cannot disagree about what a

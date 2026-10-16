@@ -7,6 +7,12 @@ describe('telling a page apart from the map', () => {
     expect(readPage('/charter', '')).toEqual({ kind: 'charter' })
   })
 
+  it('reads the admin page', () => {
+    expect(readPage('/admin', '')).toEqual({ kind: 'admin' })
+    expect(readPage('/admin/', '')).toEqual({ kind: 'admin' })
+    expect(readPage('/administrator', '')).toBeNull()
+  })
+
   it('reads a token out of a link from a letter', () => {
     expect(readPage('/confirm', '?token=abc123')).toEqual({ kind: 'confirm', token: 'abc123' })
     expect(readPage('/reset', '?token=abc123')).toEqual({ kind: 'reset', token: 'abc123' })

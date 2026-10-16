@@ -33,6 +33,7 @@ export type Mechanic =
   | 'youth_shown'
   | 'lastfm_brought'
   | 'letter_asked'
+  | 'changes_opened'
 
 /**
  * Counts one use.

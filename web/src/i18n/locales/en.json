@@ -205,7 +205,7 @@
     },
     "whose": {
       "heading": "Whose sky is it",
-      "body": "The map itself is built from open data — MusicBrainz, ListenBrainz, Discogs, Wikidata and Wikipedia — and belongs to nobody. Your account holds no part of it."
+      "body": "The map itself is built from open data — MusicBrainz, ListenBrainz, Discogs, Wikidata and Wikipedia — and belongs to nobody. Your account holds no part of it. What rises in it each week is counted from everyone’s listening on ListenBrainz, from the dump ListenBrainz publishes every day — not from the listening lyrid keeps for your own sky, which serves nothing else."
     },
     "controls": {
       "heading": "Your data, in your hands",
@@ -428,6 +428,154 @@
       "confirmFirst": "Confirm your address first: the letter goes only to an address you have shown is yours.",
       "otherLanguage": "The letter is written in the language you were reading lyrid in when you asked for it.",
       "moveHere": "write it in this language"
+    }
+  },
+  "changes": {
+    "open": "edition {{number}} · what changed",
+    "openUnsealed": "what changed",
+    "heading": "What changed in the sky",
+    "description": "Which edition of the canon this sky is, what that edition changed, and the weather over it this week: who is rising and what came out.",
+    "loading": "reading what changed",
+    "failed": "what changed in the sky could not be read",
+    "edition": {
+      "heading": "This sky",
+      "is": "Edition {{number}} of the canon, sealed on {{day}}: {{stars}} stars.",
+      "unsealed": "This sky has not been sealed as an edition of the canon yet, so there is nothing to compare it with.",
+      "notCurrent": "The sky was laid out again after this edition was sealed: the stars on screen are not yet an edition of their own.",
+      "source": "{{source}} — {{version}}, imported {{imported}}",
+      "first": "The first edition: nothing came before it, so nothing has changed yet. The next rebuild of the canon will say what it changed.",
+      "since": "Since edition {{number}}: {{new}} new stars, {{merged}} merged into others, {{gone}} gone dark.",
+      "newStars": "The brightest of the new stars",
+      "merges": "Merged by MusicBrainz, by the names they had",
+      "gone": "Gone dark: {{names}}"
+    },
+    "sources": {
+      "musicbrainz": "MusicBrainz",
+      "listenbrainz-similarity": "ListenBrainz similarity",
+      "discogs": "Discogs",
+      "wikidata": "Wikidata",
+      "wikipedia": "Wikipedia",
+      "acousticbrainz": "AcousticBrainz"
+    },
+    "rising": {
+      "heading": "Rising this week",
+      "how": "People listening a day in the week to {{through}}, against the four weeks before — counted from everyone’s listening on ListenBrainz.",
+      "counting": "lyrid has counted {{count}} day of listening so far; rising needs a week and the month before it.",
+      "counting_other": "lyrid has counted {{count}} days of listening so far; rising needs a week and the month before it.",
+      "quiet": "Nothing on this sky rose this week.",
+      "numbers": "{{recent}} a day · was {{earlier}}"
+    },
+    "releases": {
+      "heading": "Out around now",
+      "none": "Nothing by a star of this sky came out this fortnight.",
+      "out": "Out",
+      "coming": "Coming",
+      "by": "by",
+      "kinds": {
+        "Album": "album",
+        "Single": "single",
+        "EP": "EP",
+        "Broadcast": "broadcast",
+        "Other": "other"
+      }
+    }
+  },
+  "admin": {
+    "title": "This stand",
+    "version": "lyrid {{version}}",
+    "back": "back to the sky",
+    "loading": "reading the stand",
+    "failed": "the stand could not be read",
+    "signIn": "Sign in on the sky first: this page is for the people who run this stand.",
+    "notAdmin": "This account does not run this stand. An account is made an admin from the server’s command line:",
+    "state": {
+      "ok": "working",
+      "failing": "failing",
+      "running": "reading now",
+      "never": "not run yet"
+    },
+    "canon": {
+      "heading": "The canon",
+      "artists": "Artists",
+      "stars": "Stars on the sky",
+      "layout": "Layout",
+      "noLayout": "none — the sky is not laid out",
+      "edition": "Edition",
+      "editionIs": "{{number}}, sealed {{sealed}}: {{artists}} artists, {{stars}} stars",
+      "unsealed": "not sealed yet — run lyrid canon seal on the full canon",
+      "slice": "Slice",
+      "sliceIs": "holds {{held}} of the edition’s {{of}} artists",
+      "editions": "Editions",
+      "imports": "Every import this database has recorded, newest first",
+      "changes": "+{{new}} · merged {{merged}} · gone {{gone}}",
+      "first": "the first edition"
+    },
+    "listening": {
+      "heading": "Listening from ListenBrainz",
+      "counted": "Star-days counted",
+      "waiting": "Listeners waiting for their day to close",
+      "rising": "Rising",
+      "risingIs": "{{count}} star, through {{through}}",
+      "risingIs_other": "{{count}} stars, through {{through}}",
+      "notYet": "not enough days counted yet",
+      "noDays": "No day of listening has been read yet.",
+      "strip": "Coverage of the last {{count}} day; {{missing}} with no dump",
+      "strip_other": "Coverage of the last {{count}} days; {{missing}} with no dump",
+      "stripCaption": "{{from}} – {{to}}: a bar a day, as tall as the share of it the dumps covered; {{missing}} closed with most of the day missing.",
+      "dayIs": "{{day}}: {{covered}}% covered, {{listeners}} listeners"
+    },
+    "releases": {
+      "heading": "Releases from ListenBrainz",
+      "known": "Releases known",
+      "thisWeek": "Out in the last seven days"
+    },
+    "feed": {
+      "lastDone": "Last worked",
+      "lastFailed": "Last failed",
+      "failedThisWeek": "Failures this week",
+      "runs": "The latest runs",
+      "running": "running",
+      "seconds": "{{count}} s",
+      "seconds_other": "{{count}} s"
+    },
+    "accounts": {
+      "heading": "Accounts",
+      "total": "Accounts",
+      "totalIs": "{{total}}, {{confirmed}} confirmed",
+      "joined": "Joined",
+      "joinedIs": "{{week}} this week, {{month}} this month",
+      "sessions": "Open sessions",
+      "admins": "Admins",
+      "listenbrainz": "ListenBrainz",
+      "listenbrainzIs": "{{linked}} linked, {{history}} still reading their history; {{listens}} listens; last read {{read}}",
+      "failing": "Links failing",
+      "lastfm": "Brought a Last.fm file",
+      "letters": "Weekly letter",
+      "lettersIs": "{{subscribed}} asked for it; last week considered {{week}}"
+    },
+    "mechanics": {
+      "heading": "What gets used",
+      "how": "Uses over the last fourteen days, counted as numbers that go up — never who.",
+      "caption": "Uses per mechanic, last fourteen days",
+      "none": "Nothing counted in the last fourteen days."
+    },
+    "columns": {
+      "edition": "Edition",
+      "sealed": "Sealed",
+      "layout": "Layout",
+      "stars": "Stars",
+      "changes": "Changed",
+      "source": "Source",
+      "version": "Version",
+      "finished": "Finished",
+      "rows": "Rows",
+      "started": "Started",
+      "took": "Took",
+      "read": "Read",
+      "kept": "Kept",
+      "error": "Why it failed",
+      "mechanic": "Mechanic",
+      "uses": "Uses"
     }
   }
 }

@@ -30,6 +30,9 @@ import { Charter } from '@/Charter'
 import { Embed } from '@/Embed'
 import { ConfirmPage, ResetPage, StopLetterPage } from '@/LetterPage'
 import { YourSky } from '@/YourSky'
+import { SkyChanges } from '@/SkyChanges'
+import { AdminPage } from '@/AdminPage'
+import { fetchChanges, type SkyChanges as Changes } from '@/changes'
 import { count } from '@/metrics'
 import { useLanguage } from '@/lib/language'
 import type { Place, Star } from '@/sky/renderer'
@@ -542,6 +545,16 @@ export function App() {
   // "Your sky": the home, the youth, a Last.fm file, the letter.
   const [yourSky, setYourSky] = useState(false)
 
+  // What changed in the sky. Read once on arrival, so the status line can say
+  // which edition this is; the dialog asks again whenever it opens.
+  const [changes, setChanges] = useState<Changes | null>(null)
+  const [changesOpen, setChangesOpen] = useState(false)
+  useEffect(() => {
+    const abort = new AbortController()
+    fetchChanges(abort.signal).then(setChanges, () => undefined)
+    return () => abort.abort()
+  }, [])
+
   const flyHome = useCallback(
     (star: PlacedStar) => {
       setYourSky(false)
@@ -654,6 +667,9 @@ export function App() {
   }
   if (page?.kind === 'stop') {
     return <StopLetterPage token={page.token} onClose={leavePage} />
+  }
+  if (page?.kind === 'admin') {
+    return <AdminPage onClose={leavePage} />
   }
 
   return (
@@ -786,6 +802,14 @@ export function App() {
         />
       )}
 
+      <SkyChanges
+        open={changesOpen}
+        onOpenChange={setChangesOpen}
+        changes={changes}
+        onChanges={setChanges}
+        onOpen={star => goTo({ artistId: star.id, x: star.x, y: star.y })}
+      />
+
       {comparing && (
         <Suspense fallback={null}>
           <Compare
@@ -883,6 +907,19 @@ export function App() {
                 version: __APP_VERSION__,
               })}
             </p>
+            {/* Which edition of the canon this sky is, and the way into what
+                changed in it -- the edition beside the version, because both
+                answer "which one am I looking at". */}
+            <Button
+              variant="link"
+              className="font-mono text-xs"
+              onClick={() => {
+                count('changes_opened')
+                setChangesOpen(true)
+              }}
+            >
+              {changes?.edition ? t('changes.open', { number: changes.edition.number }) : t('changes.openUnsealed')}
+            </Button>
             <LanguagePicker />
           </div>
         </div>
