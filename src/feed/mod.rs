@@ -49,30 +49,43 @@ pub async fn run(pool: PgPool, sources: Sources) {
     // A minute's grace: a server that has just started has a sky to warm
     // before it has a day of listening to count.
     tokio::time::sleep(Duration::from_secs(60)).await;
+    // Each feed on a clock of its own. In one loop the releases waited behind
+    // the listening, and the listening's first look on an empty database
+    // reads every dump on offer -- eighteen days, 23 minutes on the stand on
+    // 2026-10-16 -- so a fresh stand had no releases until it was done.
+    let listening = tokio::spawn(count_listening(pool.clone(), sources.dumps));
+    let releases = tokio::spawn(read_releases(pool, sources.listenbrainz));
+    let _ = tokio::join!(listening, releases);
+}
+
+/// Counts listening for as long as the server runs. Failures are logged and
+/// recorded, never raised: the next look is the retry.
+async fn count_listening(pool: PgPool, dumps: Dumps) {
     loop {
-        pass(&pool, &sources).await;
+        match listening::catch_up(&pool, &dumps).await {
+            Ok(Some(caught)) if caught.dumps > 0 => tracing::info!(
+                dumps = caught.dumps,
+                listens = caught.listens,
+                kept = caught.kept,
+                closed = caught.closed,
+                "listening counted"
+            ),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(error = format!("{error:#}"), "the listening feed stopped"),
+        }
         tokio::time::sleep(EVERY).await;
     }
 }
 
-/// One look at both feeds. Failures are logged and recorded, never raised:
-/// the next look is the retry.
-pub async fn pass(pool: &PgPool, sources: &Sources) {
-    match listening::catch_up(pool, &sources.dumps).await {
-        Ok(Some(caught)) if caught.dumps > 0 => tracing::info!(
-            dumps = caught.dumps,
-            listens = caught.listens,
-            kept = caught.kept,
-            closed = caught.closed,
-            "listening counted"
-        ),
-        Ok(_) => {}
-        Err(error) => tracing::warn!(error = format!("{error:#}"), "the listening feed stopped"),
-    }
-    match releases::read_if_due(pool, &sources.listenbrainz).await {
-        Ok(releases::Outcome::Read(read)) => tracing::info!(listed = read.listed, kept = read.kept, "releases read"),
-        Ok(_) => {}
-        Err(error) => tracing::warn!(error = format!("{error:#}"), "the releases feed stopped"),
+/// Reads the releases for as long as the server runs, once a day.
+async fn read_releases(pool: PgPool, listenbrainz: crate::scrobbling::Client) {
+    loop {
+        match releases::read_if_due(&pool, &listenbrainz).await {
+            Ok(releases::Outcome::Read(read)) => tracing::info!(listed = read.listed, kept = read.kept, "releases read"),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(error = format!("{error:#}"), "the releases feed stopped"),
+        }
+        tokio::time::sleep(EVERY).await;
     }
 }
 
