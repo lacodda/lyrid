@@ -100,6 +100,19 @@ The credentials are read from the stand's own `.env` on the stand — they are
 never passed on a command line and never copied to the machine holding the
 canon.
 
+## Carrying the edition
+
+The [edition](/lyrid/guides/building-the-sky/#sealing-the-edition) is sealed on the full canon, so a slice cut after sealing already carries it. A stand filled before an edition was sealed takes it on its own, as four tables:
+
+```sh
+pg_dump -Fc --data-only -t canon_edition -t canon_edition_source \
+  -t canon_edition_star -t canon_change > .local/lyrid-edition.dump
+tools/stage-seed.sh --skip-tiles --dump .local/lyrid-edition.dump \
+  --tables canon_edition,canon_edition_source,canon_edition_star,canon_change
+```
+
+All four, because the other three point at `canon_edition` and the script's `TRUNCATE` refuses to empty a table something outside the list still points at. The stand then shows the edition in its status line, and its [admin page](/lyrid/guides/watching-a-stand/#the-admin-page) shows it holds a slice of it.
+
 ## Checking it arrived
 
 The script prints what the stand ended up holding — how many artists, how many

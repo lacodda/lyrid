@@ -509,6 +509,69 @@ sixty, on the current sky. A year before 1900 or after this one answers `400`.
 Why these rules, measured on the full canon: [your life on the
 sky](/lyrid/concepts/your-life-on-the-sky/#stars-of-your-youth).
 
+## `GET /api/sky/changes`
+
+What changed in the sky, in one answer for one panel: the edition of the canon
+this sky is and what it changed, the stars rising this week, and the releases
+out within a week of today. No session; cached for five minutes. Every star in
+it has a place on the current sky — what the sky cannot fly to is counted where
+counts are given and never listed. Cut to its first entries:
+
+```json
+{
+  "edition": {
+    "number": 1,
+    "sealed_at": "2026-10-16T18:54:16.71741Z",
+    "stars": 206636,
+    "current": true,
+    "sources": [
+      { "source": "musicbrainz", "version": "2026-08-15 00:21:41.385745+00", "imported_at": "2026-08-21T00:18:29.210171Z" }
+    ],
+    "previous": null,
+    "changed": null
+  },
+  "rising": {
+    "through": "2026-10-15",
+    "days_counted": 16,
+    "stars": [
+      { "id": 1080756, "name": "Jess Williamson", "x": 108.9, "y": 327.96, "recent": 25.0, "earlier": 2.63 }
+    ]
+  },
+  "releases": {
+    "from": "2026-10-09",
+    "to": "2026-10-23",
+    "releases": [
+      { "title": "The Holy Bible Live", "credit": "Manic Street Preachers", "kind": "Album", "out_on": "2026-10-23",
+        "star": { "id": 2273, "name": "Manic Street Preachers", "x": 21.51, "y": 16.02 } }
+    ]
+  }
+}
+```
+
+- `edition` is `null` until the canon is sealed. `current` is false when the
+  sky was laid out again after sealing. `changed` is `null` for the first
+  edition; from the second it holds the counts of `new`, `merged` and `gone`
+  stars, the brightest new stars, the merges as `{ from, into }` and the names
+  of the stars gone dark — at most 24 of each.
+- `rising.through` is the last day of the week the stars rose in, `null` until
+  a week and the month before it are covered; `recent` and `earlier` are
+  listeners a day. At most 12, strongest rise first.
+- A release is listed once, under the brightest star it credits; at most 24,
+  brightest stars first. `kind` is MusicBrainz's primary type, or `null`.
+
+Why these numbers mean what they say: [What changed in the
+sky](/lyrid/concepts/what-changed-in-the-sky/) and [ADR
+0022](https://github.com/lacodda/lyrid/blob/main/docs/adr/0022-living-data-from-the-daily-dumps.md).
+
+## `GET /api/admin`
+
+The stand's own state, for an admin: the canon, the two feeds and the counts
+of accounts and mechanics — the page at `/admin` is a reading of it. Counts
+only; it names nobody. `401` without a session, `403` for an account that is
+not an admin (granted from the command line, never by a route). The shape is
+the one [Watching a stand](/lyrid/guides/watching-a-stand/#the-admin-page)
+describes; the page is its only client, so it changes with the page.
+
 ## Usage metrics
 
 `POST /api/metrics/{mechanic}` counts one use of a mechanic. It takes no body
@@ -529,7 +592,7 @@ lens_used         time_travelled    stars_compared
 route_opened      radio_started     signal_heard
 signal_found      dossier_opened    listening_linked
 heard_shown       home_flown        youth_shown
-lastfm_brought    letter_asked
+lastfm_brought    letter_asked      changes_opened
 ```
 
 A name outside the list answers `404`. The list is what stops a client

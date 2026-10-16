@@ -14,7 +14,8 @@ lyrid is configured entirely through the environment. There is no configuration 
 | `LYRID_PUBLIC_URL` | no | `http://$LYRID_ADDR` | Where this service is reached from outside. Used for the links in letters and for the preview image. |
 | `LYRID_SMTP_URL` | no | — | SMTP server, credentials included. Unset means letters are written to the log instead of sent. |
 | `LYRID_MAIL_FROM` | no | `lyrid <no-reply@localhost>` | Sender address for the two letters lyrid sends. |
-| `LYRID_LISTENBRAINZ_URL` | no | `https://api.listenbrainz.org` | Where linked accounts' listening is read from. Set it to a stand-in to run without asking the real service. |
+| `LYRID_LISTENBRAINZ_URL` | no | `https://api.listenbrainz.org` | Where linked accounts' listening and the list of fresh releases are read from. Set it to a stand-in to run without asking the real service. |
+| `LYRID_DUMPS_URL` | no | `https://data.metabrainz.org/pub/musicbrainz/listenbrainz` | Where ListenBrainz's daily dumps are published. The listening feed reads its `incremental/` directory by byte ranges; a server that ignores ranges is refused. See [Watching a stand](/lyrid/guides/watching-a-stand/). |
 | `RUST_LOG` | no | `lyrid=info,tower_http=info` | Log filter, in `tracing-subscriber` `EnvFilter` syntax |
 
 ## How it is read

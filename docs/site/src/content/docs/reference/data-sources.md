@@ -8,7 +8,7 @@ The universe is assembled locally from full open dumps. No rate-limited API sits
 | Source | What it contributes | Form |
 | --- | --- | --- |
 | **MusicBrainz** | Artists, release groups, memberships, countries, years, URL relationships | PostgreSQL dump |
-| **ListenBrainz** | Artist similarity from co-listening; scrobbles | Published relations dataset (CC0) + user API for scrobbling |
+| **ListenBrainz** | Artist similarity from co-listening; who is listened to each day; releases out around now; scrobbles | Published relations dataset (CC0); daily incremental listen dumps (CC0, Parquet); the fresh-releases list, once a day; user API for scrobbling |
 | **Discogs** | Genres, styles and labels — the only genre source, see below | Monthly XML dumps (CC0) |
 | **Wikidata** | Influence links, cities, biographical facts, Wikipedia article titles | Full JSON dump (CC0), streamed |
 | **Wikipedia** | Prose extracts for artist cards | Multistream dump (CC BY-SA 4.0), reached by index |
@@ -43,7 +43,12 @@ Worth knowing before planning against it, because the documentation reads as tho
 - **Current artist similarity** lives only behind ListenBrainz's live API. The published relations dataset (2020, CC0) is the newest bulk form of it.
 - **Per-artist listen counts** are served by an API capped at the top 1,000 artists sitewide, or by MLHD+ under its non-commercial licence. Neither can fill a three-million-star sky.
 
-Both gaps are closable by computing from the CC0 listen dumps, which is a stage of its own rather than an import.
+Both gaps are closable by computing from the CC0 listen dumps. Since v0.19
+the daily incremental dumps are read as they appear: how many people listened
+to each star, day by day, which is what rising stars are made of — see [What
+changed in the sky](/lyrid/concepts/what-changed-in-the-sky/). A fresh
+similarity graph and popularity over years, from the full dumps, are a stage of
+their own.
 
 - **Ready-made Wikipedia lead extracts.** There is no longer any free dump of them. The Wikimedia Enterprise HTML dumps, which carried an `abstract` field per article, stopped being replicated to `dumps.wikimedia.org` on 24 March 2025, and `enwiki-latest-abstract.xml.gz` is absent from the current listings. The live REST summary endpoint is a rate-limited API, which ADR 0002 forbids. Extracts must therefore be parsed out of the article wikitext in the `pages-articles` dump — which the multistream index makes tractable, since it allows seeking to one article's stream instead of decompressing 27 GB.
 

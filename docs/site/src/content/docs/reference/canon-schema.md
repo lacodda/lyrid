@@ -347,6 +347,37 @@ Artists with no similarity edges have no position: there is nothing to place
 them near. See [Building the sky](/lyrid/guides/building-the-sky/) and
 [ADR 0008](https://github.com/lacodda/lyrid/blob/main/docs/adr/0008-layout-written-here.md).
 
+## `artist_redirect`
+
+What a merge in MusicBrainz leaves behind: `(mbid, artist_id)`, the merged
+artist's MBID and the artist it now leads to, from `artist_gid_redirect`.
+Imported with the canon. Sealing reads it to tell a star that merged into
+another from one that went dark, and v0.22 reads it to carry progress across a
+merge.
+
+## `canon_edition`, `canon_edition_source`, `canon_edition_star`, `canon_change`
+
+The editions of the canon: a sky sealed by `lyrid canon seal` once it is built
+([Sealing the edition](/lyrid/guides/building-the-sky/#sealing-the-edition)).
+
+| Table | Holds |
+| --- | --- |
+| `canon_edition` | One row per edition: when it was sealed, the layout by its key, how many artists and stars |
+| `canon_edition_source` | The newest finished import of each source when it was sealed, copied from `dump_import` |
+| `canon_edition_star` | Its stars, by MBID, with the names they had |
+| `canon_change` | What changed from the edition before: `new`, `merged` (with `into_mbid`) or `gone`, by MBID and name |
+
+None of them references the canon's tables, so they outlive the canon they
+describe: rebuilding the canon empties `artist` and everything that points at
+it, and the editions are its history. A slice cut from a sealed canon keeps
+them whole. See [ADR
+0023](https://github.com/lacodda/lyrid/blob/main/docs/adr/0023-editions-of-the-canon.md).
+
+The tables the feeds write — `feed_run`, `listening_day`, `listener_seen`,
+`artist_day`, `star_rising`, `new_release` — are not the canon and are not
+replaced with it; they are described in [Watching a
+stand](/lyrid/guides/watching-a-stand/).
+
 ## Replacing the canon
 
 An importer truncates the tables it owns and writes the new contents in one

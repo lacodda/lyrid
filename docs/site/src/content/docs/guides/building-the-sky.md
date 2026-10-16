@@ -196,3 +196,15 @@ LIMIT 20;
 A genre whose members are spread as widely as a random sample is a sign the
 layout has not separated it — either too few iterations, or too weak an
 attraction.
+
+## Sealing the edition
+
+Once the layout is drawn, the tiles are cut and the sky has been looked at, seal it:
+
+```sh
+lyrid canon seal
+```
+
+Sealing records the sky as the next **edition** of the canon: the newest import of each source, the layout by its key, and every star with its name. It then compares that list with the edition before and records what changed — stars that are new, stars MusicBrainz merged into another artist (the MusicBrainz import keeps its redirects in `artist_redirect` for this), and stars that went dark. The sky names its edition in the status line and shows what changed in it; see [What changed in the sky](/lyrid/concepts/what-changed-in-the-sky/).
+
+Seal the full canon, before cutting a slice: a slice sealed as an edition would be compared with a whole canon next time and report everything it left out as gone. One layout is one edition — sealing the same layout again is refused, so laying the sky out again is what makes room for a new edition. Measured on the full canon: 206,636 stars sealed in 15 seconds.
