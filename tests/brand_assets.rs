@@ -189,7 +189,10 @@ fn the_social_preview_is_the_banner_on_its_plate() {
     // edges. The colour is read from the banner rather than written here.
     let plate = banner_plate();
     for (x, y) in [(0, 0), (1279, 0), (0, 639), (1279, 639), (640, 20), (640, 619)] {
-        assert!(close_to(image.get_pixel(x, y).0, plate), "the social preview's edge at {x},{y} is not the plate");
+        assert!(
+            close_to(image.get_pixel(x, y).0, plate),
+            "the social preview's edge at {x},{y} is not the plate"
+        );
     }
 
     // And centred, with nothing cut off. The banner is a wide plate with its
