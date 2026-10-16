@@ -2,10 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.19.0] - 2026-10-16
+
+### Bug Fixes
+- Centre the social preview on its plate without cutting the artwork
+
+### Documentation
+- Record the living data, the editions and the admin page
+
+### Features
+- Read the sky's weather from ListenBrainz and seal its editions
+- Show what changed in the sky, and give a stand its admin page
+
 ## [0.18.0] - 2026-10-13
 
 ### Documentation
 - Record the history, the files, the youth and the letter
+- Generate for v0.18.0
 
 ### Features
 - **Breaking:** Read whole histories, bring Last.fm files, and send a weekly letter
