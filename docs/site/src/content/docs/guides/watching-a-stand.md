@@ -14,7 +14,7 @@ A stand does not only serve the canon it was filled with. While it runs, it read
 
 The server looks every half hour, starting a minute after it boots. Each pass over a dump or the list is a row of `feed_run`: when it started and finished, how many rows it read and kept, and why it failed if it did. A failure is retried on the next look; the listening feed stops at a failed dump rather than skipping past it, so the days it covers are not closed without it.
 
-A dump is read by byte ranges — its footer and four columns, about a third of the file — and nothing is written to disk. The first run on an empty database reads every dump the server still offers, about eighteen days; on a Raspberry Pi 4 that is the better part of an hour, in the background.
+A dump is read by byte ranges — its footer and four columns, about a third of the file — and nothing is written to disk. The first run on an empty database reads every dump the server still offers, about eighteen days. Measured on the Raspberry Pi 4 stand on 2026-10-16: 30 dumps, 56.8 million listens, 23 minutes in the background — a day's dump takes about a minute, bound by the network rather than the processor. The releases feed runs on a clock of its own, so it does not wait for that.
 
 What is kept, and for how long:
 
