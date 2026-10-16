@@ -16,6 +16,7 @@ use sqlx::PgPool;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+use super::PlacedStar;
 use super::accounts::{bad_request, current_session, server_error, unauthorised};
 use crate::app::AppState;
 use crate::scrobbling::{self, ByHand, Failure, ReadError, home, lastfm};
@@ -61,7 +62,7 @@ struct Listening {
     /// The latest of those, newest first.
     recent: Vec<Opening>,
     /// Where the listening is at home on the sky, once anything is heard.
-    home: Option<Star>,
+    home: Option<PlacedStar>,
 }
 
 #[derive(Serialize)]
@@ -92,15 +93,6 @@ struct Opening {
     name: String,
     /// The first listen that named this star.
     opened_at: String,
-}
-
-/// A star, and where the sky puts it.
-#[derive(Serialize)]
-struct Star {
-    id: i32,
-    name: String,
-    x: f32,
-    y: f32,
 }
 
 /// What a read by hand added, beside the summary it leaves.
@@ -227,7 +219,7 @@ async fn summary(pool: &PgPool, user: i32) -> sqlx::Result<Listening> {
     let mut placed = scrobbling::placed(&mut *pool.acquire().await?, user, None).await?;
     let home = home::home(&placed.iter().map(scrobbling::Placed::heard).collect::<Vec<_>>())
         .and_then(|home| placed.iter().find(|star| star.id == home.id))
-        .map(|star| Star {
+        .map(|star| PlacedStar {
             id: star.id,
             name: star.name.clone(),
             x: star.x,

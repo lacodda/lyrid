@@ -1,7 +1,7 @@
 //! Imports the canonical universe from a MusicBrainz full export.
 //!
 //! The archive (mbdump.tar.bz2, ~7 GB compressed) holds one file per table in
-//! PostgreSQL's COPY TEXT format under `mbdump/`. Only twelve of those tables
+//! PostgreSQL's COPY TEXT format under `mbdump/`. Only fifteen of those tables
 //! matter here; the rest -- recordings, tracks, edit history -- are skipped
 //! without being decompressed into memory.
 //!
@@ -71,6 +71,8 @@ struct Tables {
     artist_url_links: Vec<(i32, i32, i32)>,
     /// artist_credit.id -> the first credited artist id.
     credit_artists: HashMap<i32, i32>,
+    /// (old MBID, artist id): ids left behind by merges, and where they lead.
+    redirects: Vec<(uuid::Uuid, i32)>,
     timestamp: Option<String>,
 }
 
@@ -162,6 +164,7 @@ fn read_archive(file: File) -> Result<Tables> {
             // pressing has no country would otherwise come out undated.
             "release_country" | "release_unknown_country" => read_release_dates(reader, name, &mut tables)?,
             "artist_credit_name" => read_credit_names(reader, &mut tables)?,
+            "artist_gid_redirect" => read_redirects(reader, &mut tables)?,
             "url" => read_urls(reader, &mut tables)?,
             "link" => read_links(reader, &mut tables)?,
             "link_type" => read_link_types(reader, &mut tables)?,
@@ -300,6 +303,19 @@ fn read_credit_names<R: BufRead>(reader: R, tables: &mut Tables) -> Result<()> {
     })
 }
 
+/// artist_gid_redirect: gid, new_id, created
+///
+/// What a merge leaves behind: the merged artist's MBID, pointing at the
+/// artist it became. Kept so that an MBID from before a merge -- in someone's
+/// listening, in an older edition of the sky -- still leads to a star.
+fn read_redirects<R: BufRead>(reader: R, tables: &mut Tables) -> Result<()> {
+    each_row(reader, |row| {
+        if let (Some(mbid), Some(artist)) = (row.parse::<uuid::Uuid>(0), row.parse::<i32>(1)) {
+            tables.redirects.push((mbid, artist));
+        }
+    })
+}
+
 /// url: id, gid, url, edits_pending, last_updated
 fn read_urls<R: BufRead>(reader: R, tables: &mut Tables) -> Result<()> {
     each_row(reader, |row| {
@@ -372,6 +388,7 @@ async fn write(pool: &PgPool, tables: &Tables, version: &str) -> Result<()> {
     written += write_artist_credits(&mut tx, tables).await?;
     written += write_release_groups(&mut tx, tables).await?;
     written += write_artist_urls(&mut tx, tables).await?;
+    written += write_redirects(&mut tx, tables).await?;
 
     sqlx::query("UPDATE dump_import SET finished_at = now(), rows_imported = $2 WHERE id = $1")
         .bind(import_id)
@@ -562,6 +579,33 @@ async fn write_artist_urls(tx: &mut sqlx::PgTransaction<'_>, tables: &Tables) ->
     Ok(written)
 }
 
+async fn write_redirects(tx: &mut sqlx::PgTransaction<'_>, tables: &Tables) -> Result<i64> {
+    // A redirect to an artist the dump does not carry leads nowhere, and the
+    // foreign key would refuse it anyway.
+    let known: std::collections::HashSet<i32> = tables.artists.iter().map(|a| a.id).collect();
+    let resolved: Vec<(uuid::Uuid, i32)> = tables.redirects.iter().copied().filter(|(_, artist)| known.contains(artist)).collect();
+
+    let mut written = 0i64;
+    for chunk in resolved.chunks(BATCH) {
+        let mbids: Vec<uuid::Uuid> = chunk.iter().map(|(mbid, _)| *mbid).collect();
+        let artists: Vec<i32> = chunk.iter().map(|(_, artist)| *artist).collect();
+
+        sqlx::query(
+            "INSERT INTO artist_redirect (mbid, artist_id)
+             SELECT * FROM UNNEST($1::uuid[], $2::int[])
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(&mbids)
+        .bind(&artists)
+        .execute(&mut **tx)
+        .await
+        .context("failed to write artist redirects")?;
+        written += i64::try_from(chunk.len()).unwrap_or(i64::MAX);
+    }
+    tracing::info!(rows = written, "artist redirects written");
+    Ok(written)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,9 +617,25 @@ mod tests {
         match table {
             "iso_3166_1" => read_area_codes(rows.as_bytes(), &mut tables).unwrap(),
             "release" => read_releases(rows.as_bytes(), &mut tables).unwrap(),
+            "artist_gid_redirect" => read_redirects(rows.as_bytes(), &mut tables).unwrap(),
             other => read_release_dates(rows.as_bytes(), other, &mut tables).unwrap(),
         }
         tables
+    }
+
+    #[test]
+    fn reads_where_a_merged_artist_now_leads() {
+        // gid, new_id, created: the old MBID first, the surviving artist's
+        // own key second.
+        let tables = read_table(
+            "artist_gid_redirect",
+            "5441c29d-3602-4898-b1a1-b77fa23b8e50	11650	2013-05-15 21:46:07.226436+00
+",
+        );
+        assert_eq!(
+            tables.redirects,
+            vec![(uuid::Uuid::parse_str("5441c29d-3602-4898-b1a1-b77fa23b8e50").unwrap(), 11650)]
+        );
     }
 
     #[test]

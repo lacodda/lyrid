@@ -294,6 +294,43 @@ impl Client {
         })
     }
 
+    /// The releases ListenBrainz lists as out within `days` of today, on
+    /// either side.
+    ///
+    /// One request for the whole list: a dataset ListenBrainz assembles from
+    /// MusicBrainz for everyone, not a question about anyone, read once a day
+    /// by the releases feed (ADR 0022). Releases whose dates or ids do not
+    /// parse are left out rather than failing the list.
+    pub fn fresh_releases(&self, days: u32) -> Result<Vec<FreshRelease>, Failure> {
+        let mut response = self
+            .agent
+            .get(format!("{}/1/explore/fresh-releases/", self.base))
+            .query("days", days.to_string())
+            .query("past", "true")
+            .query("future", "true")
+            .call()
+            .map_err(|error| unreachable(&error))?;
+        let status = response.status().as_u16();
+        if status == 429 {
+            return Err(Failure::Throttled);
+        }
+        if status >= 500 {
+            return Err(Failure::Unreachable);
+        }
+        if !(200..300).contains(&status) {
+            return Err(Failure::Malformed);
+        }
+        // The list for sixty days is about five megabytes; ten is the reader's
+        // own limit and would be reached by a busy season.
+        let body = response
+            .body_mut()
+            .with_config()
+            .limit(64 * 1024 * 1024)
+            .read_to_string()
+            .map_err(|error| unreachable(&error))?;
+        parse_fresh_releases(&body)
+    }
+
     /// One page of the listens between `after` and `before`, both exclusive.
     fn page_between(&self, name: &str, after: i64, before: i64) -> Result<Vec<Listen>, Failure> {
         let body = self.ask(
@@ -398,6 +435,74 @@ fn reset_in(headers: &ureq::http::HeaderMap) -> Option<Duration> {
 
 fn remaining(headers: &ureq::http::HeaderMap) -> Option<u64> {
     header_number(headers, "x-ratelimit-remaining")
+}
+
+/// A release as ListenBrainz lists it, reduced to what is kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreshRelease {
+    pub group: Uuid,
+    pub title: String,
+    pub credit: String,
+    pub artists: Vec<Uuid>,
+    pub kind: Option<String>,
+    pub out_on: time::Date,
+}
+
+/// Reads the fresh releases list. `Malformed` only when the answer is not the
+/// list at all; a release in it that cannot be read is skipped.
+pub fn parse_fresh_releases(body: &str) -> Result<Vec<FreshRelease>, Failure> {
+    #[derive(Deserialize)]
+    struct Answer {
+        payload: Payload,
+    }
+    #[derive(Deserialize)]
+    struct Payload {
+        releases: Vec<Listed>,
+    }
+    #[derive(Deserialize)]
+    struct Listed {
+        release_group_mbid: Option<String>,
+        release_name: Option<String>,
+        artist_credit_name: Option<String>,
+        #[serde(default)]
+        artist_mbids: Vec<String>,
+        release_group_primary_type: Option<String>,
+        release_date: Option<String>,
+    }
+
+    let answer: Answer = serde_json::from_str(body).map_err(|_| Failure::Malformed)?;
+    Ok(answer
+        .payload
+        .releases
+        .into_iter()
+        .filter_map(|release| {
+            let artists: Vec<Uuid> = release.artist_mbids.iter().filter_map(|mbid| Uuid::parse_str(mbid).ok()).collect();
+            if artists.is_empty() {
+                return None;
+            }
+            Some(FreshRelease {
+                group: Uuid::parse_str(release.release_group_mbid.as_deref()?).ok()?,
+                title: release.release_name.filter(|title| !title.trim().is_empty())?,
+                credit: release.artist_credit_name.filter(|credit| !credit.trim().is_empty())?,
+                artists,
+                kind: release.release_group_primary_type.filter(|kind| !kind.trim().is_empty()),
+                out_on: calendar_date(release.release_date.as_deref()?)?,
+            })
+        })
+        .collect())
+}
+
+/// `2026-10-16` as a date; a partial date ("2026-10") or anything else as
+/// `None`. MusicBrainz allows partial dates, and a release with no day has no
+/// week to be out in.
+fn calendar_date(text: &str) -> Option<time::Date> {
+    let mut parts = text.trim().split('-');
+    let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() || year.len() != 4 || month.len() != 2 || day.len() != 2 {
+        return None;
+    }
+    let month = time::Month::try_from(month.parse::<u8>().ok()?).ok()?;
+    time::Date::from_calendar_date(year.parse().ok()?, month, day.parse().ok()?).ok()
 }
 
 /// Reads one page of the listens endpoint.

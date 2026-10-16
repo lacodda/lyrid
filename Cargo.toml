@@ -18,6 +18,9 @@ anyhow = "1.0.104"
 argon2 = "0.6.0"
 axum = "0.8.9"
 bzip2 = "0.6.1"
+# The byte buffers Parquet's reader is handed: already in the tree through
+# axum, named here because the feed implements Parquet's reader over them.
+bytes = "1.11"
 clap = { version = "4.6.6", features = ["derive"] }
 # Last.fm exports arrive as CSV with quoted fields that may hold commas and
 # line breaks: a reader that gets that right is a library, not twenty lines.
@@ -28,6 +31,10 @@ flate2 = "1.1"
 # pulls in: a second crypto provider in one binary is two implementations of
 # the same thing, and rustls refuses to guess which one to install.
 lettre = { version = "0.11.23", default-features = false, features = ["tokio1-rustls", "smtp-transport", "builder", "ring", "rustls-platform-verifier"] }
+# ListenBrainz publishes its daily listening as Parquet, already matched to
+# artists. Without arrow: rows are read through the record API, and only the
+# columns lyrid counts are fetched.
+parquet = { version = "60.0.0", default-features = false, features = ["zstd"] }
 quick-xml = "0.42"
 rand = "0.10.2"
 serde = { version = "1.0.229", features = ["derive"] }

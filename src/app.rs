@@ -56,6 +56,8 @@ pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
         .merge(crate::api::scrobbling::routes())
         .merge(crate::api::letter::routes())
         .merge(crate::api::youth::routes())
+        .merge(crate::api::changes::routes())
+        .merge(crate::api::admin::routes())
         .with_state(state);
 
     let Some(root) = static_dir else {

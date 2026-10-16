@@ -27,6 +27,7 @@ use serde::Serialize;
 use sqlx::PgExecutor;
 use time::OffsetDateTime;
 
+use super::PlacedStar;
 use super::accounts::{bad_request, server_error};
 use crate::app::AppState;
 
@@ -52,15 +53,7 @@ const EARLIEST: i16 = 1900;
 struct Youth {
     from: i16,
     to: i16,
-    stars: Vec<Star>,
-}
-
-#[derive(Serialize)]
-struct Star {
-    id: i32,
-    name: String,
-    x: f32,
-    y: f32,
+    stars: Vec<PlacedStar>,
 }
 
 async fn youth(State(state): State<AppState>, Path(from): Path<i16>) -> Response {
@@ -78,7 +71,7 @@ async fn youth(State(state): State<AppState>, Path(from): Path<i16>) -> Response
             Json(Youth {
                 from,
                 to,
-                stars: stars.into_iter().map(|(id, name, x, y)| Star { id, name, x, y }).collect(),
+                stars: stars.into_iter().map(|(id, name, x, y)| PlacedStar { id, name, x, y }).collect(),
             }),
         )
             .into_response(),

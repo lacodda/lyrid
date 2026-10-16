@@ -49,6 +49,11 @@ pub struct Config {
     /// The real one unless told otherwise. Set for a stand that should read
     /// from a stand-in, or for a run where ListenBrainz must not be asked.
     pub listenbrainz_url: String,
+    /// Where ListenBrainz's dumps are published (`LYRID_DUMPS_URL`).
+    ///
+    /// The real server unless told otherwise, for a stand-in or for a run that
+    /// must not read a day of everyone's listening.
+    pub dumps_url: String,
 }
 
 impl Config {
@@ -84,6 +89,10 @@ impl Config {
             .map(|url| url.trim().trim_end_matches('/').to_string())
             .filter(|url| !url.is_empty())
             .unwrap_or_else(|| crate::scrobbling::client::DEFAULT_URL.to_string());
+        let dumps_url = lookup("LYRID_DUMPS_URL")
+            .map(|url| url.trim().trim_end_matches('/').to_string())
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(|| crate::feed::remote::DEFAULT_URL.to_string());
 
         Ok(Self {
             addr,
@@ -94,6 +103,7 @@ impl Config {
             smtp_url,
             mail_from,
             listenbrainz_url,
+            dumps_url,
         })
     }
 }
@@ -225,6 +235,19 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(config.listenbrainz_url, "http://stand-in:9000");
+    }
+
+    #[test]
+    fn the_dumps_are_the_real_ones_unless_told_otherwise() {
+        let config = Config::from_lookup(env(&[("DATABASE_URL", "postgres://localhost/lyrid")])).unwrap();
+        assert_eq!(config.dumps_url, "https://data.metabrainz.org/pub/musicbrainz/listenbrainz");
+
+        let config = Config::from_lookup(env(&[
+            ("DATABASE_URL", "postgres://localhost/lyrid"),
+            ("LYRID_DUMPS_URL", " http://stand-in:9001/dumps/ "),
+        ]))
+        .unwrap();
+        assert_eq!(config.dumps_url, "http://stand-in:9001/dumps");
     }
 
     #[test]

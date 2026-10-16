@@ -1,7 +1,10 @@
+mod admin;
 mod api;
 mod app;
 mod auth;
+mod canon;
 mod config;
+mod feed;
 mod import;
 mod layout;
 mod letter;
@@ -43,6 +46,24 @@ enum Command {
     /// Cut the canon down to the brightest artists, for a stand too small to
     /// hold all of it. Requires the layout to have run first.
     Slice(slice::Args),
+    /// Editions of the canon: the sky, sealed once it is built.
+    #[command(subcommand)]
+    Canon(CanonCommand),
+    /// Read what ListenBrainz publishes every day, once, by hand. The server
+    /// does this on its own every half hour.
+    #[command(subcommand)]
+    Feed(feed::Command),
+    /// Who may read this stand's admin page.
+    #[command(subcommand)]
+    Admin(admin::Command),
+}
+
+#[derive(Subcommand)]
+enum CanonCommand {
+    /// Seal the current sky as the next edition of the canon, and record what
+    /// changed since the edition before. Run at the end of the canon
+    /// pipeline, after the layout and the tiles, and before cutting a slice.
+    Seal,
 }
 
 #[derive(Subcommand)]
@@ -133,6 +154,18 @@ async fn main() -> Result<()> {
             let pool = connect(&config).await?;
             layout::cut::run(&pool, &args).await
         }
+        Some(Command::Canon(CanonCommand::Seal)) => {
+            let pool = connect(&config).await?;
+            canon::run(&pool).await
+        }
+        Some(Command::Feed(command)) => {
+            let pool = connect(&config).await?;
+            feed::command(&pool, &config, &command).await
+        }
+        Some(Command::Admin(command)) => {
+            let pool = connect(&config).await?;
+            admin::run(&pool, &command).await
+        }
     }
 }
 
@@ -179,6 +212,17 @@ async fn serve(config: &config::Config) -> Result<()> {
     // The weekly letters go out within an hour of a week's end, to those who
     // asked for them.
     tokio::spawn(letter::run(pool.clone(), mailer.clone(), config.public_url.clone()));
+
+    // What ListenBrainz publishes every day -- everyone's listening, and the
+    // releases out around today -- is read in the background too. Like the
+    // listening reader, nothing a visitor does waits on it.
+    tokio::spawn(feed::run(
+        pool.clone(),
+        feed::Sources {
+            dumps: feed::Dumps::new(&config.dumps_url),
+            listenbrainz: listenbrainz.clone(),
+        },
+    ));
 
     let state = app::AppState {
         pool,
