@@ -175,3 +175,55 @@ fn the_spa_offers_the_icons_it_points_at() {
         );
     }
 }
+
+#[test]
+fn the_social_preview_is_the_banner_on_its_plate() {
+    // GitHub's social preview and the og:image the sky unfurls into.
+    let image = image::load_from_memory_with_format(&read("assets/social-preview.png"), image::ImageFormat::Png)
+        .expect("the social preview is a PNG")
+        .to_rgba8();
+    assert_eq!(image.dimensions(), (1280, 640), "GitHub asks for a 1280x640 social preview");
+    assert_eq!(read("web/public/social-preview.png"), read("assets/social-preview.png"));
+
+    // Laid on the plate colour, so no seam of a rounded banner shows at the
+    // edges. The colour is read from the banner rather than written here.
+    let plate = banner_plate();
+    for (x, y) in [(0, 0), (1279, 0), (0, 639), (1279, 639), (640, 20), (640, 619)] {
+        assert!(close_to(image.get_pixel(x, y).0, plate), "the social preview's edge at {x},{y} is not the plate");
+    }
+
+    // And centred, with nothing cut off. The banner is a wide plate with its
+    // artwork on the left: until v0.19 it was cut at a fixed width, and on
+    // this machine's fonts the underline beneath "a music universe" ran past
+    // that line and was sliced off at the picture's edge. A sliced artwork
+    // touches its box on that side, so equal margins catch both defects.
+    let drawn: Vec<(u32, u32)> = image
+        .enumerate_pixels()
+        .filter(|(_, _, rgba)| !close_to(rgba.0, plate))
+        .map(|(x, y, _)| (x, y))
+        .collect();
+    let left = drawn.iter().map(|p| p.0).min().expect("the preview draws something");
+    let right = drawn.iter().map(|p| p.0).max().expect("the preview draws something");
+    let top = drawn.iter().map(|p| p.1).min().expect("the preview draws something");
+    let bottom = drawn.iter().map(|p| p.1).max().expect("the preview draws something");
+    let (margin_right, margin_bottom) = (1279 - right, 639 - bottom);
+    assert!(
+        left.abs_diff(margin_right) <= 8 && top.abs_diff(margin_bottom) <= 8,
+        "the artwork is off-centre: margins left {left}, right {margin_right}, top {top}, bottom {margin_bottom}"
+    );
+    // Large enough to read in a feed, and clear of the edges GitHub crops.
+    assert!(right - left >= 800, "the artwork is only {}px wide", right - left);
+    assert!(left >= 64 && top >= 64, "the artwork runs into the edge GitHub crops");
+}
+
+/// The colour of the plate the banner is drawn on: its first fill.
+fn banner_plate() -> [u8; 3] {
+    let svg = String::from_utf8(read("assets/banner.svg")).expect("the banner is UTF-8");
+    let hex = svg.split("fill=\"#").nth(1).map(|rest| &rest[..6]).expect("the banner paints a plate");
+    let channel = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).expect("a hex colour");
+    [channel(0), channel(2), channel(4)]
+}
+
+fn close_to(rgba: [u8; 4], rgb: [u8; 3]) -> bool {
+    rgba.iter().zip(rgb).all(|(have, want)| have.abs_diff(want) <= 6)
+}

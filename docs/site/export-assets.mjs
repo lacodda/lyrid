@@ -105,24 +105,38 @@ fs.copyFileSync(path.join(ASSETS, "apple-touch-icon.png"), path.join(WEB_PUBLIC,
 fs.copyFileSync(M, path.join(WEB_PUBLIC, "mark.svg"));
 console.log("wrote pngs");
 
-// GitHub social preview: 1280x640. Two adjustments to the banner: its plate
-// spans the full 720px while the artwork only fills the left ~380px (trim the
-// tail, or it lands off-centre), and the rounded plate over an identical
-// background leaves a visible seam (drop it and keep the inner rows only).
-const bannerWidth = 1600;
-const bannerHeight = Math.round((bannerWidth * 170) / 720);
-const inset = Math.round((bannerWidth * 6) / 720); // clears the plate's rounded edge
-const artworkWidth = Math.round((bannerWidth * 380) / 720);
-const banner = await sharp(BANNER, { density: 384 })
-  .resize({ width: bannerWidth })
-  .extract({ left: inset, top: inset, width: artworkWidth - inset, height: bannerHeight - 2 * inset })
+// The social preview: what a link to the repository or the sky unfurls into,
+// and the picture GitHub shows for the repository. 1280x640 is GitHub's size.
+//
+// The banner is a plate with the artwork on its left: drawn as it is, the
+// artwork would land off-centre and the plate's rounded corners would show as
+// a seam against a background of the same colour. So the banner is laid on
+// that colour first - the corners vanish into it - then trimmed down to the
+// artwork, wherever the fonts installed here put the wordmark's end, and
+// centred. Nothing about the banner's geometry is hard-coded: until v0.19 it
+// cut the banner at a fixed 380 of its 720 units, and the underline beneath
+// "a music universe" ran past that line on this machine's fonts and came out
+// sliced off at the picture's edge.
+const PLATE = "#1B2126";
+const PREVIEW = { width: 1280, height: 640 };
+// GitHub crops the edges in some views; keep the artwork inside this margin.
+const PREVIEW_MARGIN = 140;
+
+const bannerOnPlate = await sharp(BANNER, { density: 384 }).flatten({ background: PLATE }).png().toBuffer();
+// The hex's own fill is a shade off the plate; a low threshold keeps it from
+// counting as background while still eating the antialiased plate edge.
+const artwork = await sharp(bannerOnPlate).trim({ background: PLATE, threshold: 4 }).png().toBuffer();
+const fitted = await sharp(artwork)
+  .resize({
+    width: PREVIEW.width - 2 * PREVIEW_MARGIN,
+    height: PREVIEW.height - 2 * PREVIEW_MARGIN,
+    fit: "inside",
+  })
   .png()
   .toBuffer();
 
-await sharp({
-  create: { width: 1280, height: 640, channels: 4, background: "#1B2126" },
-})
-  .composite([{ input: await sharp(banner).resize({ width: 880 }).png().toBuffer(), gravity: "centre" }])
+await sharp({ create: { ...PREVIEW, channels: 4, background: PLATE } })
+  .composite([{ input: fitted, gravity: "centre" }])
   .png()
   .toFile(path.join(ASSETS, "social-preview.png"));
 

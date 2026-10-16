@@ -56,6 +56,10 @@ zstd = "0.14.0"
 # dev-dependencies, which is why this is listed twice.
 dotenvy = "0.15.7"
 http-body-util = "0.1.5"
+# The brand gate decodes the social preview and reads its pixels: whether the
+# artwork sits centred on its plate is a property of the picture, not of the
+# file's size.
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 tempfile = "3.27.0"
 
 [lints.rust]
