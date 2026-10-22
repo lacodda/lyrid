@@ -80,8 +80,12 @@ alternatives on the same dump:
 The 2020 graph itself scores 0.728 on genre coherence. Weighting by person let
 accounts listing three artists name a star's nearest neighbours.
 
-**The sky is laid out on the new metric.** 283,060 stars have edges in it,
-194,255 of them new to the sky. The 2020 metric stays in the canon -- a
+**The sky is laid out on the new metric.** 283,062 stars have edges in it,
+joined by 6.89 million edges. Laid out the same way as before, the stars of
+one main style sit in a region half as wide as on the sky of the 2020 graph
+(median spread 0.089 of the sky's width against 0.159), and distance still
+tracks the strength of an edge (73 for the strongest, 810 for the faintest,
+1,612 between two stars picked at random). The 2020 metric stays in the canon -- a
 different notion of closeness the plan already has uses for -- but the layout,
 the brightness and the card's neighbours read the metric of the current
 layout, by name rather than by whichever metric was imported last.
@@ -93,9 +97,14 @@ refreshed with every full export, and are read in minutes.
 
 ## Consequences
 
-- Edition 2 of the canon is this sky. Its "what changed" is mostly stars
-  arriving and stars going dark, which is what an edition is for; there is no
-  player progress yet to carry over (that is v0.22).
+- Edition 2 of the canon is this sky: 194,257 stars arrived -- the
+  brightest of them Tyler, The Creator, Bad Bunny, Joji, Playboi Carti,
+  Clairo, Chappell Roan -- and 117,831 went dark, none of them with more than
+  five listeners. That is what an edition is for; there is no player progress
+  yet to carry over (that is v0.22).
+- On the full canon the import takes under eight minutes: 72 seconds of
+  stream, 24 of similarity on sixteen threads, the rest writing 6.9 million
+  edges.
 - The graph can be refreshed with every full export ListenBrainz publishes:
   import, lay out, seal. A newer import replaces the metric's edges and the
   listeners; the layout keeps the positions it drew until it is drawn again.
