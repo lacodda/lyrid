@@ -103,8 +103,13 @@ if [ "$do_db" = yes ] && [ -n "$tables" ]; then
     # pg_restore reads a list from a file, not from a pipe it is also reading
     # the dump from, so the list is written into the container first.
     remote "docker compose -f docker-compose.prod.yml exec -T db sh -c 'cat > /tmp/stage-seed.list'" < "$list"
+    # Foreign keys are not checked row by row while the rows load: a full dump
+    # lays its data out by name, not by what points at what, and `artist_genre`
+    # comes before `genre`. The rows come from one consistent database, so
+    # nothing a check would catch can be in them.
     remote "$remote_env; docker compose -f docker-compose.prod.yml exec -T db \
-        pg_restore -U \"\$user\" -d \"\$db\" --data-only --no-owner --no-privileges -L /tmp/stage-seed.list" \
+        pg_restore -U \"\$user\" -d \"\$db\" --data-only --disable-triggers --single-transaction \
+        --no-owner --no-privileges -L /tmp/stage-seed.list" \
         < "$dump"
 
     for table in $names; do

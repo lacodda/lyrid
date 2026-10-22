@@ -24,7 +24,9 @@
 
 BEGIN;
 
-SELECT set_config('seed.tables', :'tables', true);
+-- Handed to the block below through a setting, since psql does not expand
+-- its variables inside a dollar-quoted body; \gset keeps the echo quiet.
+SELECT set_config('seed.tables', :'tables', true) AS seed_tables \gset
 
 DO $$
 DECLARE
