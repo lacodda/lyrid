@@ -16,7 +16,8 @@
 # replaced: `--tables` restores only the rows of the named tables, emptying them
 # first, and leaves every other table -- the accounts above all -- as it is.
 # The tables must already exist on the stand, which a deploy of the release
-# that adds them has done by running its migrations.
+# that adds them has done by running its migrations. Naming every table of the
+# canon replaces the canon under the accounts.
 #
 # Usage:
 #   tools/stage-seed.sh [--stand pi] [--dump .local/lyrid-slice-100k.dump]
@@ -93,10 +94,11 @@ if [ "$do_db" = yes ] && [ -n "$tables" ]; then
     printf '%s\n' "$toc" | grep -E "TABLE DATA public ($(printf '%s' "$tables" | tr ',' '|')) " > "$list"
 
     echo "stage-seed: replacing the rows of $tables on $stand"
-    # Emptied in one statement and without CASCADE: the named tables may
-    # reference each other, and a table outside the list that points at one of
-    # them makes the truncate fail rather than silently emptying it too.
-    remote_psql -c "'TRUNCATE $(printf '%s' "$tables" | sed 's/,/, /g')'"
+    # Emptied in one transaction by stage-seed-empty.sql: truncated where the
+    # schema allows it, deleted where a table outside the list points in with
+    # ON DELETE SET NULL -- a profile's camera and the layout it was on -- and
+    # refused before anything goes when one points in any other way.
+    remote_psql -v ON_ERROR_STOP=1 -v "tables=$tables" < "$(dirname "$0")/stage-seed-empty.sql"
 
     # pg_restore reads a list from a file, not from a pipe it is also reading
     # the dump from, so the list is written into the container first.

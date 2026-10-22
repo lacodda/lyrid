@@ -101,6 +101,32 @@ The credentials are read from the stand's own `.env` on the stand — they are
 never passed on a command line and never copied to the machine holding the
 canon.
 
+## Replacing the whole canon under accounts
+
+A new sky — v0.20 laid it out from a different graph — changes every canon
+table at once, on a stand that has people on it. Name every table of the canon,
+and nothing of the accounts or the weather:
+
+```sh
+tools/stage-seed.sh --dump .local/lyrid-slice-100k.dump --tiles .local/tiles \
+  --tables artist,artist_credit,artist_discogs,artist_fact,artist_genre,artist_influence,artist_listeners,artist_position,artist_prose,artist_redirect,artist_similarity,artist_spectrum,artist_url,artist_wikidata,artist_wikidata_genre,artist_wikidata_label,canon_change,canon_edition,canon_edition_source,canon_edition_star,dump_import,genre,label,label_artist,label_year,release_group,similarity_metric,sky_layout,spectrum_scale,wikidata_item
+```
+
+The accounts, their listening, their letters and the stand's own weather —
+`app_user` and what hangs off it, `feed_run`, `listening_day`, `artist_day`,
+`star_rising`, `new_release` — stay as they are. Listening is keyed by
+MusicBrainz id, not by the canon's own numbers, so it finds its stars again in
+the new canon.
+
+One thing outside the canon does point into it: a profile remembers the layout
+its camera was on. So the named tables are not simply truncated — Postgres
+would refuse, since `user_profile` is not among them. The script truncates what
+it can and deletes the rest children first, which lets the schema do what it
+says: the camera forgets a layout that is gone, and the next visit opens on the
+whole sky. A table outside the list that would lose rows with the canon, or
+block it, stops the script before anything is emptied. Measured on a slice of
+100,000 artists: one second.
+
 ## Carrying the edition
 
 The [edition](/lyrid/guides/building-the-sky/#sealing-the-edition) is sealed on the full canon, so a slice cut after sealing already carries it. A stand filled before an edition was sealed takes it on its own, as four tables:
