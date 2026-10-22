@@ -6,17 +6,21 @@ description: Project the similarity graph into coordinates and cut the tile pyra
 The canon holds who is similar to whom. This step turns that into a place:
 coordinates for every star, and the tiles a browser fetches to draw them.
 
-Run the [similarity import](/lyrid/guides/importing-similarity/) first — the
-layout has nothing to project without a graph.
+Run the [listeners import](/lyrid/guides/importing-listeners/) first — the
+layout has nothing to project without a graph, and the tiles take each star's
+brightness from its listeners.
 
 ## Run it
 
 ```sh
-lyrid layout --tiles ./tiles
+lyrid layout --metric listenbrainz-listeners --tiles ./tiles
 ```
 
+`--metric` is needed once a canon holds more than one similarity metric — the
+layout refuses to guess which notion of closeness the sky should show.
+
 ```
-INFO lyrid::layout::build: laying out the sky metric=listenbrainz-2020
+INFO lyrid::layout::build: laying out the sky metric=listenbrainz-listeners
 INFO lyrid::layout::build: graph built; running the layout stars=… edges=…
 INFO lyrid::layout::build: laying out iteration=10 movement=…
 INFO lyrid::layout::build: positions written rows=…
@@ -141,39 +145,45 @@ The [tile format](/lyrid/reference/tile-format/) has the details, including
 The client uploads these straight into a GPU buffer, so JSON or protobuf would
 be parsing work per frame for no benefit.
 
-**Brightness is connectivity**, not popularity — no listen counts exist as a
-dump ([ADR 0004](https://github.com/lacodda/lyrid/blob/main/docs/adr/0004-similarity-from-a-published-dataset.md)).
+**Brightness is how many people listen** — `artist_listeners`, from the
+[listeners import](/lyrid/guides/importing-listeners/) ([ADR 0024](https://github.com/lacodda/lyrid/blob/main/docs/adr/0024-the-sky-from-the-people-who-listen.md)).
 It is normalised against the brightest star and square-rooted, so the long
-tail stays visible instead of collapsing into the hubs.
+tail stays visible instead of collapsing into the hubs. Measured, that gives
+nearly the same sky the graph's own connectivity gave before v0.20 — the
+median star at 0.024 against 0.021 — with the stars people listen to burning
+in place of the ones most woven into an old graph. Cut tiles again after
+importing listeners: the brightness is baked into them.
 
 ## What a real run looks like
 
-Measured against the full canon — 2.96M artists, of which 206,636 appear in
-the similarity graph, joined by 5.96M edges:
+Measured against the full canon on 2026-10-22 — 2.96M artists, of which
+283,062 have neighbours in the `listenbrainz-listeners` metric, joined by 6.89M
+edges:
 
 | | |
 | --- | --- |
-| Stars placed | 206,636 |
+| Stars placed | 283,062 |
 | Iterations | 300 |
-| Peak memory | ~170 MB |
-| Time | 13.4 minutes |
-| Tiles | 250 files, 6.3 MB |
+| Time | 11.4 minutes |
+| Tiles | 255 files, 8.9 MB |
 
 **Distance tracks similarity**, which is the claim the map makes. Averaged over
 200,000 edges of the finished layout:
 
 | Edge strength | Average distance |
 | --- | --- |
-| Strong (≥ 0.5) | 10 |
-| Medium (0.1–0.5) | 21 |
-| Weak (0.01–0.1) | 72 |
-| Faint (< 0.01) | 479 |
+| Strong (≥ 0.5) | 73 |
+| Medium (0.2–0.5) | 189 |
+| Weak (0.1–0.2) | 357 |
+| Faint (< 0.1) | 810 |
+| Two stars picked at random | 1,612 |
 
 **Genres separate without being told to.** Discogs genres take no part in the
-layout — it sees only the listening graph — yet styles land in regions a third
-the width of the sky or less: Delta Blues 0.23, Country Blues 0.29, Texas
-Blues 0.31, Electric Blues 0.32, Classic Rock 0.32. The blues family lands
-together because people listen to it together.
+layout — it sees only who listens to whom — yet the stars of one main style sit
+in a region about a twelfth of the sky's width: the median spread of the 208
+styles with more than a hundred stars is 0.089 of the width, where the sky of
+the 2020 graph managed 0.159. Blues lands with blues because the same people
+listen to it.
 
 ## Judging a layout
 

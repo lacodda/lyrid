@@ -27,7 +27,7 @@ The universe is assembled locally from open dumps and datasets — MusicBrainz, 
 
 ## Status
 
-Pre-alpha, and the sky is on screen: 206,636 artists in WebGL2, in English and Russian, with accounts and a privacy charter. Instruments, radio, a daily signal and dossiers of labels and towns read it. Your ListenBrainz or Last.fm history lights it, finds your home star and the stars of your youth. Daily, it reads ListenBrainz's open dumps: the sky names its edition and shows who is rising this week and what came out. The fog of war comes next. What landed when: the [CHANGELOG](https://github.com/lacodda/lyrid/blob/main/CHANGELOG.md); how it fits together: [the architecture](https://lacodda.github.io/lyrid/guides/architecture/).
+Pre-alpha. The sky is 283,062 artists in WebGL2, placed by the people who listen to them on ListenBrainz and as bright as how many do, with cards, radio, dossiers, your own listening history and a live feed of who is rising; English and Russian. The fog of war comes next. What landed when: the [CHANGELOG](https://github.com/lacodda/lyrid/blob/main/CHANGELOG.md).
 
 ## Documentation
 

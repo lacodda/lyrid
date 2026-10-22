@@ -224,10 +224,11 @@ async fn load_comparison(pool: &PgPool, a: i32, b: i32) -> sqlx::Result<Option<C
     let mut why = why_many(&mut *pool.acquire().await?, a, &[b]).await?.remove(&b).unwrap_or_default();
 
     // The pair is stored once, smaller id first, under the metric the card
-    // also reads; see `artists::load_artist` for why the metric is pinned.
+    // also reads: the one the sky being shown was laid out from, so the pair
+    // agrees with the map.
     why.co_listening = sqlx::query_scalar(
         "SELECT score FROM artist_similarity
-         WHERE metric_id = (SELECT max(id) FROM similarity_metric)
+         WHERE metric_id = (SELECT metric_id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
            AND source_id = least($1, $2) AND target_id = greatest($1, $2)",
     )
     .bind(a)
@@ -247,7 +248,7 @@ async fn load_comparison(pool: &PgPool, a: i32, b: i32) -> sqlx::Result<Option<C
     let genre_mix = genre_mix(&genres(a).await?, &genres(b).await?);
 
     let shared_neighbours = sqlx::query_as::<_, (i32, String, f32)>(
-        "WITH metric AS (SELECT max(id) AS id FROM similarity_metric),
+        "WITH metric AS (SELECT metric_id AS id FROM sky_layout ORDER BY created_at DESC LIMIT 1),
          near_a AS (
              SELECT CASE WHEN e.source_id = $1 THEN e.target_id ELSE e.source_id END AS id, e.score
              FROM artist_similarity e, metric

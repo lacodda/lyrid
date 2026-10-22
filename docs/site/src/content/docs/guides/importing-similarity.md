@@ -1,10 +1,15 @@
 ---
 title: Importing similarity
-description: Build the artist similarity graph from the ListenBrainz relations dataset.
+description: The older similarity graph, from the ListenBrainz relations dataset of 2020.
 ---
 
 Stars alone are a list. What makes the sky a map is similarity: who is
-listened to alongside whom. This guide imports that graph.
+listened to alongside whom. The sky is drawn from the graph of the people who
+listen now — see [Importing listeners](/lyrid/guides/importing-listeners/).
+This guide imports the older one, published by ListenBrainz in 2020 and kept
+beside it as a second metric: a different corpus and a different method
+(listening sessions rather than people), for the lenses that arrange the same
+music by another notion of closeness.
 
 Run the [MusicBrainz import](/lyrid/guides/importing-musicbrainz/) first — the
 dataset is keyed by MusicBrainz artist credits, and resolving it needs the
@@ -39,7 +44,6 @@ The import reports what it dropped rather than leaving the gaps invisible:
 INFO lyrid::import::listenbrainz: resolving similarity against the canon credits=…
 INFO lyrid::import::listenbrainz: dataset read; writing to PostgreSQL version=2020-08-13T12:41:07.693781+00:00 edges=… skipped_unknown=… skipped_weak=0 skipped_self=…
 INFO lyrid::import::listenbrainz: similarity edges written rows=…
-INFO lyrid::import::listenbrainz: artist prominence computed rows=…
 ```
 
 - **`skipped_unknown`** — credits absent from your canon. A newer MusicBrainz
@@ -75,22 +79,6 @@ one metric replaces only its own edges, leaving the others standing. This is
 what later lets the same music be arranged by a deliberately different notion
 of closeness without discarding the first.
 
-## Brightness without listen counts
-
-ListenBrainz publishes no per-artist listen counts as a dump — only a
-top-1000 API and a corpus licensed for non-commercial use only. So brightness
-is derived from the graph itself, in `artist_prominence`:
-
-| Column | Meaning |
-| --- | --- |
-| `degree` | How many edges the artist has |
-| `weight` | Sum of those edges' scores |
-
-`weight` is the more honest measure: one strong tie counts for more than many
-faint ones, which keeps a well-connected obscurity from outshining a genuinely
-central artist. The columns are named for what they measure, so nothing here
-can be mistaken for play counts.
-
 ## Why a dataset from 2020
 
 Current similarity exists at ListenBrainz only behind a live, rate-limited
@@ -102,9 +90,8 @@ collect 1,516 edges.
 
 This dataset yields about four thousand times that, immediately. Musical
 similarity also ages slowly: Beethoven and Mozart have not drifted apart since
-2020. What the vintage does cost is artists who rose afterwards, who arrive
-with no edges at all — which the design already has a place for, as the "dark
-matter" every map has at its margins.
-
-Computing a fresh graph from the CC0 listen dumps is its own stage, and the
-schema is ready for it: it will land as a second metric beside this one.
+2020. What the vintage costs is artists who rose afterwards, who arrive with no
+edges at all — measured in 2026, the sky drawn from it held only 42,945 of the
+100,000 artists most listened to now. That is why the sky is drawn from the
+fresh graph since v0.20 ([ADR 0024](https://github.com/lacodda/lyrid/blob/main/docs/adr/0024-the-sky-from-the-people-who-listen.md)), and this one stays as a metric
+beside it.

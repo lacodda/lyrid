@@ -18,7 +18,7 @@ use clap::Args as ClapArgs;
 use sqlx::PgPool;
 
 use super::labels::{self, Kind};
-use super::tiles::{self, Bounds, Plan, Star};
+use super::tiles::{self, Bounds, Plan, Star, brightness};
 
 #[derive(ClapArgs)]
 pub struct Args {
@@ -143,9 +143,9 @@ fn stamp() -> u64 {
 
 /// Every placed star, brightest first.
 ///
-/// Brightness comes from `artist_prominence` -- connectivity, which ADR 0004
-/// settled on because no listen counts exist as a dump. It is normalised here
-/// so the client uploads a 0..1 value and does no scaling per frame.
+/// Brightness comes from `artist_listeners` -- how many people listen to the
+/// artist (ADR 0024). It is normalised here so the client uploads a 0..1 value
+/// and does no scaling per frame.
 ///
 /// The year follows the card's rule: `MusicBrainz`'s own begin year, and
 /// Wikidata's inception only where `MusicBrainz` has none. One rule in two
@@ -153,11 +153,10 @@ fn stamp() -> u64 {
 /// time machine read it the same way.
 async fn stars(pool: &PgPool, layout_id: i16) -> Result<Vec<Star>> {
     let rows: Vec<(i32, f32, f32, f32, Option<i16>)> = sqlx::query_as(
-        "SELECT p.artist_id, p.x, p.y, COALESCE(pr.weight, 0), COALESCE(a.begin_year, f.inception_year)
+        "SELECT p.artist_id, p.x, p.y, COALESCE(al.listeners, 0)::real, COALESCE(a.begin_year, f.inception_year)
          FROM artist_position p
-         JOIN sky_layout l ON l.id = p.layout_id
          JOIN artist a ON a.id = p.artist_id
-         LEFT JOIN artist_prominence pr ON pr.artist_id = p.artist_id AND pr.metric_id = l.metric_id
+         LEFT JOIN artist_listeners al ON al.artist_id = p.artist_id
          LEFT JOIN artist_fact f ON f.artist_id = p.artist_id
          WHERE p.layout_id = $1",
     )
@@ -167,20 +166,17 @@ async fn stars(pool: &PgPool, layout_id: i16) -> Result<Vec<Star>> {
     .context("failed to read the stored layout")?;
 
     // Normalised against the brightest star rather than against a constant:
-    // the scale of connectivity depends on the metric, and a fixed divisor
-    // would wash out one graph and clip another.
-    let max_weight = rows.iter().map(|r| r.3).fold(0f32, f32::max).max(f32::MIN_POSITIVE);
+    // the audience of the biggest act depends on the dump, and a fixed divisor
+    // would wash out a small sky and clip a large one.
+    let brightest = rows.iter().map(|r| r.3).fold(0f32, f32::max);
 
     let mut stars: Vec<Star> = rows
         .into_iter()
-        .map(|(artist_id, x, y, weight, year)| Star {
+        .map(|(artist_id, x, y, listeners, year)| Star {
             artist_id,
             x,
             y,
-            // Square root, so the long tail of faint stars stays visible
-            // rather than collapsing to zero: connectivity is heavily
-            // skewed, and a linear scale would show only the hubs.
-            brightness: (weight / max_weight).sqrt(),
+            brightness: brightness(listeners, brightest),
             begin_year: plausible_year(year),
         })
         .collect();

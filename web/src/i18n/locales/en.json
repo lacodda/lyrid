@@ -80,7 +80,9 @@
     "pinned": "held for comparing — open another star",
     "compareWith": "compare with {{name}}",
     "heard": "you have heard them once, on {{since}}",
-    "heard_other": "you have heard them {{number}} times, first on {{since}}"
+    "heard_other": "you have heard them {{number}} times, first on {{since}}",
+    "listeners": "listened to by one person on ListenBrainz",
+    "listeners_other": "listened to by {{number}} people on ListenBrainz"
   },
   "spectrum": {
     "heading": "spectrum",
@@ -452,6 +454,7 @@
     "sources": {
       "musicbrainz": "MusicBrainz",
       "listenbrainz-similarity": "ListenBrainz similarity",
+      "listenbrainz-statistics": "ListenBrainz listeners",
       "discogs": "Discogs",
       "wikidata": "Wikidata",
       "wikipedia": "Wikipedia",

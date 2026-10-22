@@ -76,6 +76,13 @@ enum ImportCommand {
     /// dataset. Requires the MusicBrainz import to have run first.
     #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
     Listenbrainz(import::listenbrainz::Args),
+    /// Import how many people listen to each artist, and the similarity of
+    /// artists by the people they share, from the statistics dump of a
+    /// ListenBrainz full export. Read from the dump server as a stream and
+    /// stopped after its first file. Requires the MusicBrainz import to have
+    /// run first.
+    #[allow(clippy::doc_markdown, reason = "this text is user-facing --help output, not rustdoc")]
+    Listeners(import::listeners::Args),
     /// Import genres, styles and labels from the Discogs monthly XML dumps.
     /// Requires the MusicBrainz import to have run first: artists are joined
     /// through its `discogs` URL relationships.
@@ -111,8 +118,10 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("lyrid=info,tower_http=info")))
         .init();
 
-    let config = config::Config::from_env()?;
+    // Arguments first: `--help` and a mistyped command are answered without
+    // a database, by a binary that has no environment yet.
     let cli = Cli::parse();
+    let config = config::Config::from_env()?;
 
     match cli.command {
         // Running the binary with no arguments serves, which is what a
@@ -125,6 +134,10 @@ async fn main() -> Result<()> {
         Some(Command::Import(ImportCommand::Listenbrainz(args))) => {
             let pool = connect(&config).await?;
             import::listenbrainz::run(&pool, &args).await
+        }
+        Some(Command::Import(ImportCommand::Listeners(args))) => {
+            let pool = connect(&config).await?;
+            import::listeners::run(&pool, &feed::Dumps::new(&config.dumps_url), &args).await
         }
         Some(Command::Import(ImportCommand::Discogs(args))) => {
             let pool = connect(&config).await?;

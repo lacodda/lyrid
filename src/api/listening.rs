@@ -25,6 +25,7 @@ use tokio::sync::Mutex;
 
 use crate::api::artists::channel_of;
 use crate::app::AppState;
+use crate::layout::tiles::brightness;
 
 pub fn routes() -> Router<AppState> {
     Router::new().route("/api/radio", get(radio)).route("/api/signal", get(signal))
@@ -45,7 +46,7 @@ pub struct Station {
 #[derive(Clone, Debug)]
 struct Tuned {
     station: Station,
-    /// As the sky draws it: the square root of prominence over the brightest.
+    /// As the sky draws it: the square root of listeners over the brightest.
     brightness: f32,
     /// Outside the stars the wide sky draws -- see [`dark_after`].
     dark: bool,
@@ -57,10 +58,7 @@ struct Tuned {
 /// Every playable star of one layout.
 pub struct Tuning {
     layout: LayoutKey,
-    /// The similarity metric the layout was drawn from, whose prominence is
-    /// the brightness of its stars.
-    metric: i16,
-    /// The prominence of the layout's brightest star, which every other star
+    /// The listeners of the layout's brightest star, which every other star
     /// is dimmed against.
     brightest: f32,
     stars: Vec<Tuned>,
@@ -70,7 +68,6 @@ pub struct Tuning {
 #[derive(Clone, Copy, Debug)]
 pub struct Sky {
     pub layout: i16,
-    pub metric: i16,
     pub brightest: f32,
 }
 
@@ -108,7 +105,6 @@ impl Dial {
     pub async fn sky(&self, pool: &PgPool) -> sqlx::Result<Option<Sky>> {
         Ok(self.tuning(pool).await?.map(|tuning| Sky {
             layout: tuning.layout.id,
-            metric: tuning.metric,
             brightest: tuning.brightest,
         }))
     }
@@ -154,17 +150,11 @@ async fn latest_layout(connection: &mut PgConnection) -> sqlx::Result<Option<Lay
 /// them in the tile order -- brightness down, then id up, the order the tiles
 /// are cut in -- is dark.
 async fn tune(connection: &mut PgConnection, layout: LayoutKey, drawn: usize) -> sqlx::Result<Tuning> {
-    let metric: i16 = sqlx::query_scalar("SELECT metric_id FROM sky_layout WHERE id = $1")
-        .bind(layout.id)
-        .fetch_one(&mut *connection)
-        .await?;
-
     // The brightest star of all, to normalise against the way the tiles do.
     let brightest: f32 = sqlx::query_scalar(
-        "SELECT COALESCE(max(pr.weight), 0)::real
+        "SELECT COALESCE(max(al.listeners), 0)::real
          FROM artist_position p
-         JOIN sky_layout l ON l.id = p.layout_id
-         JOIN artist_prominence pr ON pr.artist_id = p.artist_id AND pr.metric_id = l.metric_id
+         JOIN artist_listeners al ON al.artist_id = p.artist_id
          WHERE p.layout_id = $1",
     )
     .bind(layout.id)
@@ -175,10 +165,9 @@ async fn tune(connection: &mut PgConnection, layout: LayoutKey, drawn: usize) ->
     // no such star the whole sky fits in the wide levels and nothing is.
     let offset = i64::try_from(drawn.saturating_sub(1)).unwrap_or(i64::MAX);
     let edge: Option<(f32, i32)> = sqlx::query_as(
-        "SELECT COALESCE(pr.weight, 0)::real, p.artist_id
+        "SELECT COALESCE(al.listeners, 0)::real, p.artist_id
          FROM artist_position p
-         JOIN sky_layout l ON l.id = p.layout_id
-         LEFT JOIN artist_prominence pr ON pr.artist_id = p.artist_id AND pr.metric_id = l.metric_id
+         LEFT JOIN artist_listeners al ON al.artist_id = p.artist_id
          WHERE p.layout_id = $1
          ORDER BY 1 DESC, 2
          OFFSET $2 LIMIT 1",
@@ -201,12 +190,11 @@ async fn tune(connection: &mut PgConnection, layout: LayoutKey, drawn: usize) ->
              FROM main_genres(ARRAY(SELECT DISTINCT artist_id FROM channel)) m
              JOIN genre g ON g.id = m.genre_id
          )
-         SELECT a.id, a.name, p.x, p.y, COALESCE(pr.weight, 0)::real, c.url, genre.name, style.name
+         SELECT a.id, a.name, p.x, p.y, COALESCE(al.listeners, 0)::real, c.url, genre.name, style.name
          FROM channel c
          JOIN artist_position p ON p.artist_id = c.artist_id AND p.layout_id = $1
-         JOIN sky_layout l ON l.id = p.layout_id
          JOIN artist a ON a.id = c.artist_id
-         LEFT JOIN artist_prominence pr ON pr.artist_id = c.artist_id AND pr.metric_id = l.metric_id
+         LEFT JOIN artist_listeners al ON al.artist_id = c.artist_id
          LEFT JOIN main genre ON genre.artist_id = c.artist_id AND NOT genre.is_style
          LEFT JOIN main style ON style.artist_id = c.artist_id AND style.is_style
          ORDER BY a.id, c.url",
@@ -220,26 +208,21 @@ async fn tune(connection: &mut PgConnection, layout: LayoutKey, drawn: usize) ->
     let stars = rows
         .chunk_by(|a, b| a.0 == b.0)
         .filter_map(|links| {
-            let (id, name, x, y, weight, _, genre, style) = links[0].clone();
+            let (id, name, x, y, listeners, _, genre, style) = links[0].clone();
             let uploads = channel_of(links.iter().map(|link| link.5.as_str()))?;
             // After the edge in the tile order: dimmer, or as bright and
             // later by id.
-            let dark = edge.is_some_and(|(edge_weight, edge_id)| edge_weight.total_cmp(&weight).then(id.cmp(&edge_id)).is_gt());
+            let dark = edge.is_some_and(|(edge_listeners, edge_id)| edge_listeners.total_cmp(&listeners).then(id.cmp(&edge_id)).is_gt());
             Some(Tuned {
                 station: Station { id, name, x, y, uploads },
-                brightness: if brightest > 0.0 { (weight / brightest).sqrt() } else { 0.0 },
+                brightness: brightness(listeners, brightest),
                 dark,
                 genre,
                 style,
             })
         })
         .collect();
-    Ok(Tuning {
-        layout,
-        metric,
-        brightest,
-        stars,
-    })
+    Ok(Tuning { layout, brightest, stars })
 }
 
 /// A nebula a radio can play: a genre or a style, by the name the sky writes.
@@ -716,17 +699,16 @@ mod tests {
                 .fetch_one(&mut *tx)
                 .await
                 .unwrap();
-        for (id, weight) in [(hub, 9.0_f32), (faint, 1.0), (silent, 5.0)] {
+        for (id, listeners) in [(hub, 9_i32), (faint, 1), (silent, 5)] {
             sqlx::query("INSERT INTO artist_position (layout_id, artist_id, x, y) VALUES ($1, $2, 1, 2)")
                 .bind(layout)
                 .bind(id)
                 .execute(&mut *tx)
                 .await
                 .unwrap();
-            sqlx::query("INSERT INTO artist_prominence (metric_id, artist_id, degree, weight) VALUES ($1, $2, 1, $3)")
-                .bind(metric)
+            sqlx::query("INSERT INTO artist_listeners (artist_id, listeners, listens) VALUES ($1, $2, $2)")
                 .bind(id)
-                .bind(weight)
+                .bind(listeners)
                 .execute(&mut *tx)
                 .await
                 .unwrap();
@@ -783,7 +765,6 @@ mod tests {
         assert!((hub_star.brightness - 1.0).abs() < 1e-6, "the brightest star is 1");
         assert!(!hub_star.dark);
         assert!(tuning.stars[1].dark, "the third brightest is past the two lit ones");
-        assert_eq!(tuning.metric, metric);
         assert!((tuning.brightest - 9.0).abs() < 1e-6, "the hub is the brightest placed star");
         assert_eq!(
             queue(&tuning.stars, "Fixture Disco", Kind::Style, 3).iter().map(|s| s.id).collect::<Vec<_>>(),

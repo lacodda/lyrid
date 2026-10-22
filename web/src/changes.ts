@@ -113,11 +113,14 @@ export function splitReleases(releases: Release[], now: Date): { out: Release[];
  * A source's version as a date, when it is one.
  *
  * The importers record what upstream calls its version, verbatim: a fullexport
- * stamp (`20260815-002140`), a dump date (`20260801`), a timestamp, or a word.
- * The dated ones read better as dates; the rest are shown as they are, with
- * the day they were imported beside them.
+ * stamp (`20260815-002140`), a dump date (`20260801`), a ListenBrainz dump by
+ * its directory (`listenbrainz-dump-2723-20261015-000002-full`), a timestamp,
+ * or a word. The dated ones read better as dates; the rest are shown as they
+ * are, with the day they were imported beside them.
  */
 export function versionDate(version: string): Date | null {
+  const dump = /^listenbrainz-dump-\d+-(\d{8}-\d{6})-(?:full|incremental)$/.exec(version.trim())
+  if (dump?.[1]) return versionDate(dump[1])
   const stamp = /^(\d{4})(\d{2})(\d{2})(?:-\d{6})?$/.exec(version.trim())
   if (stamp) {
     const [, year, month, day] = stamp.map(Number)

@@ -104,7 +104,13 @@ export interface Artist {
   area: string | null
   begin_year: number | null
   end_year: number | null
+  /** Where the star is on the current sky, and how brightly the sky draws it, 0..1. */
   position: { x: number; y: number; brightness: number } | null
+  /**
+   * How many people listen to the artist: those who have it among the thousand
+   * artists they play most, as ListenBrainz counts them. `null` when nobody does.
+   */
+  listeners: number | null
   genres: Genre[]
   /** What the star sounds like, from AcousticBrainz. `null` for the many stars never measured. */
   spectrum: Spectrum | null

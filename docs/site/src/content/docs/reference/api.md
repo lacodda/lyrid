@@ -53,8 +53,8 @@ attempt:
 finds a band called "Beatless" and misses The Beatles entirely, because their
 name starts with an article.
 
-**Ranking puts connectivity above where the match falls.** An exact name wins
-first; after that the most woven-into-the-graph artist leads. Otherwise
+**Ranking puts listeners above where the match falls.** An exact name wins
+first; after that the artist most people listen to leads. Otherwise
 `beatles` still leads with "Beatless" — the word does start its name — and
 `nirvana` leads with a sitar ensemble.
 
@@ -63,13 +63,13 @@ fly to is a dead end.
 
 ## `GET /api/nearby?min_x=…&min_y=…&max_x=…&max_y=…`
 
-The named stars inside a rectangle of the layout, most prominent first, twelve
+The named stars inside a rectangle of the layout, most listened first, twelve
 at most. All four bounds are required: defaulting a missing edge to zero would
 answer a rectangle nobody asked about, and the answer would look plausible.
 
 ```json
 [
-  { "id": 54, "name": "Nirvana", "comment": "1980s–1990s US grunge band", "x": -59.2, "y": -69.5 },
+  { "id": 54, "name": "Nirvana", "comment": "1980s–1990s US grunge band", "x": -31.2, "y": 187.1 },
   { "id": 12389, "name": "Red Hot Chili Peppers", "comment": null, "x": -52.8, "y": -71.3 }
 ]
 ```
@@ -88,7 +88,7 @@ request each.
 
 Two details of the ordering:
 
-**By prominence, not by distance from the middle.** A reader asking what they
+**By listeners, not by distance from the middle.** A reader asking what they
 are looking at wants the names worth knowing in this patch of sky; the star
 nearest the exact centre of an arbitrary pan is nobody in particular.
 
@@ -117,7 +117,8 @@ each, the spectrum from AcousticBrainz, the neighbours from co-listening.
   "area": "United States",
   "begin_year": 1987,
   "end_year": 1994,
-  "position": { "x": -59.2, "y": -69.5, "brightness": 1.1 },
+  "position": { "x": -31.2, "y": 187.1, "brightness": 0.93 },
+  "listeners": 26150,
   "genres": [
     { "name": "Rock", "is_style": false, "releases": 314 },
     { "name": "Grunge", "is_style": true, "releases": 303 }
@@ -239,7 +240,7 @@ the roster sits on the sky, and where to go next. `id` is Discogs's own.
   not only the canon's, because it is the label's history.
 - **`roster.listed`** is the first sixty by releases on the label; **`roster.map`**
   is `[id, x, y, brightness]` for every placed member, brightness as the sky
-  draws it (the square root of prominence over the brightest star). `size`
+  draws it (the square root of listeners over the brightest star's). `size`
   counts every placed member.
 - **`sound`** is the roster's main styles — the same "main" the sky's names and
   the radio read — or its main genres when it has no styles; **`scenes`** is
@@ -327,7 +328,7 @@ a shorter route.
 ## `GET /api/region?min_x=…&min_y=…&max_x=…&max_y=…`
 
 What a patch of sky is: the commonest **main** style and genre among the 300
-most prominent stars in the rectangle. The compass asks it about the middle half
+most listened stars in the rectangle. The compass asks it about the middle half
 of the view.
 
 ```json
@@ -398,19 +399,25 @@ not, embedded. `stars` is empty when nothing on this sky is both faint and
 playable.
 
 **`position` comes from the newest layout.** An older one would place the star
-somewhere the map does not draw it. `brightness` there is the raw graph weight
-— connectivity, not popularity, since no listen counts are published as a dump
-([ADR 0004](https://github.com/lacodda/lyrid/blob/main/docs/adr/0004-similarity-from-a-published-dataset.md)).
-The tiles carry a normalised version of the same number.
+somewhere the map does not draw it. `brightness` there is the number the tiles
+carry for the star, 0..1: the square root of its listeners over the brightest
+star's.
+
+**`listeners` is how many people listen to the artist** — people with it among
+the thousand artists they have played most, as ListenBrainz's statistics dump
+counts them ([ADR 0024](https://github.com/lacodda/lyrid/blob/main/docs/adr/0024-the-sky-from-the-people-who-listen.md)). It is there for an artist the sky does not
+place, too; `null` means nobody does.
 
 `genres` are ordered by their release count, which is what makes a genre a
 claim rather than a label: "Rock 314" says more than "Rock".
 
 `similar` reads both columns of `artist_similarity`, since a pair is stored
-once. Both it and the influence lists pin the newest similarity metric: an
-edge is keyed by `(metric_id, source_id, target_id)`, so joining without one
-would list the same neighbour once per metric — on scores that are not
-comparable across metrics anyway.
+once, and only the metric the newest layout was drawn from: an edge is keyed by
+`(metric_id, source_id, target_id)`, so joining without one would list the same
+neighbour once per metric — on scores that are not comparable across metrics
+anyway — and the layout's metric is the one whose neighbours sit near the star
+on the map being shown. The influence lists lead with the artists most people
+listen to.
 
 **`prose` is never served without its attribution.** The extract and the
 credit are one row in the database and one object here, so no response can

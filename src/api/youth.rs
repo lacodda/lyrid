@@ -86,7 +86,7 @@ async fn youth(State(state): State<AppState>, Path(from): Path<i16>) -> Response
 /// y)` on the current sky.
 async fn stars(db: impl PgExecutor<'_>, from: i16, to: i16) -> sqlx::Result<Vec<(i32, String, f32, f32)>> {
     sqlx::query_as::<_, (i32, String, f32, f32)>(
-        "WITH layout AS (SELECT id, metric_id FROM sky_layout ORDER BY created_at DESC LIMIT 1),
+        "WITH layout AS (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1),
          released AS (
              SELECT DISTINCT artist_id FROM release_group
              WHERE year BETWEEN $1 AND $2 AND primary_type IN ('Album', 'EP', 'Single')
@@ -96,13 +96,13 @@ async fn stars(db: impl PgExecutor<'_>, from: i16, to: i16) -> sqlx::Result<Vec<
          JOIN artist a ON a.id = r.artist_id
          JOIN layout l ON true
          JOIN artist_position p ON p.artist_id = a.id AND p.layout_id = l.id
-         JOIN artist_prominence pr ON pr.artist_id = a.id AND pr.metric_id = l.metric_id
+         JOIN artist_listeners al ON al.artist_id = a.id
          WHERE NOT EXISTS (
              SELECT 1 FROM release_group e
              WHERE e.artist_id = a.id AND e.year < $1 - $3
                AND e.primary_type IN ('Album', 'EP', 'Single')
          )
-         ORDER BY pr.weight DESC, a.id
+         ORDER BY al.listeners DESC, a.id
          LIMIT $4",
     )
     .bind(from)
@@ -157,7 +157,7 @@ mod tests {
     }
 
     /// A name, how bright it is, and its records as (year, type).
-    type Fixture<'a> = (&'a str, f32, &'a [(i16, &'a str)]);
+    type Fixture<'a> = (&'a str, i32, &'a [(i16, &'a str)]);
 
     #[tokio::test]
     async fn a_star_of_a_youth_put_music_out_then_and_was_not_reissuing_an_old_catalogue() {
@@ -184,14 +184,14 @@ mod tests {
             .unwrap();
 
         let artists: [Fixture<'_>; 5] = [
-            ("Arrived Then", 2.0, &[(1997, "Single"), (1999, "Album")]),
-            ("Brighter Arrival", 5.0, &[(2001, "EP")]),
-            ("Old Catalogue", 9.0, &[(1963, "Album"), (2000, "Album")]),
-            ("Compiled", 7.0, &[(2000, "Compilation")]),
-            ("Later On", 8.0, &[(2010, "Album")]),
+            ("Arrived Then", 2, &[(1997, "Single"), (1999, "Album")]),
+            ("Brighter Arrival", 5, &[(2001, "EP")]),
+            ("Old Catalogue", 9, &[(1963, "Album"), (2000, "Album")]),
+            ("Compiled", 7, &[(2000, "Compilation")]),
+            ("Later On", 8, &[(2010, "Album")]),
         ];
         let mut next_group = rand::random_range(1_500_000_000..1_900_000_000);
-        for (name, brightness, records) in artists {
+        for (name, listeners, records) in artists {
             let id: i32 = rand::random_range(1_500_000_000..2_000_000_000);
             sqlx::query("INSERT INTO artist (id, mbid, name, sort_name) VALUES ($1, $2, $3, $3)")
                 .bind(id)
@@ -206,10 +206,9 @@ mod tests {
                 .execute(&mut *tx)
                 .await
                 .unwrap();
-            sqlx::query("INSERT INTO artist_prominence (metric_id, artist_id, degree, weight) VALUES ($1, $2, 1, $3)")
-                .bind(metric)
+            sqlx::query("INSERT INTO artist_listeners (artist_id, listeners, listens) VALUES ($1, $2, $2)")
                 .bind(id)
-                .bind(brightness)
+                .bind(listeners)
                 .execute(&mut *tx)
                 .await
                 .unwrap();

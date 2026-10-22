@@ -47,11 +47,12 @@ If the database is unreachable the same endpoint answers `503` with `"status": "
 
 ## The universe
 
-An empty database is a sky with no stars. Filling it takes six imports, in this order:
+An empty database is a sky with no stars. Filling it takes seven imports, in this order:
 
 ```sh
 cargo run -- import musicbrainz  --dump ./mbdump.tar.bz2                   # the stars
-cargo run -- import listenbrainz --dump ./artist-credit-relations.tar.bz2  # the routes between them
+cargo run --release -- import listeners                                   # who listens, and who alongside whom
+cargo run -- import listenbrainz --dump ./artist-credit-relations.tar.bz2  # the older routes, from 2020
 cargo run -- import discogs      --masters ./discogs_masters.xml.gz \
                                  --labels  ./discogs_labels.xml.gz         # what each star is made of
 cargo run -- import wikidata                                               # where it came from, and who it followed
@@ -63,15 +64,15 @@ cargo run --release -- import acousticbrainz --dir ./acousticbrainz \
 
 MusicBrainz comes first in every case: every later import resolves against the canon it builds.
 
-The last one streams a 100 GB dump straight from the network without ever storing it — about ten hours, so run it in the background. What it extracts is a few hundred megabytes.
+The Wikidata one streams a 100 GB dump straight from the network without ever storing it — about ten hours, so run it in the background. What it extracts is a few hundred megabytes.
 
 Once the canon is filled, the sky is built from it:
 
 ```sh
-cargo run --release -- layout --tiles ./tiles   # coordinates, then the tile pyramid
+cargo run --release -- layout --metric listenbrainz-listeners --tiles ./tiles   # coordinates, then the tile pyramid
 ```
 
-See [Importing MusicBrainz](/lyrid/guides/importing-musicbrainz/), [Importing similarity](/lyrid/guides/importing-similarity/), [Importing genres and labels](/lyrid/guides/importing-genres/) [Importing facts and influence](/lyrid/guides/importing-facts/) [Importing prose](/lyrid/guides/importing-prose/), [Importing spectra](/lyrid/guides/importing-spectra/) and [Building the sky](/lyrid/guides/building-the-sky/). Everything else runs fine without them; there is simply nothing to look at yet.
+See [Importing MusicBrainz](/lyrid/guides/importing-musicbrainz/), [Importing listeners](/lyrid/guides/importing-listeners/), [Importing similarity](/lyrid/guides/importing-similarity/), [Importing genres and labels](/lyrid/guides/importing-genres/) [Importing facts and influence](/lyrid/guides/importing-facts/) [Importing prose](/lyrid/guides/importing-prose/), [Importing spectra](/lyrid/guides/importing-spectra/) and [Building the sky](/lyrid/guides/building-the-sky/). Everything else runs fine without them; there is simply nothing to look at yet.
 
 :::note[Adding a migration]
 Migrations are embedded into the binary at compile time, so a newly added `.sql` file needs a rebuild before it will apply — `cargo build` after adding one, or the server will happily run the old set.
@@ -88,7 +89,7 @@ pnpm dev
 The map needs tiles. Point the layout at the folder the dev server publishes:
 
 ```sh
-cargo run --release -- layout --tiles web/public/tiles
+cargo run --release -- layout --metric listenbrainz-listeners --tiles web/public/tiles
 ```
 
 Then `http://localhost:5173` shows the sky itself — drag to pan, wheel to

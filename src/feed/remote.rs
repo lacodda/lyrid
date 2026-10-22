@@ -1,4 +1,5 @@
-//! ListenBrainz's dump server, read a byte range at a time.
+//! ListenBrainz's dump server, read a byte range at a time -- or, for the one
+//! file that cannot be, from its first byte to where the reader stops.
 //!
 //! A day of listening is a tar of two Parquet files, about two hundred
 //! megabytes, of which lyrid counts four columns. Parquet keeps its table of
@@ -10,6 +11,7 @@
 //! Blocking, like the rest of lyrid's outbound HTTP: the feeds run it on the
 //! blocking pool, and nothing a visitor waits for goes through here.
 
+use std::io::Read;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -23,17 +25,30 @@ pub const DEFAULT_URL: &str = "https://data.metabrainz.org/pub/musicbrainz/liste
 pub struct Dumps {
     base: String,
     agent: ureq::Agent,
+    /// For a file read as one stream: minutes of body, so nothing bounds the
+    /// whole of it, only a silence.
+    stream: ureq::Agent,
 }
 
-/// One daily dump on offer: `listenbrainz-dump-2724-20261016-000002-incremental`.
+/// One dump on offer: a daily one,
+/// `listenbrainz-dump-2724-20261016-000002-incremental`, or a full export,
+/// `listenbrainz-dump-2723-20261015-000002-full`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dump {
     /// ListenBrainz's running number for its dumps, shared by full and
     /// incremental ones -- which is why the incremental numbers have gaps.
     pub sequence: u32,
-    /// The directory name, which is also what a feed run records.
+    /// The directory name, which is also what a feed run or an import
+    /// records: unlike the date in it, it names one dump only (2722 and 2723
+    /// are both exports of 2026-10-15).
     pub name: String,
 }
+
+/// The suffix that tells a daily dump's name from a full export's.
+const INCREMENTAL: &str = "-incremental";
+const FULL: &str = "-full";
+
+const USER_AGENT: &str = concat!("lyrid/", env!("CARGO_PKG_VERSION"), " (+https://github.com/lacodda/lyrid)");
 
 impl Dumps {
     pub fn new(base: &str) -> Self {
@@ -44,12 +59,23 @@ impl Dumps {
             // Statuses are read rather than thrown: a 200 where a 206 was
             // asked for is the one answer that must not be read as data.
             .http_status_as_error(false)
-            .user_agent(concat!("lyrid/", env!("CARGO_PKG_VERSION"), " (+https://github.com/lacodda/lyrid)"))
+            .user_agent(USER_AGENT)
+            .build()
+            .into();
+        let stream = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(30)))
+            .timeout_recv_response(Some(Duration::from_secs(60)))
+            // A minute without a byte is a server that has stopped sending;
+            // a slow one that keeps sending is read to the end.
+            .timeout_per_read(Some(Duration::from_secs(60)))
+            .http_status_as_error(false)
+            .user_agent(USER_AGENT)
             .build()
             .into();
         Self {
             base: base.trim_end_matches('/').to_string(),
             agent,
+            stream,
         }
     }
 
@@ -59,14 +85,45 @@ impl Dumps {
     /// in any other form, and the names are the one thing on that page that
     /// is a contract.
     pub fn incremental(&self) -> Result<Vec<Dump>> {
-        let url = format!("{}/incremental/", self.base);
-        let mut response = self.agent.get(&url).call().with_context(|| format!("cannot reach {url}"))?;
+        let page = self.page(&format!("{}/incremental/", self.base))?;
+        Ok(dumps_on(&page, INCREMENTAL))
+    }
+
+    /// The full exports the server offers now, oldest first. It keeps the
+    /// last two.
+    pub fn full(&self) -> Result<Vec<Dump>> {
+        let page = self.page(&format!("{}/fullexport/", self.base))?;
+        Ok(dumps_on(&page, FULL))
+    }
+
+    /// The statistics dump of a full export, as a stream from its first byte.
+    ///
+    /// It is one zstd stream over a tar, so unlike the listening it cannot be
+    /// read by ranges: whoever reads it takes what they need from the front
+    /// and drops the rest unread, which ends the download there.
+    pub fn statistics(&self, dump: &Dump) -> Result<Box<dyn Read + Send>> {
+        let directory = format!("{}/fullexport/{}/", self.base, dump.name);
+        let page = self.page(&directory)?;
+        let file = hrefs(&page)
+            .find(|href| href.starts_with("listenbrainz-statistics-dump-") && href.ends_with(".tar.zst"))
+            .with_context(|| format!("{directory} holds no statistics dump"))?;
+        let url = format!("{directory}{file}");
+        let response = self.stream.get(&url).call().with_context(|| format!("cannot reach {url}"))?;
         let status = response.status().as_u16();
         if status != 200 {
             bail!("{url} answered {status}");
         }
-        let page = response.body_mut().read_to_string().with_context(|| format!("cannot read {url}"))?;
-        Ok(incremental_dumps(&page))
+        Ok(Box::new(response.into_body().into_reader()))
+    }
+
+    /// A directory's index page.
+    fn page(&self, url: &str) -> Result<String> {
+        let mut response = self.agent.get(url).call().with_context(|| format!("cannot reach {url}"))?;
+        let status = response.status().as_u16();
+        if status != 200 {
+            bail!("{url} answered {status}");
+        }
+        response.body_mut().read_to_string().with_context(|| format!("cannot read {url}"))
     }
 
     /// The Parquet copy of one dump: the same listens, already matched to
@@ -97,16 +154,18 @@ impl Dumps {
     }
 }
 
-/// The dumps named on an index page, oldest first, each once.
-fn incremental_dumps(page: &str) -> Vec<Dump> {
-    let mut dumps: Vec<Dump> = page
-        .split("href=\"")
-        .skip(1)
-        .filter_map(|rest| rest.split('"').next())
+/// What an index page links to, in the order it lists them.
+fn hrefs(page: &str) -> impl Iterator<Item = &str> {
+    page.split("href=\"").skip(1).filter_map(|rest| rest.split('"').next())
+}
+
+/// The dumps of one kind named on an index page, oldest first, each once.
+fn dumps_on(page: &str, suffix: &str) -> Vec<Dump> {
+    let mut dumps: Vec<Dump> = hrefs(page)
         .filter_map(|href| {
             let name = href.trim_end_matches('/');
             Some(Dump {
-                sequence: sequence_of(name)?,
+                sequence: sequence_in(name, suffix)?,
                 name: name.to_string(),
             })
         })
@@ -120,7 +179,12 @@ fn incremental_dumps(page: &str) -> Vec<Dump> {
 /// `listenbrainz-dump-<sequence>-<yyyymmdd>-<hhmmss>-incremental`. `None` for
 /// anything else, full dumps included.
 pub fn sequence_of(name: &str) -> Option<u32> {
-    let parts: Vec<&str> = name.strip_prefix("listenbrainz-dump-")?.strip_suffix("-incremental")?.split('-').collect();
+    sequence_in(name, INCREMENTAL)
+}
+
+/// The running number of a dump whose name ends in `suffix`.
+fn sequence_in(name: &str, suffix: &str) -> Option<u32> {
+    let parts: Vec<&str> = name.strip_prefix("listenbrainz-dump-")?.strip_suffix(suffix)?.split('-').collect();
     let [sequence, date, clock] = parts.as_slice() else {
         return None;
     };
@@ -238,7 +302,7 @@ mod tests {
 <a href="listenbrainz-dump-2692-20261001-000003-full/">a full dump is not a daily one</a>
 <a href="listenbrainz-dump-x-20261016-000002-incremental/">a name that is not one</a>
 </pre><hr></body></html>"#;
-        let dumps = incremental_dumps(page);
+        let dumps = dumps_on(page, INCREMENTAL);
         assert_eq!(
             dumps.iter().map(|dump| dump.sequence).collect::<Vec<_>>(),
             vec![2709, 2724, 2725],
@@ -249,6 +313,22 @@ mod tests {
 
     #[test]
     fn a_page_with_no_dumps_offers_none() {
-        assert_eq!(incremental_dumps("<html><body>moved</body></html>"), Vec::<Dump>::new());
+        assert_eq!(dumps_on("<html><body>moved</body></html>", INCREMENTAL), Vec::<Dump>::new());
+    }
+
+    #[test]
+    fn finds_the_full_exports_apart_from_the_daily_dumps() {
+        // As the server writes it on 2026-10-22: two exports of one date.
+        let page = r#"<a href="../">../</a>
+<a href="listenbrainz-dump-2723-20261015-000002-full/">listenbrainz-dump-2723-20261015-000002-full/</a>
+<a href="listenbrainz-dump-2722-20261015-000002-full/">listenbrainz-dump-2722-20261015-000002-full/</a>
+<a href="listenbrainz-dump-2724-20261016-000002-incremental/">a daily one is not a full export</a>"#;
+        let full = dumps_on(page, FULL);
+        assert_eq!(
+            full.iter().map(|dump| dump.name.as_str()).collect::<Vec<_>>(),
+            vec!["listenbrainz-dump-2722-20261015-000002-full", "listenbrainz-dump-2723-20261015-000002-full"],
+            "oldest first by number, though the date is the same"
+        );
+        assert_eq!(dumps_on(page, INCREMENTAL).len(), 1);
     }
 }

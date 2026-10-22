@@ -428,11 +428,9 @@ async fn name_artists(conn: &mut PgConnection, scrobbles: &[Scrobble]) -> sqlx::
         .into_iter()
         .collect();
     let candidates: Vec<(String, Uuid, f32)> = sqlx::query_as(
-        "SELECT lower(a.name), a.mbid, COALESCE(pr.weight, 0)
+        "SELECT lower(a.name), a.mbid, COALESCE(al.listeners, 0)::real
          FROM artist a
-         LEFT JOIN artist_prominence pr
-             ON pr.artist_id = a.id
-            AND pr.metric_id = (SELECT metric_id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
+         LEFT JOIN artist_listeners al ON al.artist_id = a.id
          WHERE lower(a.name) = ANY($1)",
     )
     .bind(&names)

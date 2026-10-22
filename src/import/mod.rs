@@ -4,6 +4,7 @@ pub mod discogs;
 pub mod discogs_releases;
 pub mod discogs_xml;
 pub mod listenbrainz;
+pub mod listeners;
 pub mod musicbrainz;
 pub mod recordings;
 pub mod special;

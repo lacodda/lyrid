@@ -59,6 +59,7 @@ interface Props {
  */
 export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare, onListen, onRadio, onDossier, sounding, listener }: Props) {
   const { t } = useTranslation()
+  const { resolved } = useLanguage()
   const [artist, setArtist] = useState<Artist | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [added, setAdded] = useState(false)
@@ -111,6 +112,12 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
           {artist.comment && <p className="m-0 text-xs text-dim">{artist.comment}</p>}
 
           {facts && <Facts facts={facts} scene={artist.origin?.place ? (artist.origin.qid ?? null) : null} onScene={qid => onDossier({ kind: 'scene', qid })} />}
+
+          {artist.listeners !== null && (
+            <p className="m-0 text-xs text-dim">
+              {t('card.listeners', { count: artist.listeners, number: artist.listeners.toLocaleString(resolved) })}
+            </p>
+          )}
 
           {listener && <HeardLine artistId={artist.id} />}
 

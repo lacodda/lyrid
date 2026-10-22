@@ -36,6 +36,8 @@ describe('reading a source version as a date', () => {
   it('reads the stamps the importers record', () => {
     expect(versionDate('20260815-002140')?.toISOString()).toBe('2026-08-15T00:00:00.000Z')
     expect(versionDate('20260801')?.toISOString()).toBe('2026-08-01T00:00:00.000Z')
+    expect(versionDate('listenbrainz-dump-2723-20261015-000002-full')?.toISOString()).toBe('2026-10-15T00:00:00.000Z')
+    expect(versionDate('listenbrainz-dump-2723-2026101-000002-full')).toBeNull()
     expect(versionDate('2026-08-15 00:21:41.385745+00')?.toISOString().slice(0, 10)).toBe('2026-08-15')
     expect(versionDate('2020-08-13T12:41:07.693781+00:00')?.toISOString().slice(0, 10)).toBe('2020-08-13')
   })

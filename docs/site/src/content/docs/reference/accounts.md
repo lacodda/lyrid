@@ -43,7 +43,7 @@ All answer JSON. A refusal carries `{"error": "..."}` written for a person to re
   "mode": "create",
   "halo_shape": "ring",
   "halo_colour": "azure",
-  "camera": { "x": -59.17, "y": -69.55, "scale": 12.0 },
+  "camera": { "x": -31.22, "y": 187.08, "scale": 12.0 },
   "email_confirmed": true,
   "born": 1983,
   "letter": { "language": "en" }

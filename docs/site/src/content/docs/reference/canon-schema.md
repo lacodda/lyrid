@@ -81,7 +81,7 @@ closeness for the "prestige" lens. Each set of edges names its metric.
 
 | Column | Meaning |
 | --- | --- |
-| `key` | Stable identifier, e.g. `listenbrainz-2020` |
+| `key` | Stable identifier: `listenbrainz-2020`, `listenbrainz-listeners` |
 | `description` | Corpus, method and vintage — what a reader needs to judge the numbers |
 
 Scores are comparable **within** a metric and never across metrics.
@@ -95,18 +95,19 @@ by a check constraint. The relation is symmetric, and storing both directions
 would double a table of millions of rows while inviting the two copies to
 disagree. Both columns are indexed, so neighbours can be found from either end.
 
-## `artist_prominence`
+## `artist_listeners`
 
-How brightly a star is drawn, per metric.
+How many people listen to an artist, and how brightly its star is drawn.
 
 | Column | Meaning |
 | --- | --- |
-| `degree` | How many edges the artist has |
-| `weight` | Sum of those edges' scores |
+| `listeners` | People with the artist among the thousand they have played most, over all time |
+| `listens` | Those people's listens of it, summed |
 
-Derived from the graph rather than from listen counts, because no per-artist
-listen counts are published as a dump. See
-[Importing similarity](/lyrid/guides/importing-similarity/).
+One row per artist, read from ListenBrainz's statistics dump; an artist nobody
+lists has no row. A heavy listener's long tail is not in the dump, so the count
+is of people who keep coming back to an artist. See
+[Importing listeners](/lyrid/guides/importing-listeners/).
 
 ## `genre`
 

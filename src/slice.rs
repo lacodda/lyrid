@@ -82,27 +82,7 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
     // stand that fails mid-prune should still have a sky to serve.
     let mut tx = pool.begin().await.context("failed to open a transaction")?;
 
-    // The artists worth keeping, held for the duration. Ranked by graph weight
-    // rather than by anything resembling popularity: connectivity is what the
-    // layout is built from, so keeping the most connected artists is what
-    // keeps the shape of the sky (ADR 0004).
-    sqlx::query("CREATE TEMPORARY TABLE kept_artist (id integer PRIMARY KEY) ON COMMIT DROP")
-        .execute(&mut *tx)
-        .await
-        .context("failed to create the table of kept artists")?;
-
-    sqlx::query(
-        "INSERT INTO kept_artist (id)
-         SELECT p.artist_id
-         FROM artist_position p
-         LEFT JOIN artist_prominence pr ON pr.artist_id = p.artist_id
-         ORDER BY COALESCE(pr.weight, 0) DESC, p.artist_id
-         LIMIT $1",
-    )
-    .bind(args.keep)
-    .execute(&mut *tx)
-    .await
-    .context("failed to choose the artists to keep")?;
+    keep(&mut tx, args.keep).await?;
 
     // Without statistics the planner assumes this temporary table holds a
     // handful of rows and picks a nested loop for every prune below.
@@ -140,6 +120,57 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
     );
     tracing::info!("run `VACUUM FULL` to return the freed space to the filesystem");
 
+    Ok(())
+}
+
+/// Chooses the artists the slice keeps, into `kept_artist`, and leaves the
+/// slice one sky.
+///
+/// A stand shows the newest layout only, and a canon can hold several: the
+/// sky of the 2020 graph is still there after v0.20 laid out the fresh one.
+/// Choosing among every layout's positions would count a star once per layout
+/// and keep stars of a sky nobody is shown -- so the older layouts go, and
+/// the kept artists are the most listened of the stars the newest one places,
+/// which are the brightest it draws (ADR 0024).
+async fn keep(tx: &mut PgConnection, keep: i64) -> Result<()> {
+    let layout: i16 = sqlx::query_scalar("SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1")
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to find the newest layout")?;
+
+    // Positions first, in one statement: their cascade from the layouts would
+    // be the same delete, made by a trigger.
+    let older = sqlx::query("DELETE FROM artist_position WHERE layout_id <> $1")
+        .bind(layout)
+        .execute(&mut *tx)
+        .await
+        .context("failed to remove the positions of older layouts")?
+        .rows_affected();
+    sqlx::query("DELETE FROM sky_layout WHERE id <> $1")
+        .bind(layout)
+        .execute(&mut *tx)
+        .await
+        .context("failed to remove older layouts")?;
+    tracing::info!(positions = older, "older layouts removed: a stand shows one sky");
+
+    sqlx::query("CREATE TEMPORARY TABLE kept_artist (id integer PRIMARY KEY) ON COMMIT DROP")
+        .execute(&mut *tx)
+        .await
+        .context("failed to create the table of kept artists")?;
+
+    // Every position left is the newest sky's.
+    sqlx::query(
+        "INSERT INTO kept_artist (id)
+         SELECT p.artist_id
+         FROM artist_position p
+         LEFT JOIN artist_listeners al ON al.artist_id = p.artist_id
+         ORDER BY COALESCE(al.listeners, 0) DESC, p.artist_id
+         LIMIT $1",
+    )
+    .bind(keep)
+    .execute(&mut *tx)
+    .await
+    .context("failed to choose the artists to keep")?;
     Ok(())
 }
 
@@ -315,6 +346,64 @@ mod tests {
                 "the refusal should name the flag, got: {error}"
             );
         }
+    }
+
+    /// The slice keeps the most listened stars of the newest sky, and that sky
+    /// alone -- in a schema of the test's own, inside a transaction that is
+    /// rolled back, because the test database is a working canon with layouts
+    /// of its own.
+    #[tokio::test]
+    async fn keeps_the_most_listened_stars_of_the_newest_sky_alone() {
+        let _ = dotenvy::dotenv();
+        let Ok(url) = std::env::var("LYRID_TEST_DATABASE_URL") else {
+            eprintln!("LYRID_TEST_DATABASE_URL is not set: the choice of kept stars was NOT checked against a database");
+            return;
+        };
+        let pool = PgPoolOptions::new().max_connections(1).connect(&url).await.expect("test database");
+        sqlx::migrate!().run(&pool).await.expect("migrations apply");
+        let mut tx = pool.begin().await.unwrap();
+
+        let schema = format!("slice_{:016x}", rand::random::<u64>());
+        sqlx::raw_sql(AssertSqlSafe(format!("CREATE SCHEMA {schema}"))).execute(&mut *tx).await.unwrap();
+        for table in ["sky_layout", "artist_position", "artist_listeners"] {
+            sqlx::raw_sql(AssertSqlSafe(format!("CREATE TABLE {schema}.{table} (LIKE public.{table} INCLUDING ALL)")))
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+        }
+        sqlx::raw_sql(AssertSqlSafe(format!("SET LOCAL search_path TO {schema}")))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+
+        // The old sky places 1, 2 and 3; the new one 2, 3 and 4. Star 1 is the
+        // most listened of all, but the sky being shown has no place for it.
+        sqlx::raw_sql(AssertSqlSafe(
+            "INSERT INTO sky_layout (id, key, metric_id, description, seed, created_at)
+             VALUES (1, 'old', 1, 'old', 1, now() - interval '1 day'), (2, 'new', 2, 'new', 1, now());
+             INSERT INTO artist_position (layout_id, artist_id, x, y)
+             VALUES (1, 1, 0, 0), (1, 2, 0, 0), (1, 3, 0, 0), (2, 2, 1, 1), (2, 3, 1, 1), (2, 4, 1, 1);
+             INSERT INTO artist_listeners (artist_id, listeners, listens)
+             VALUES (1, 100, 100), (2, 5, 5), (3, 50, 50), (4, 20, 20);"
+                .to_string(),
+        ))
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+        keep(&mut tx, 2).await.expect("the choice runs");
+
+        let kept: Vec<i32> = sqlx::query_scalar("SELECT id FROM kept_artist ORDER BY id").fetch_all(&mut *tx).await.unwrap();
+        assert_eq!(kept, vec![3, 4], "the two most listened of the newest sky");
+        let layouts: Vec<String> = sqlx::query_scalar("SELECT key FROM sky_layout").fetch_all(&mut *tx).await.unwrap();
+        assert_eq!(layouts, vec!["new".to_string()]);
+        let positions: i64 = sqlx::query_scalar("SELECT count(*) FROM artist_position WHERE layout_id <> 2")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(positions, 0, "no position of an older sky is left behind");
+
+        tx.rollback().await.unwrap();
     }
 
     /// Cuts the labels of a fixture canon inside a transaction that is rolled

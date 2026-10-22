@@ -29,8 +29,9 @@ tag to rewrite a database with what it already holds.
 On the machine that holds the canon:
 
 ```sh
-lyrid layout                    # positions
-lyrid slice --keep 100000       # the brightest 100,000 artists
+lyrid layout --metric listenbrainz-listeners  # positions
+lyrid canon seal                              # the edition, on the whole canon
+lyrid slice --keep 100000                     # the 100,000 most listened of the placed stars
 lyrid tiles --out tiles         # the pyramid and the names, from the slice
 ```
 

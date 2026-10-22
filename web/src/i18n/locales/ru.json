@@ -88,7 +88,11 @@
     "heard_one": "{{number}} прослушивание, первое — {{since}}",
     "heard_few": "{{number}} прослушивания, первое — {{since}}",
     "heard_many": "{{number}} прослушиваний, первое — {{since}}",
-    "heard_other": "{{number}} прослушивания, первое — {{since}}"
+    "heard_other": "{{number}} прослушивания, первое — {{since}}",
+    "listeners_one": "на ListenBrainz слушает {{number}} человек",
+    "listeners_few": "на ListenBrainz слушают {{number}} человека",
+    "listeners_many": "на ListenBrainz слушают {{number}} человек",
+    "listeners_other": "на ListenBrainz слушают {{number}} человека"
   },
   "spectrum": {
     "heading": "спектр",
@@ -482,6 +486,7 @@
     "sources": {
       "musicbrainz": "MusicBrainz",
       "listenbrainz-similarity": "похожесть ListenBrainz",
+      "listenbrainz-statistics": "слушатели ListenBrainz",
       "discogs": "Discogs",
       "wikidata": "Wikidata",
       "wikipedia": "Wikipedia",

@@ -168,6 +168,17 @@ impl Plan {
     }
 }
 
+/// How brightly a star is drawn: the square root of its listeners over the
+/// brightest star's, so the long tail stays visible rather than collapsing
+/// into the hubs. Zero on a sky with no brightest star.
+///
+/// The one formula the tiles, the card and the dossiers share: a star must not
+/// be drawn one way and described another.
+#[must_use]
+pub fn brightness(listeners: f32, brightest: f32) -> f32 {
+    if brightest > 0.0 { (listeners / brightest).sqrt() } else { 0.0 }
+}
+
 /// One tile ready to be written.
 pub struct Tile {
     pub id: TileId,
@@ -249,6 +260,12 @@ pub fn path(id: TileId) -> String {
 #[expect(clippy::cast_precision_loss, reason = "test fixtures build coordinates from small loop counters")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn brightness_is_drawn_as_the_sky_draws_it() {
+        assert!((brightness(4.0, 16.0) - 0.5).abs() < 1e-6);
+        assert!(brightness(1.0, 0.0).abs() < f32::EPSILON, "an empty sky has no brightest star");
+    }
 
     fn star(id: i32, x: f32, y: f32, brightness: f32) -> Star {
         Star {

@@ -236,10 +236,9 @@ async fn changed(conn: &mut PgConnection, edition: i16) -> sqlx::Result<Changed>
          FROM canon_change c
          JOIN artist a ON a.mbid = c.mbid
          JOIN artist_position p ON p.artist_id = a.id AND p.layout_id = {CURRENT_LAYOUT}
-         JOIN sky_layout l ON l.id = p.layout_id
-         LEFT JOIN artist_prominence pr ON pr.artist_id = a.id AND pr.metric_id = l.metric_id
+         LEFT JOIN artist_listeners al ON al.artist_id = a.id
          WHERE c.edition_id = $1 AND c.change = 'new'
-         ORDER BY coalesce(pr.weight, 0) DESC, a.id
+         ORDER BY coalesce(al.listeners, 0) DESC, a.id
          LIMIT $2"
     )))
     .bind(edition)
@@ -255,10 +254,9 @@ async fn changed(conn: &mut PgConnection, edition: i16) -> sqlx::Result<Changed>
          FROM canon_change c
          JOIN artist a ON a.mbid = c.into_mbid
          JOIN artist_position p ON p.artist_id = a.id AND p.layout_id = {CURRENT_LAYOUT}
-         JOIN sky_layout l ON l.id = p.layout_id
-         LEFT JOIN artist_prominence pr ON pr.artist_id = a.id AND pr.metric_id = l.metric_id
+         LEFT JOIN artist_listeners al ON al.artist_id = a.id
          WHERE c.edition_id = $1 AND c.change = 'merged'
-         ORDER BY coalesce(pr.weight, 0) DESC, c.name
+         ORDER BY coalesce(al.listeners, 0) DESC, c.name
          LIMIT $2"
     )))
     .bind(edition)
@@ -331,16 +329,15 @@ async fn releases(conn: &mut PgConnection) -> sqlx::Result<ReleaseWeek> {
     let releases = sqlx::query_as::<_, (String, String, Option<String>, Date, i32, String, f32, f32)>(sqlx::AssertSqlSafe(format!(
         "SELECT title, credit, primary_type, out_on, id, name, x, y FROM (
              SELECT DISTINCT ON (n.release_group_mbid)
-                    n.title, n.credit, n.primary_type, n.out_on, a.id, a.name, p.x, p.y, coalesce(pr.weight, 0) AS weight
+                    n.title, n.credit, n.primary_type, n.out_on, a.id, a.name, p.x, p.y, coalesce(al.listeners, 0) AS listeners
              FROM new_release n
              JOIN artist a ON a.mbid = ANY (n.artist_mbids)
              JOIN artist_position p ON p.artist_id = a.id AND p.layout_id = {CURRENT_LAYOUT}
-             JOIN sky_layout l ON l.id = p.layout_id
-             LEFT JOIN artist_prominence pr ON pr.artist_id = a.id AND pr.metric_id = l.metric_id
+             LEFT JOIN artist_listeners al ON al.artist_id = a.id
              WHERE n.out_on BETWEEN $1 AND $2
-             ORDER BY n.release_group_mbid, coalesce(pr.weight, 0) DESC, a.id
+             ORDER BY n.release_group_mbid, coalesce(al.listeners, 0) DESC, a.id
          ) AS out
-         ORDER BY weight DESC, out_on DESC, title
+         ORDER BY listeners DESC, out_on DESC, title
          LIMIT $3"
     )))
     .bind(from)
@@ -386,7 +383,7 @@ mod tests {
             "similarity_metric",
             "sky_layout",
             "artist_position",
-            "artist_prominence",
+            "artist_listeners",
             "canon_edition",
             "canon_edition_source",
             "canon_change",
@@ -441,7 +438,7 @@ mod tests {
         .await;
         run(
             &mut *tx,
-            "INSERT INTO artist_prominence (metric_id, artist_id, degree, weight) VALUES (1, 1, 10, 9.0), (1, 2, 1, 1.0)",
+            "INSERT INTO artist_listeners (artist_id, listeners, listens) VALUES (1, 9, 9), (2, 1, 1)",
         )
         .await;
 

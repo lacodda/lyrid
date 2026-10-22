@@ -15,7 +15,9 @@
 //! live, rate-limited API, which ADR 0002 forbids in the critical path --
 //! covering three million artists would take three million requests. The
 //! published dump is CC0, complete, and already an enormous step up from what
-//! per-request hydration achieves. A freshly computed graph is its own stage.
+//! per-request hydration achieves. The fresh graph, from the people who listen
+//! now, is `lyrid import listeners` (ADR 0024); this one stays beside it as a
+//! second metric.
 #![allow(clippy::doc_markdown, reason = "documentation quotes upstream table and column names throughout")]
 
 use std::collections::HashMap;
@@ -205,7 +207,7 @@ fn read_relations<R: BufRead>(reader: R, credits: &HashMap<i32, i32>, min_score:
     Ok(())
 }
 
-/// Writes edges and the prominence derived from them, in one transaction.
+/// Writes the edges in one transaction.
 async fn write(pool: &PgPool, edges: &[(i32, i32, f32)], version: &str, min_score: f32) -> Result<()> {
     let mut tx = pool.begin().await.context("failed to open the import transaction")?;
 
@@ -241,11 +243,6 @@ async fn write(pool: &PgPool, edges: &[(i32, i32, f32)], version: &str, min_scor
         .execute(&mut *tx)
         .await
         .context("failed to clear the previous edges")?;
-    sqlx::query("DELETE FROM artist_prominence WHERE metric_id = $1")
-        .bind(metric_id)
-        .execute(&mut *tx)
-        .await
-        .context("failed to clear the previous prominence")?;
 
     let mut written = 0i64;
     for chunk in edges.chunks(BATCH) {
@@ -267,26 +264,6 @@ async fn write(pool: &PgPool, edges: &[(i32, i32, f32)], version: &str, min_scor
         written += i64::try_from(chunk.len()).unwrap_or(i64::MAX);
     }
     tracing::info!(rows = written, "similarity edges written");
-
-    // Brightness comes from the graph because no listen-count dump exists:
-    // an artist woven into many strong edges is a prominent one. Computed in
-    // the database rather than in Rust -- the data is already there, and this
-    // is exactly what a database is for.
-    let prominence = sqlx::query(
-        "INSERT INTO artist_prominence (metric_id, artist_id, degree, weight)
-         SELECT $1, artist_id, count(*)::int, sum(score)::real
-         FROM (
-             SELECT source_id AS artist_id, score FROM artist_similarity WHERE metric_id = $1
-             UNION ALL
-             SELECT target_id AS artist_id, score FROM artist_similarity WHERE metric_id = $1
-         ) AS ends
-         GROUP BY artist_id",
-    )
-    .bind(metric_id)
-    .execute(&mut *tx)
-    .await
-    .context("failed to compute artist prominence")?;
-    tracing::info!(rows = prominence.rows_affected(), "artist prominence computed");
 
     sqlx::query("UPDATE dump_import SET finished_at = now(), rows_imported = $2 WHERE id = $1")
         .bind(import_id)

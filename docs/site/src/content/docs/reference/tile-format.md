@@ -126,12 +126,11 @@ Two consequences worth relying on:
 
 ## Brightness
 
-Brightness is **connectivity**, not popularity — no per-artist listen counts
-are published as a dump, which
-[ADR 0004](https://github.com/lacodda/lyrid/blob/main/docs/adr/0004-similarity-from-a-published-dataset.md)
-settles. It is the star's weight in the similarity graph, normalised against
-the brightest star and square-rooted so the long tail stays visible instead of
-collapsing into the hubs.
+Brightness is **how many people listen** — people with the artist among the
+thousand they have played most, from ListenBrainz's statistics dump
+([ADR 0024](https://github.com/lacodda/lyrid/blob/main/docs/adr/0024-the-sky-from-the-people-who-listen.md)). It is normalised against the brightest star and
+square-rooted so the long tail stays visible instead of collapsing into the
+hubs.
 
 Because it is normalised per layout, brightness is comparable **within** a sky
 and not across two.

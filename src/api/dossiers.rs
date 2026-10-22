@@ -24,6 +24,7 @@ use sqlx::PgPool;
 
 use crate::api::listening::{Dial, Sky};
 use crate::app::AppState;
+use crate::layout::tiles::brightness;
 use crate::markup::{self, Kind, Piece};
 
 pub fn routes() -> Router<AppState> {
@@ -189,11 +190,6 @@ fn answer<T: Serialize>(result: sqlx::Result<Option<T>>, what: &'static str, id:
     }
 }
 
-/// As the sky draws it: the square root of prominence over the brightest.
-fn brightness(weight: f32, brightest: f32) -> f32 {
-    if brightest > 0.0 { (weight / brightest).sqrt() } else { 0.0 }
-}
-
 async fn load_label(pool: &PgPool, dial: &Dial, id: i32) -> sqlx::Result<Option<LabelDossier>> {
     let Some((name, profile, parent_id, parent_name)) = sqlx::query_as::<_, (String, Option<String>, Option<i32>, Option<String>)>(
         "SELECT l.name, l.profile, l.parent_label_id, parent.name
@@ -267,9 +263,7 @@ async fn load_label(pool: &PgPool, dial: &Dial, id: i32) -> sqlx::Result<Option<
 /// star, the way the tiles draw them.
 async fn label_roster(pool: &PgPool, dial: &Dial, id: i32) -> sqlx::Result<(Roster<LabelMember>, Vec<i32>)> {
     let Some(Sky {
-        layout: layout_id,
-        metric: metric_id,
-        brightest,
+        layout: layout_id, brightest, ..
     }) = dial.sky(pool).await?
     else {
         return Ok((
@@ -282,18 +276,17 @@ async fn label_roster(pool: &PgPool, dial: &Dial, id: i32) -> sqlx::Result<(Rost
         ));
     };
     let rows = sqlx::query_as::<_, (i32, String, i32, Option<i16>, Option<i16>, f32, f32, f32)>(
-        "SELECT a.id, a.name, la.releases, la.first_year, la.last_year, p.x, p.y, COALESCE(pr.weight, 0)::real AS weight
+        "SELECT a.id, a.name, la.releases, la.first_year, la.last_year, p.x, p.y, COALESCE(al.listeners, 0)::real AS listeners
          FROM label_artist la
          JOIN artist a ON a.id = la.artist_id
          JOIN artist_position p ON p.artist_id = la.artist_id AND p.layout_id = $2
-         LEFT JOIN artist_prominence pr ON pr.artist_id = la.artist_id AND pr.metric_id = $3
+         LEFT JOIN artist_listeners al ON al.artist_id = la.artist_id
          WHERE la.label_id = $1
-         ORDER BY la.releases DESC, weight DESC, a.id
-         LIMIT $4",
+         ORDER BY la.releases DESC, listeners DESC, a.id
+         LIMIT $3",
     )
     .bind(id)
     .bind(layout_id)
-    .bind(metric_id)
     .bind(MEMBERS)
     .fetch_all(pool)
     .await?;
@@ -330,9 +323,7 @@ async fn load_scene(pool: &PgPool, dial: &Dial, qid: i32) -> sqlx::Result<Option
         return Ok(None);
     };
     let Some(Sky {
-        layout: layout_id,
-        metric: metric_id,
-        brightest,
+        layout: layout_id, brightest, ..
     }) = dial.sky(pool).await?
     else {
         return Ok(None);
@@ -342,18 +333,17 @@ async fn load_scene(pool: &PgPool, dial: &Dial, qid: i32) -> sqlx::Result<Option
     // and the sky's own measure puts the names a reader knows at the top.
     let rows = sqlx::query_as::<_, (i32, String, bool, Option<i16>, Option<i16>, f32, f32, f32)>(
         "SELECT a.id, a.name, COALESCE(f.origin_is_birth, false), COALESCE(a.begin_year, f.inception_year), a.end_year,
-                p.x, p.y, COALESCE(pr.weight, 0)::real AS weight
+                p.x, p.y, COALESCE(al.listeners, 0)::real AS listeners
          FROM artist_fact f
          JOIN artist a ON a.id = f.artist_id
          JOIN artist_position p ON p.artist_id = f.artist_id AND p.layout_id = $2
-         LEFT JOIN artist_prominence pr ON pr.artist_id = f.artist_id AND pr.metric_id = $3
+         LEFT JOIN artist_listeners al ON al.artist_id = f.artist_id
          WHERE f.origin_qid = $1
-         ORDER BY weight DESC, a.id
-         LIMIT $4",
+         ORDER BY listeners DESC, a.id
+         LIMIT $3",
     )
     .bind(qid)
     .bind(layout_id)
-    .bind(metric_id)
     .bind(MEMBERS)
     .fetch_all(pool)
     .await?;
@@ -511,9 +501,9 @@ async fn render(pool: &PgPool, profile: &str) -> sqlx::Result<Vec<Vec<Segment>>>
              FROM artist_discogs d
              JOIN artist_position p ON p.artist_id = d.artist_id
                  AND p.layout_id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
-             LEFT JOIN artist_prominence pr ON pr.artist_id = d.artist_id
+             LEFT JOIN artist_listeners al ON al.artist_id = d.artist_id
              WHERE d.discogs_id = ANY($1)
-             ORDER BY d.discogs_id, pr.weight DESC NULLS LAST, d.artist_id",
+             ORDER BY d.discogs_id, al.listeners DESC NULLS LAST, d.artist_id",
         )
         .bind(&artist_ids)
         .fetch_all(pool)
@@ -744,12 +734,6 @@ mod tests {
             arrivals([1991, 1976, 1991].into_iter()),
             vec![YearCount { year: 1976, count: 1 }, YearCount { year: 1991, count: 2 }]
         );
-    }
-
-    #[test]
-    fn brightness_is_drawn_as_the_sky_draws_it() {
-        assert!((brightness(4.0, 16.0) - 0.5).abs() < 1e-6);
-        assert!(brightness(1.0, 0.0).abs() < f32::EPSILON, "an empty sky has no brightest star");
     }
 
     #[tokio::test]

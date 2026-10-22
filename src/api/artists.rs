@@ -24,6 +24,7 @@ use crate::api::listening::{Dial, Nebula, radio_here, radio_of};
 use crate::api::relations::{Why, why_many};
 use crate::api::spectrum::{self, Spectrum};
 use crate::app::AppState;
+use crate::layout::tiles::brightness;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -49,6 +50,9 @@ struct Artist {
     end_year: Option<i16>,
     /// Where the star sits in the current layout, when it has a place.
     position: Option<Position>,
+    /// How many people listen to the artist: those with it among the thousand
+    /// they have played most, as ListenBrainz's statistics dump counts them.
+    listeners: Option<i32>,
     /// Genres by weight, strongest first.
     genres: Vec<Genre>,
     /// What the star sounds like, as `AcousticBrainz` measured its recordings:
@@ -155,7 +159,8 @@ struct Release {
 struct Position {
     x: f32,
     y: f32,
-    /// How brightly the star is drawn: connectivity, not popularity.
+    /// How brightly the star is drawn, as the tiles carry it: the square root
+    /// of listeners over the brightest star's.
     brightness: f32,
 }
 
@@ -224,23 +229,37 @@ async fn load_artist(pool: &PgPool, dial: &Dial, id: i32) -> sqlx::Result<Option
 
     // The newest layout is the one the client is looking at; an older one
     // would place the star somewhere the map does not show it.
-    let position = sqlx::query_as::<_, (f32, f32, Option<f32>)>(
-        "SELECT p.x, p.y, pr.weight
+    let place = sqlx::query_as::<_, (f32, f32)>(
+        "SELECT p.x, p.y
          FROM artist_position p
          JOIN sky_layout l ON l.id = p.layout_id
-         LEFT JOIN artist_prominence pr ON pr.artist_id = p.artist_id AND pr.metric_id = l.metric_id
          WHERE p.artist_id = $1
          ORDER BY l.created_at DESC
          LIMIT 1",
     )
     .bind(id)
     .fetch_optional(pool)
-    .await?
-    .map(|(x, y, weight)| Position {
-        x,
-        y,
-        brightness: weight.unwrap_or(0.0),
-    });
+    .await?;
+
+    // Asked apart from the position so an artist the sky does not place still
+    // says how many people listen to them.
+    let counted = sqlx::query_as::<_, (i32, f32)>("SELECT listeners, listeners::real FROM artist_listeners WHERE artist_id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    let listeners = counted.map(|(listeners, _)| listeners);
+
+    let position = match place {
+        Some((x, y)) => {
+            let brightest = dial.sky(pool).await?.map_or(0.0, |sky| sky.brightest);
+            Some(Position {
+                x,
+                y,
+                brightness: brightness(counted.map_or(0.0, |(_, real)| real), brightest),
+            })
+        }
+        None => None,
+    };
 
     let genres = sqlx::query_as::<_, (String, bool, i32)>(
         "SELECT g.name, g.is_style, ag.releases
@@ -270,7 +289,7 @@ async fn load_artist(pool: &PgPool, dial: &Dial, id: i32) -> sqlx::Result<Option
     // Influence is directed, so each direction is its own query rather than
     // one query over both columns: "shaped by" and "went on to shape" are
     // different claims, and collapsing them would invent symmetry Wikidata
-    // never asserted. Ordered by brightness so the better-known names lead.
+    // never asserted. Ordered by listeners so the better-known names lead.
     let influenced_by = influences(pool, id, Direction::Sources).await?;
     let influenced = influences(pool, id, Direction::Targets).await?;
 
@@ -285,6 +304,7 @@ async fn load_artist(pool: &PgPool, dial: &Dial, id: i32) -> sqlx::Result<Option
         begin_year,
         end_year,
         position,
+        listeners,
         genres,
         spectrum,
         similar,
@@ -305,16 +325,17 @@ async fn alongside(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Alongside>> {
     // Similarity is stored once per unordered pair, so neighbours come from
     // both columns.
     //
-    // The metric is pinned for the same reason as in `influences`: an edge is
-    // keyed by (metric_id, source_id, target_id), and a second metric would
-    // otherwise put the same neighbour in the list once per metric, on scores
-    // that are not comparable across metrics anyway.
+    // The metric is pinned to the one the newest layout was drawn from: an
+    // edge is keyed by (metric_id, source_id, target_id), and a second metric
+    // would otherwise put the same neighbour in the list once per metric, on
+    // scores that are not comparable across metrics anyway. It is the layout's
+    // metric, not the newest one, so the list agrees with the map being shown.
     let neighbours = sqlx::query_as::<_, (i32, String, f32)>(
         "SELECT other.id, other.name, e.score
          FROM artist_similarity e
          JOIN artist other ON other.id = CASE WHEN e.source_id = $1 THEN e.target_id ELSE e.source_id END
          WHERE (e.source_id = $1 OR e.target_id = $1)
-           AND e.metric_id = (SELECT max(id) FROM similarity_metric)
+           AND e.metric_id = (SELECT metric_id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
          ORDER BY e.score DESC
          LIMIT 10",
     )
@@ -621,32 +642,25 @@ async fn influences(pool: &PgPool, id: i32, direction: Direction) -> sqlx::Resul
     // planner sees each one whole, and each uses the index built for its own
     // direction (the reverse one exists for exactly this query).
     //
-    // Prominence is keyed by (metric_id, artist_id), so joining it without
-    // naming a metric would return one row per metric and repeat every
-    // influence in the list. Today there is a single metric and the bug would
-    // be invisible; v0.17.1 adds a second one, at which point every card would
-    // quietly show its influences twice. The subquery pins one metric now.
+    // Listeners are one row per artist, so the join cannot repeat an
+    // influence; the better-known names lead.
     let sql = match direction {
         Direction::Sources => {
-            "SELECT a.id, a.name, coalesce(p.weight, 0)
+            "SELECT a.id, a.name, coalesce(al.listeners, 0)::real
              FROM artist_influence i
              JOIN artist a ON a.id = i.influence_id
-             LEFT JOIN artist_prominence p
-               ON p.artist_id = a.id
-              AND p.metric_id = (SELECT max(id) FROM similarity_metric)
+             LEFT JOIN artist_listeners al ON al.artist_id = a.id
              WHERE i.artist_id = $1
-             ORDER BY coalesce(p.weight, 0) DESC, a.name
+             ORDER BY coalesce(al.listeners, 0) DESC, a.name
              LIMIT 8"
         }
         Direction::Targets => {
-            "SELECT a.id, a.name, coalesce(p.weight, 0)
+            "SELECT a.id, a.name, coalesce(al.listeners, 0)::real
              FROM artist_influence i
              JOIN artist a ON a.id = i.artist_id
-             LEFT JOIN artist_prominence p
-               ON p.artist_id = a.id
-              AND p.metric_id = (SELECT max(id) FROM similarity_metric)
+             LEFT JOIN artist_listeners al ON al.artist_id = a.id
              WHERE i.influence_id = $1
-             ORDER BY coalesce(p.weight, 0) DESC, a.name
+             ORDER BY coalesce(al.listeners, 0) DESC, a.name
              LIMIT 8"
         }
     };
@@ -713,18 +727,19 @@ async fn run_search(pool: &PgPool, term: &str) -> sqlx::Result<Found> {
     //
     // Only among stars that have a place -- a result the map cannot fly to is
     // a dead end -- and ranked so the obvious answer leads: an exact name
-    // first, then how woven into the graph the artist is. Connectivity beats
+    // first, then how many people listen to the artist. Listeners beat
     // where the match falls, or searching "beatles" leads with a band called
     // "Beatless" simply because the word starts its name.
     let rows = sqlx::query_as::<_, (i32, String, Option<String>, Option<f32>, Option<f32>)>(
         "SELECT a.id, a.name, a.comment, p.x, p.y
          FROM artist a
          JOIN artist_position p ON p.artist_id = a.id
-         LEFT JOIN artist_prominence pr ON pr.artist_id = a.id
+             AND p.layout_id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
+         LEFT JOIN artist_listeners al ON al.artist_id = a.id
          WHERE a.name ILIKE '%' || $1 || '%'
          ORDER BY
              (lower(a.name) = lower($1)) DESC,
-             COALESCE(pr.weight, 0) DESC,
+             COALESCE(al.listeners, 0) DESC,
              (a.name ILIKE $1 || '%') DESC,
              length(a.name),
              a.name
@@ -874,7 +889,7 @@ struct Nearby {
     y: f32,
 }
 
-/// The stars in a rectangle, most prominent first.
+/// The stars in a rectangle, most listened first.
 ///
 /// This exists for the list beside the canvas, which is how the sky is read by
 /// a keyboard and by a screen reader. It is a question the *server* has to
@@ -883,7 +898,7 @@ struct Nearby {
 /// than everything in view — so a client-side list would be a list of the stars
 /// that happened to survive thinning, named by one request each.
 ///
-/// Ordered by prominence and not by distance from the middle. A reader asking
+/// Ordered by listeners and not by distance from the middle. A reader asking
 /// "what am I looking at" wants the names worth knowing in this patch of sky,
 /// and the nearest star to the exact centre of an arbitrary pan is nobody in
 /// particular.
@@ -928,12 +943,11 @@ async fn run_nearby(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f3
          FROM artist_position p
          JOIN sky_layout l ON l.id = p.layout_id
          JOIN artist a ON a.id = p.artist_id
-         LEFT JOIN artist_prominence pr
-             ON pr.artist_id = p.artist_id AND pr.metric_id = l.metric_id
+         LEFT JOIN artist_listeners al ON al.artist_id = p.artist_id
          WHERE l.id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
            AND p.x BETWEEN $1 AND $3
            AND p.y BETWEEN $2 AND $4
-         ORDER BY COALESCE(pr.weight, 0) DESC, a.name
+         ORDER BY COALESCE(al.listeners, 0) DESC, a.name
          LIMIT $5",
     )
     .bind(min_x)
@@ -958,7 +972,7 @@ struct Region {
     radio: Option<Nebula>,
 }
 
-/// How many of the most prominent stars in the rectangle are asked what they
+/// How many of the most listened stars in the rectangle are asked what they
 /// are. Enough for a majority to mean something, few enough that a view of the
 /// whole canon is not a count over millions of rows.
 const REGION_SAMPLE: i64 = 300;
@@ -990,7 +1004,7 @@ async fn region(State(state): State<AppState>, Query(query): Query<NearbyQuery>)
 }
 
 async fn run_region(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f32) -> sqlx::Result<Region> {
-    // The sample is the same "most prominent in the rectangle" the nearby list
+    // The sample is the same "most listened in the rectangle" the nearby list
     // reads; each star then votes with its main genre and its main style --
     // `main_genres`, the same "main" the names on the map are built from and
     // the radio plays.
@@ -999,11 +1013,11 @@ async fn run_region(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f3
              SELECT p.artist_id
              FROM artist_position p
              JOIN sky_layout l ON l.id = p.layout_id
-             LEFT JOIN artist_prominence pr ON pr.artist_id = p.artist_id AND pr.metric_id = l.metric_id
+             LEFT JOIN artist_listeners al ON al.artist_id = p.artist_id
              WHERE l.id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
                AND p.x BETWEEN $1 AND $3
                AND p.y BETWEEN $2 AND $4
-             ORDER BY COALESCE(pr.weight, 0) DESC
+             ORDER BY COALESCE(al.listeners, 0) DESC
              LIMIT $5
          ),
          tally AS (
