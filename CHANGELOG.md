@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file.
 - Replace the whole canon under a stand's accounts
 
 ### Documentation
+- Measure the fresh sky and its edition
 - Measure the first catch-up on the stand
 - Say on the home page what the sky is today
 
