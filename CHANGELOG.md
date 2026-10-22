@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file.
 ### Bug Fixes
 - Keep each feed on a clock of its own
 - Point the homepage at the docs and drop a wrong star count
+- Replace the whole canon under a stand's accounts
 
 ### Documentation
 - Measure the first catch-up on the stand
