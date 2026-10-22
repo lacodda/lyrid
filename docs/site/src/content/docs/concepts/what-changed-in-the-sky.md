@@ -7,13 +7,13 @@ The sky holds still between rebuilds of the canon, and the music under it does n
 
 ## This sky
 
-An edition is the canon sealed once it is built: which import of each source it was made from, and the layout its stars are placed by. The panel says which edition this is, when it was sealed and how many stars it has, and lists its sources with their versions — MusicBrainz of 15 August, Discogs of 1 August, ListenBrainz's similarity of 2020, and so on.
+An edition is the canon sealed once it is built: which import of each source it was made from, and the layout its stars are placed by. The panel says which edition this is, when it was sealed and how many stars it has, and lists its sources with their versions — MusicBrainz of 15 August, Discogs of 1 August, ListenBrainz's listeners of 15 October, its older similarity of 2020, and so on.
 
 From the second edition on it also says what changed since the one before:
 
 - **new stars** — artists who have a place in this sky and had none in the last one; the brightest are named, and a press flies to them;
 - **merged** — stars MusicBrainz merged into another artist, by the name they had, with the star they became;
-- **gone dark** — stars that left without a merge: deleted, or left with no similarity to place them by.
+- **gone dark** — stars that left without a merge: deleted, or left with too few listeners, or none shared with anyone else, to place them by.
 
 The first edition changed nothing, because nothing came before it, and the panel says so. Editions are explained in [ADR 0023](https://github.com/lacodda/lyrid/blob/main/docs/adr/0023-editions-of-the-canon.md).
 
