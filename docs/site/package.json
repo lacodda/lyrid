@@ -12,10 +12,10 @@
   },
   "dependencies": {
     "@astrojs/starlight": "^0.42.6",
-    "astro": "^7.3.8"
+    "astro": "^7.4.2"
   },
   "devDependencies": {
     "sharp": "^0.35.5"
   },
-  "packageManager": "pnpm@10.34.5"
+  "packageManager": "pnpm@10.34.6"
 }
