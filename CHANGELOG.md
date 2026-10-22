@@ -11,6 +11,7 @@ All notable changes to this project are documented in this file.
 
 ### Documentation
 - Measure the first catch-up on the stand
+- Say on the home page what the sky is today
 
 ### Features
 - Draw the sky from the people who listen
