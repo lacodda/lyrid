@@ -13,6 +13,11 @@ services:
       # postgres:18+ images keep data in a version-specific subdirectory;
       # the mount must sit one level up or the entrypoint refuses to start.
       - db-data:/var/lib/postgresql
+    # Parallel hash joins share their tables through /dev/shm, and Docker's
+    # 64 MB default is too small for the full canon: cutting the tiles of
+    # 283,000 stars against three million artists failed with "could not
+    # resize shared memory segment". A ceiling, not an allocation.
+    shm_size: 1gb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lyrid -d lyrid"]
       interval: 5s
