@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.20.0] - 2026-10-22
+
+### Bug Fixes
+- Keep each feed on a clock of its own
+- Point the homepage at the docs and drop a wrong star count
+
+### Documentation
+- Measure the first catch-up on the stand
+
+### Features
+- Draw the sky from the people who listen
+
 ## [0.19.0] - 2026-10-16
 
 ### Bug Fixes
