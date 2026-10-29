@@ -86,9 +86,18 @@ next to the code it constrains:
 - [0015 · The sky carries time and names; the pyramid is cut on its own](https://github.com/lacodda/lyrid/blob/main/docs/adr/0015-the-sky-carries-time-and-names.md)
 - [0016 · Listening to the sky: one player, a player per star, stations read once](https://github.com/lacodda/lyrid/blob/main/docs/adr/0016-listening-to-the-sky.md)
 - [0017 · Stations and their dossiers: labels from the Discogs releases file, scenes from places of origin](https://github.com/lacodda/lyrid/blob/main/docs/adr/0017-stations-and-their-dossiers.md)
+- [0018 · Spectra from AcousticBrainz, from trusted measurements only](https://github.com/lacodda/lyrid/blob/main/docs/adr/0018-spectra-from-acousticbrainz.md)
+- [0019 · Real listening, read from ListenBrainz into a ledger](https://github.com/lacodda/lyrid/blob/main/docs/adr/0019-listening-read-from-listenbrainz.md)
+- [0020 · The past lights the sky and does not pay](https://github.com/lacodda/lyrid/blob/main/docs/adr/0020-the-past-lights-the-sky-and-does-not-pay.md)
+- [0021 · A weekly letter, asked for](https://github.com/lacodda/lyrid/blob/main/docs/adr/0021-a-weekly-letter-asked-for.md)
+- [0022 · Living data from the daily dumps](https://github.com/lacodda/lyrid/blob/main/docs/adr/0022-living-data-from-the-daily-dumps.md)
+- [0023 · Editions of the canon](https://github.com/lacodda/lyrid/blob/main/docs/adr/0023-editions-of-the-canon.md)
+- [0024 · The sky from the people who listen](https://github.com/lacodda/lyrid/blob/main/docs/adr/0024-the-sky-from-the-people-who-listen.md)
+- [0025 · bzip2 on every core, and most lines never parsed](https://github.com/lacodda/lyrid/blob/main/docs/adr/0025-bzip2-on-every-core.md)
 
 ## Releases
 
-Every stage of work is a version, closed by a tag. Pushing a tag builds
-release artefacts, generates notes with git-cliff, and publishes the crate —
-so a release is the tag, not a sequence of manual steps.
+Every stage of work is a version, closed by a tag. Pushing a tag builds the
+release archives and generates notes with git-cliff, so a release is the tag,
+not a sequence of manual steps. lyrid is a service rather than a library, so
+nothing is published to crates.io; the stand is updated from the tag.

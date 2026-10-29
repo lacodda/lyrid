@@ -1,6 +1,6 @@
 //! Guards the facts that must agree before a version is published.
 //!
-//! lyrid ships to several storefronts - GitHub, crates.io, the docs site -
+//! lyrid ships to several storefronts - GitHub, its releases, the docs site -
 //! and each renders its own copy of the README or carries its own manifest.
 //! Drift is only visible after publishing, when it is too late to take back,
 //! so these checks run in CI instead.
@@ -32,9 +32,9 @@ fn package_json_version(path: &str) -> String {
 
 #[test]
 fn readme_links_resolve_off_github() {
-    // The same file is rendered on crates.io, where a relative path has no
-    // repository to resolve against: the banner turns into a broken image
-    // and the links 404.
+    // The same file is rendered away from the repository -- a mirror, a feed,
+    // a package index -- where a relative path has nothing to resolve
+    // against: the banner turns into a broken image and the links 404.
     let readme = read("README.md");
 
     for (line_no, line) in readme.lines().enumerate() {
@@ -48,7 +48,7 @@ fn readme_links_resolve_off_github() {
                 let relative = !target.starts_with("http") && !target.starts_with('#') && !target.is_empty();
                 assert!(
                     !relative,
-                    "README line {}: relative {kind} `{target}` breaks on crates.io; use an absolute URL",
+                    "README line {}: relative {kind} `{target}` breaks off GitHub; use an absolute URL",
                     line_no + 1
                 );
 
