@@ -55,15 +55,20 @@ The dump is read twice, facts first and then the labels they point at (see
 below), and each pass runs at the speed bzip2 decompresses on all your cores
 ([ADR 0025](https://github.com/lacodda/lyrid/blob/main/docs/adr/0025-bzip2-on-every-core.md)):
 lines without a MusicBrainz id are let go unparsed, so parsing never holds the
-reading up. Measured on a 16-thread laptop on the first three million entities
-of `20261026` — 37.5 GB of JSON:
+reading up. Measured on a 16-thread laptop:
 
-| Pass | One core (v0.20) | Every core |
+| | One core (v0.20) | Every core |
 | --- | --- | --- |
-| Facts | 834 s | 232 s |
-| Labels | 821 s | 252 s |
+| First 3 million entities of `20261026` (37.5 GB of JSON): facts | 834 s | 232 s |
+| the same: labels | 821 s | 252 s |
+| The whole dump (122 million entities): facts | 11 h 28 min | 3 h 15 min |
+| the same: labels | 19 h 53 min | 3 h 8 min |
 
-Both versions wrote the same rows. Run the full import as a background job:
+On the three million both versions wrote the same rows. The one-core whole-dump
+figures are from August, on that month's dump of 121 million entities; the
+labels pass was the slow one there because it parsed every line, where it now
+parses only the items it wants. Run the full import as a background job — about
+six and a half hours on such a machine:
 
 ```
 INFO lyrid::import::wikidata: reading the Wikidata dump dump=./wikidata-20261026-all.json.bz2 size_gb=96

@@ -10,10 +10,10 @@ in them stand.
 ## Context
 
 Every large source lyrid reads is bzip2: the Wikidata JSON dump (103.6 GB),
-the MusicBrainz export (7.2 GB), the Wikipedia articles and their index. A
-full Wikidata pass took about eighteen hours, and the importer reads the file
-twice -- facts first, then the labels of the items those facts point at
-(ADR 0006) -- so a fresh canon of facts cost a day.
+the MusicBrainz export (7.2 GB), the Wikipedia articles and their index. The
+Wikidata importer reads its file twice -- facts first, then the labels of the
+items those facts point at (ADR 0006) -- and the last full import, on 28-29
+August, took 31 hours: 11.5 for the facts, 20 for the labels.
 
 Measured on 2026-08-28: of each stretch of the Wikidata pass, **26.6 s went to
 decompression and 9.5 s to parsing JSON**. bzip2 on one core was the wall, and
@@ -103,6 +103,8 @@ writing into two copies of the same canon:
 | Reading `mbdump.tar.bz2` (7.2 GB, 25.4 GB of tar) | 914 s | 224 s, 112 MB of memory |
 | Wikidata, first 3 million entities (37.5 GB of JSON): facts | 834 s | 232 s |
 | the same: labels | 821 s | 252 s |
+| Wikidata, the whole dump: facts | 11 h 28 min | 3 h 15 min |
+| the same: labels | 19 h 53 min | 3 h 8 min |
 | Wikipedia prose, `20261001`: index | 54 s | 8 s |
 | the same: 108,679 article streams | 38 min | 9.5 min |
 
@@ -110,6 +112,11 @@ writing into two copies of the same canon:
   agrees on all 25,420,451,840 bytes. The Wikidata tables written by both
   versions from the same three million entities, and the 177,867 prose rows
   from the same Wikipedia run, have the same md5 row by row.
+- **A fresh canon of facts is an evening, not a day and a half.** The whole
+  import of `20261026` (122,056,985 entities, 321,145 of them artists in the
+  canon) took 6 h 24 min; the last one-core run, on August's dump of
+  121,453,279 entities, took 31 h 22 min. The labels pass gained the most: it
+  used to parse every line, and now parses only the 45,266 items it wants.
 - **The fact pass now runs at the speed of decompression.** Reading the same
   three million entities with nothing but the search for `"P434"` takes
   236.6 s, the import 232 s: parsing the matching lines is hidden behind the
