@@ -42,8 +42,9 @@ lyrid import musicbrainz --dump ./mbdump.tar.bz2
 ```
 
 The archive is read in a single pass — bzip2 has no random access, so a second
-pass would mean decompressing gigabytes again — and everything is written in
-one transaction. An interrupted import therefore leaves the previous universe
+pass would mean decompressing gigabytes again — and decompressed on every core,
+block by block ([ADR 0025](https://github.com/lacodda/lyrid/blob/main/docs/adr/0025-bzip2-on-every-core.md)).
+Everything is written in one transaction. An interrupted import therefore leaves the previous universe
 intact rather than a half-replaced one.
 
 Output looks like this:

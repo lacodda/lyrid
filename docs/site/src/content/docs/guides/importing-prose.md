@@ -49,6 +49,12 @@ stream. Measured against the real dump: **1.9 MB of reading for one article**.
 Wanted articles are grouped by stream, so a stream holding several of the
 canon's artists is read once.
 
+The streams are independent of each other, so they are read on every core,
+in the order of the file, and the prose comes out in that order. Measured on
+the `20261001` dump against a canon of 182,952 titles, on a 16-thread laptop:
+the index in 8 seconds, the 108,679 streams in 9.5 minutes, 177,867 leads
+written — ten minutes in all, where reading one stream at a time took 39 on the same dump. The rows are the same either way, byte for byte.
+
 :::caution[The index and the dump must be from the same run]
 The `latest-*` filenames are symlinks rebuilt at different moments, so an index
 from one rebuild points into the wrong places in an archive from another. Use a

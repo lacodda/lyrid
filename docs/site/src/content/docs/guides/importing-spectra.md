@@ -61,8 +61,11 @@ INFO lyrid::import::acousticbrainz: spectra measured; writing to PostgreSQL arti
 ```
 
 Those are the figures of the 20220623 dump against the MusicBrainz export of
-2026-09-30, on 16 threads: about an hour and a half, most of it in the single
-bzip2 pass over `mbdump.tar.bz2`.
+2026-09-30, on 16 threads: about an hour and a half, 66 minutes of it in the
+bzip2 pass over `mbdump.tar.bz2`. That run read bzip2 on one core; since v0.21
+it is read on every core ([ADR 0025](https://github.com/lacodda/lyrid/blob/main/docs/adr/0025-bzip2-on-every-core.md)),
+and reading the same export measured 914 seconds on one core and 224 on all of
+them.
 
 - **`collapsed`** — submissions where a model answered with its collapsed
   value. See below.
