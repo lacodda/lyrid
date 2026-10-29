@@ -64,7 +64,7 @@ cargo run --release -- import acousticbrainz --dir ./acousticbrainz \
 
 MusicBrainz comes first in every case: every later import resolves against the canon it builds.
 
-The Wikidata one streams a 100 GB dump straight from the network without ever storing it — about ten hours, so run it in the background. What it extracts is a few hundred megabytes.
+The Wikidata one reads a 104 GB dump twice, at the speed bzip2 decompresses on all your cores — [download it first](/lyrid/guides/importing-facts/#download-the-dump-first) and run the import in the background. What it extracts is a few hundred megabytes.
 
 Once the canon is filled, the sky is built from it:
 
