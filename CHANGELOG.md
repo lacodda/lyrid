@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.21.0] - 2026-10-29
+
+### Bug Fixes
+- Load the canon's rows without checking keys one by one
+
+### Documentation
+- List every ADR and stop promising a crates.io release
+- Measure the dumps read on every core
+- Read bzip2 on every core, and measure it against one
+- Say how long the Wikidata import takes now
+
+### Features
+- Read bzip2 on every core
+
+### Performance
+- Parse only the Wikidata lines that can hold a fact
+- Read Wikipedia's streams on every core
+
 ## [0.20.0] - 2026-10-22
 
 ### Bug Fixes
