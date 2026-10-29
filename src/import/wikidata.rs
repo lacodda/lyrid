@@ -6,10 +6,17 @@
 //! records a country, Wikidata a city).
 //!
 //! The dump is one bz2 stream holding a JSON array with **one entity per
-//! line**, about 103 GB compressed and 25 million entities. It is read in a
-//! single streaming pass and never stored: measured against the live dump at
-//! about 700 entities a second, a full pass takes ten hours, and nothing but
-//! the extracted facts survives it.
+//! line**, about 103 GB compressed and 123 million entities. It is read as a
+//! stream and never stored, and nothing but the extracted facts survives a
+//! pass. Two things keep a pass short:
+//!
+//! - **Decompression runs on every core** ([`super::bz`]): on one core it was
+//!   three quarters of the time, and a pass took eighteen hours.
+//! - **Most lines are never parsed.** An entity without a MusicBrainz id has
+//!   nothing for the fact pass, and the key `"P434"` is either in its line or
+//!   not; looking for it costs a fifth of parsing the line (measured on 20,000
+//!   entities: the same 1,161 found either way). The label pass likewise reads
+//!   an entity's id off the head of its line and parses only the wanted ones.
 //!
 //! Two things make one pass sufficient:
 //!
@@ -37,15 +44,16 @@
 #![allow(clippy::doc_markdown, reason = "documentation quotes upstream property and file names throughout")]
 
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use bzip2::read::MultiBzDecoder;
 use clap::Args as ClapArgs;
+use memchr::memmem;
 use serde::Deserialize;
 use sqlx::PgPool;
+
+use super::bz::{self, ParallelDecoder};
 
 /// How many rows to accumulate before sending a batch to Postgres.
 const BATCH: usize = 8192;
@@ -60,6 +68,10 @@ const P_INCEPTION: &str = "P571";
 const P_GENRE: &str = "P136";
 const P_LABEL: &str = "P264";
 const P_COUNTRY: &str = "P495";
+
+/// `P_MBID` as it appears in a line: a key, in quotes. Any line without it has
+/// no MusicBrainz id and is let go unparsed.
+const MBID_KEY: &[u8] = br#""P434""#;
 
 /// The official dump, used when no source is given.
 const DEFAULT_URL: &str = "https://dumps.wikimedia.org/wikidatawiki/entities/latest-all.json.bz2";
@@ -235,20 +247,52 @@ async fn load_canon(pool: &PgPool) -> Result<HashMap<String, i32>> {
 }
 
 /// Opens the dump, from a file or straight from the network.
-fn open_dump(args: &Args) -> Result<Box<dyn BufRead>> {
+fn open_dump(args: &Args) -> Result<ParallelDecoder> {
     if let Some(path) = &args.dump {
-        let file = File::open(path).with_context(|| format!("cannot open {}", path.display()))?;
-        let size = file.metadata().map_or(0, |m| m.len());
+        let size = std::fs::metadata(path).map_or(0, |m| m.len());
         tracing::info!(dump = %path.display(), size_gb = size / 1_073_741_824, "reading the Wikidata dump");
-        let decoder = MultiBzDecoder::new(BufReader::with_capacity(1 << 22, file));
-        return Ok(Box::new(BufReader::with_capacity(1 << 22, decoder)));
+        return bz::open(path);
     }
 
     let url = args.url.as_deref().unwrap_or(DEFAULT_URL);
     tracing::info!(url, "streaming the Wikidata dump; nothing is written to disk");
     let response = ureq::get(url).call().with_context(|| format!("cannot fetch {url}"))?;
-    let decoder = MultiBzDecoder::new(BufReader::with_capacity(1 << 22, response.into_body().into_reader()));
-    Ok(Box::new(BufReader::with_capacity(1 << 22, decoder)))
+    Ok(ParallelDecoder::new(response.into_body().into_reader()))
+}
+
+/// Reads the next line into `line`; false at the end of the dump.
+///
+/// Bytes rather than a `String`: almost every line is looked at and dropped,
+/// and checking a terabyte and a half for valid UTF-8 first would be paid for
+/// nothing.
+fn next_line(reader: &mut impl BufRead, line: &mut Vec<u8>) -> Result<bool> {
+    line.clear();
+    Ok(reader.read_until(b'\n', line).context("failed to read a dump line")? > 0)
+}
+
+/// The entity on a line, without the array's brackets and the comma after
+/// it; `None` for the lines that hold only those.
+fn entity_text(line: &[u8]) -> Option<&[u8]> {
+    let trimmed = line.trim_ascii();
+    let trimmed = trimmed.strip_suffix(b",").unwrap_or(trimmed);
+    (!trimmed.is_empty() && trimmed != b"[" && trimmed != b"]").then_some(trimmed)
+}
+
+/// Whether a line is shaped like an entity at all: one let go unparsed still
+/// counts as read, and a broken one still does not.
+fn looks_like_entity(text: &[u8]) -> bool {
+    text.starts_with(b"{") && text.ends_with(b"}")
+}
+
+/// The id at the head of an entity's line. Every line of the dump starts
+/// `{"type":"item","id":"Q31",` -- the entity's own first two keys, so what is
+/// read there cannot be an id from deeper inside it. A line of any other shape
+/// yields `None` and is parsed in full instead.
+fn leading_id(text: &[u8]) -> Option<&str> {
+    let rest = text.strip_prefix(br#"{"type":""#)?;
+    let rest = &rest[memchr::memchr(b'"', rest)? + 1..];
+    let rest = rest.strip_prefix(br#","id":""#)?;
+    std::str::from_utf8(&rest[..memchr::memchr(b'"', rest)?]).ok()
 }
 
 /// Reads the dump: facts first, then the labels those facts refer to.
@@ -260,11 +304,11 @@ fn read_dump(args: &Args, canon: &HashMap<String, i32>) -> Result<Harvest> {
 
 /// First pass: every fact this import keeps, and nothing else.
 fn read_facts(args: &Args, canon: &HashMap<String, i32>) -> Result<Harvest> {
-    let reader = open_dump(args)?;
+    let mut reader = open_dump(args)?;
     let mut harvest = Harvest::default();
+    let mut line = Vec::new();
 
-    for line in reader.lines() {
-        let line = line.context("failed to read a dump line")?;
+    while next_line(&mut reader, &mut line)? {
         harvest.entities += take_line(&line, canon, &mut harvest.by_mbid, &mut harvest.with_mbid);
 
         if harvest.entities % 1_000_000 == 0 && harvest.entities > 0 {
@@ -308,12 +352,12 @@ fn read_labels(args: &Args, wanted: &HashSet<i32>) -> Result<HashMap<i32, String
     }
 
     tracing::info!(wanted = wanted.len(), "reading labels for the items the facts point at");
-    let reader = open_dump(args)?;
+    let mut reader = open_dump(args)?;
     let mut labels = HashMap::with_capacity(wanted.len());
     let mut entities = 0u64;
+    let mut line = Vec::new();
 
-    for line in reader.lines() {
-        let line = line.context("failed to read a dump line")?;
+    while next_line(&mut reader, &mut line)? {
         entities += take_label(&line, wanted, &mut labels);
 
         if entities > 0 && entities.is_multiple_of(5_000_000) {
@@ -339,13 +383,18 @@ fn read_labels(args: &Args, wanted: &HashSet<i32>) -> Result<HashMap<i32, String
 ///
 /// Deliberately does not parse the whole entity: a label pass that paid full
 /// deserialisation for 123 million items would cost more than the memory it
-/// saves. The id and the English label are enough.
-fn take_label(line: &str, wanted: &HashSet<i32>, labels: &mut HashMap<i32, String>) -> u64 {
-    let trimmed = line.trim().trim_end_matches(',');
-    if trimmed.is_empty() || trimmed == "[" || trimmed == "]" {
+/// saves. Most lines are not parsed at all: the id at their head says they are
+/// not wanted.
+fn take_label(line: &[u8], wanted: &HashSet<i32>, labels: &mut HashMap<i32, String>) -> u64 {
+    let Some(text) = entity_text(line) else {
         return 0;
+    };
+    if let Some(id) = leading_id(text)
+        && !qid_number(id).is_some_and(|qid| wanted.contains(&qid))
+    {
+        return u64::from(looks_like_entity(text));
     }
-    let Ok(entity) = serde_json::from_str::<LabelOnly>(trimmed) else {
+    let Ok(entity) = serde_json::from_slice::<LabelOnly>(text) else {
         return 0;
     };
     let Some(qid) = qid_number(&entity.id) else {
@@ -364,17 +413,22 @@ fn take_label(line: &str, wanted: &HashSet<i32>, labels: &mut HashMap<i32, Strin
 ///
 /// Separate from the reading loop so the tests exercise the shipped rules
 /// rather than a reimplementation of them.
-fn take_line(line: &str, canon: &HashMap<String, i32>, by_mbid: &mut HashMap<String, Facts>, with_mbid: &mut u64) -> u64 {
+fn take_line(line: &[u8], canon: &HashMap<String, i32>, by_mbid: &mut HashMap<String, Facts>, with_mbid: &mut u64) -> u64 {
     // The file is a JSON array: the first and last lines are its brackets, and
     // every entity line carries a trailing comma.
-    let trimmed = line.trim().trim_end_matches(',');
-    if trimmed.is_empty() || trimmed == "[" || trimmed == "]" {
+    let Some(text) = entity_text(line) else {
         return 0;
+    };
+
+    // No MusicBrainz id, nothing to keep: most entities are let go here,
+    // unparsed.
+    if memmem::find(text, MBID_KEY).is_none() {
+        return u64::from(looks_like_entity(text));
     }
 
     // A malformed line is upstream data, not a reason to abandon a pass that
-    // takes ten hours.
-    let Ok(entity) = serde_json::from_str::<Entity>(trimmed) else {
+    // takes hours.
+    let Ok(entity) = serde_json::from_slice::<Entity>(text) else {
         return 0;
     };
 
@@ -700,7 +754,7 @@ mod tests {
         let canon = canon();
         let (mut by_mbid, mut with_mbid, mut read) = (HashMap::new(), 0, 0);
         for line in lines {
-            read += take_line(line, &canon, &mut by_mbid, &mut with_mbid);
+            read += take_line(line.as_bytes(), &canon, &mut by_mbid, &mut with_mbid);
         }
         (by_mbid, with_mbid, read)
     }
@@ -710,7 +764,7 @@ mod tests {
         let wanted: HashSet<i32> = wanted.iter().copied().collect();
         let mut labels = HashMap::new();
         for line in lines {
-            take_label(line, &wanted, &mut labels);
+            take_label(line.as_bytes(), &wanted, &mut labels);
         }
         labels
     }
@@ -865,6 +919,40 @@ mod tests {
         let line = entity("Q1", &format!(r#""claims":{{{},{unknown}}}"#, mbid_claim(MBID_A)));
         let (facts, _, _) = take(&[&line]);
         assert_eq!(facts[MBID_A].origin_qid, None);
+    }
+
+    #[test]
+    fn looks_for_the_key_the_facts_are_keyed_on() {
+        // The fact pass lets a line go when this key is not in it, so the key
+        // it looks for and the property it reads must be one and the same.
+        assert_eq!(MBID_KEY, format!(r#""{P_MBID}""#).as_bytes());
+    }
+
+    #[test]
+    fn lets_an_entity_without_an_mbid_go_but_counts_it() {
+        let city = entity("Q24826", r#""claims":{"P31":[]}"#);
+        let (facts, with_mbid, read) = take(&[&city]);
+        assert_eq!(read, 1, "it is still an entity read");
+        assert_eq!(with_mbid, 0);
+        assert!(facts.is_empty());
+    }
+
+    #[test]
+    fn reads_the_id_off_the_head_of_a_line() {
+        assert_eq!(leading_id(br#"{"type":"item","id":"Q31","labels":{}}"#), Some("Q31"));
+        assert_eq!(leading_id(br#"{"type":"lexeme","id":"L7","lemmas":{}}"#), Some("L7"));
+        // An id deeper in the entity is not the entity's own.
+        assert_eq!(leading_id(br#"{"type":"item","labels":{"id":"Q5"}}"#), None);
+        assert_eq!(leading_id(br#"{"labels":{},"id":"Q5"}"#), None);
+    }
+
+    #[test]
+    fn parses_in_full_a_wanted_line_of_another_shape() {
+        // Should the dump ever put its keys in another order, the head of the
+        // line says nothing, and the label must still be found -- by parsing.
+        let reordered = r#"{"labels":{"en":{"language":"en","value":"Liverpool"}},"id":"Q24826","type":"item"},"#;
+        let labels = take_labels(&[reordered], &[24826]);
+        assert_eq!(labels.get(&24826).map(String::as_str), Some("Liverpool"));
     }
 
     #[test]

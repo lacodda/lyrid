@@ -1329,6 +1329,7 @@ dependencies = [
  "http-body-util",
  "image",
  "lettre",
+ "memchr",
  "parquet",
  "quick-xml",
  "rand",
