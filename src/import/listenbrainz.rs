@@ -26,10 +26,11 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use bzip2::read::MultiBzDecoder;
 use clap::Args as ClapArgs;
 use serde::Deserialize;
 use sqlx::PgPool;
+
+use super::bz::ParallelDecoder;
 
 /// How many edges to accumulate before sending a batch to Postgres.
 const BATCH: usize = 8192;
@@ -132,8 +133,7 @@ async fn load_credits(pool: &PgPool) -> Result<HashMap<i32, i32>> {
 /// artist collapsing onto the same pair keep only their strongest score
 /// rather than colliding on insert.
 fn read_archive(file: File, credits: &HashMap<i32, i32>, min_score: f32) -> Result<Dataset> {
-    let decoder = MultiBzDecoder::new(BufReader::with_capacity(1 << 20, file));
-    let mut archive = tar::Archive::new(decoder);
+    let mut archive = tar::Archive::new(ParallelDecoder::new(file));
     let mut best: HashMap<(i32, i32), f32> = HashMap::new();
     let mut timestamp = None;
     let mut stats = Stats::default();

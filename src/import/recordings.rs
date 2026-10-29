@@ -30,9 +30,9 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use bzip2::read::MultiBzDecoder;
 use uuid::Uuid;
 
+use super::bz::ParallelDecoder;
 use super::copy_text::Reader;
 
 /// What resolving a set of recordings came to.
@@ -52,10 +52,9 @@ pub struct Resolved {
 /// Resolves `wanted` recording MBIDs to the artists they are credited to.
 pub fn artists_of(dump: &Path, wanted: &HashSet<Uuid>) -> Result<Resolved> {
     let file = File::open(dump).with_context(|| format!("cannot open {}", dump.display()))?;
-    // A full export is a concatenation of bzip2 streams; a single-stream
-    // decoder would stop at the first and silently resolve nothing past it.
-    let decoder = MultiBzDecoder::new(BufReader::with_capacity(1 << 20, file));
-    let mut archive = tar::Archive::new(decoder);
+    // A full export is a concatenation of bzip2 streams; the reader takes
+    // every stream, and decompresses each on every core.
+    let mut archive = tar::Archive::new(ParallelDecoder::new(file));
     let mut pass = Pass::new(wanted);
     let mut seen = Seen::default();
 

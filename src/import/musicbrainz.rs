@@ -23,10 +23,10 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use bzip2::read::MultiBzDecoder;
 use clap::Args as ClapArgs;
 use sqlx::PgPool;
 
+use super::bz::ParallelDecoder;
 use super::copy_text::{Reader, Row};
 
 /// How many rows to accumulate before sending a batch to Postgres.
@@ -123,10 +123,9 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
 
 /// Reads every needed table out of the archive in one pass.
 fn read_archive(file: File) -> Result<Tables> {
-    // The export is a concatenation of bzip2 streams for large tables, so a
-    // single-stream decoder would stop early and silently truncate the import.
-    let decoder = MultiBzDecoder::new(BufReader::with_capacity(1 << 20, file));
-    let mut archive = tar::Archive::new(decoder);
+    // The export is a concatenation of bzip2 streams for large tables; the
+    // reader takes every stream, and decompresses each on every core.
+    let mut archive = tar::Archive::new(ParallelDecoder::new(file));
     let mut tables = Tables::default();
 
     for entry in archive.entries().context("the dump is not a readable tar archive")? {

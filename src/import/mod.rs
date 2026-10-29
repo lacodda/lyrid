@@ -1,4 +1,5 @@
 pub mod acousticbrainz;
+pub mod bz;
 pub mod copy_text;
 pub mod discogs;
 pub mod discogs_releases;
