@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.22.0] - 2026-11-05
+
+### Documentation
+- Measure a whole Wikidata import read on every core
+- The fog, the two modes as built, and carrying progress across a canon
+
+### Features
+- Keep which stars a person opened, and carry them across editions
+- Light the sky by listening, under a soft fog
+
+
 ## [0.21.0] - 2026-10-29
 
 ### Bug Fixes
