@@ -181,7 +181,7 @@
     "lede": "The sky is public and works without an account. An account remembers what is listed below across your machines, and this page is the whole list — not a summary of one.",
     "noAccount": {
       "heading": "If you have no account",
-      "body": "Nothing about you is stored on the server. Your marker's shape and colour live in your own browser, and the view you are looking at lives in the address bar. Neither reaches us."
+      "body": "Nothing about you is stored on the server. Your marker's shape and colour live in your own browser, and so do the stars you listened to, by their MusicBrainz ids, until you sign in and they move into your account. The view you are looking at lives in the address bar. None of it reaches us."
     },
     "withAccount": {
       "heading": "If you do",
@@ -195,6 +195,8 @@
       "listeningBody": "For each listen, when it was, which artists it was by (their MusicBrainz ids), how long it ran and the light it gathered — none for listens from before the link — and no track or album names. Your listens are already public on ListenBrainz; this copy exists only so your own sky can show what you have heard. The token you paste to link is checked once and never kept. Unlinking stops the reading; what was gathered stays until you delete the account.",
       "lastfm": "If you bring a Last.fm file: the listens it names.",
       "lastfmBody": "When each was, and the artist if lyrid can place them; the track's name only to tell one scrobble from another, folded into an id and not kept. The file itself is read and dropped. You can forget everything a file brought at any time.",
+      "opened": "The stars you opened here, in the exploration mode.",
+      "openedBody": "Which stars (their MusicBrainz ids), when, and whether you played them or followed a link out. Nothing for the creative mode, which has no progress to keep.",
       "born": "If you give it: the year you were born.",
       "bornBody": "Only the year. It becomes the six years you were fifteen to twenty, and the sky is asked about those years, not about you.",
       "letter": "If you ask for the weekly letter: that you asked, and in which language.",
@@ -253,7 +255,8 @@
     "label": "The whole sky, small, with the view marked on it",
     "hint": "Arrow keys move the view, plus and minus zoom, Home shows the whole sky. Click or drag to fly.",
     "in": "in {{place}}",
-    "nowhere": "between constellations"
+    "nowhere": "between constellations",
+    "uncharted": "uncharted"
   },
   "listen": {
     "heading": "Listen",
@@ -580,5 +583,32 @@
       "mechanic": "Mechanic",
       "uses": "Uses"
     }
+  },
+  "fog": {
+    "chooseTitle": "Choose how you enter the universe",
+    "chooseBody": "This choice is permanent. The sky is the same - the journey is not.",
+    "exploreTitle": "◆ Exploration",
+    "exploreBody": "The sky starts dark. Every artist you truly listen to becomes a star you lit yourself, and its echoes show where to go next. A ship, fuel and light are on their way.",
+    "exploreAction": "Begin the expedition",
+    "createTitle": "◇ Creative",
+    "createBody": "The whole sky open from the first minute. Lenses, layers and time - a daily instrument for studying music.",
+    "createAction": "Open the sky",
+    "later": "Decide later",
+    "chooseFailed": "The choice could not be saved, so nothing has been decided. Try again.",
+    "chip": "◆ Exploration · {{count}} star lit",
+    "chip_other": "◆ Exploration · {{count}} stars lit",
+    "creative": "◇ Creative",
+    "uncharted": "Uncharted",
+    "hint": "Your sky is dark. Search for an artist you love and play them: thirty seconds of listening lights a star. A linked ListenBrainz account lights everyone you have ever heard.",
+    "comeWith": "The star you listened to will come with you.",
+    "comeWith_other": "The {{count}} stars you listened to will come with you.",
+    "lit": "{{name}} is lit on your sky.",
+    "litOn": "★ Lit by you on {{date}}",
+    "unheard": "You have not heard this star yet. Listen, and it lights.",
+    "echo": "An echo",
+    "echoOf": "An echo of {{name}}",
+    "echoes": "Echoes · unexplored",
+    "followEcho": "follow echo →",
+    "nearbyEmpty": "Nothing is lit in this part of the sky."
   }
 }

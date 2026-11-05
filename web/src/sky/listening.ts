@@ -36,6 +36,55 @@ export interface SignalListening {
   found: boolean
 }
 
+/**
+ * How long a star must really sound before it counts as heard.
+ *
+ * Long enough that something was listened to rather than skipped past, and the
+ * length of the preview the Vision calls a scan. It runs on the player's own word
+ * that it is playing, so a channel that will not play, a video held at buffering
+ * and a pause all count for nothing.
+ */
+export const HEARD_AFTER_MS = 30_000
+
+/** A clock that fires once, when a star has sounded for long enough in total. */
+export interface HeardClock {
+  /** The player says it is playing. */
+  playing: () => void
+  /** The player says it is doing anything else. */
+  paused: () => void
+  /** The player is gone. */
+  stop: () => void
+}
+
+export function heardClock(fire: () => void, after = HEARD_AFTER_MS): HeardClock {
+  let left = after
+  let since: number | null = null
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let done = false
+
+  const paused = () => {
+    if (since !== null) left -= Date.now() - since
+    since = null
+    clearTimeout(timer)
+  }
+
+  return {
+    playing: () => {
+      if (done || since !== null) return
+      since = Date.now()
+      timer = setTimeout(() => {
+        done = true
+        fire()
+      }, left)
+    },
+    paused,
+    stop: () => {
+      done = true
+      paused()
+    },
+  }
+}
+
 /** The star the player is sounding, if anything is playing. */
 export function sounding(listening: Listening | null): Station | null {
   if (!listening) return null

@@ -34,6 +34,8 @@ export type Mechanic =
   | 'lastfm_brought'
   | 'letter_asked'
   | 'changes_opened'
+  | 'mode_chosen'
+  | 'star_opened'
 
 /**
  * Counts one use.

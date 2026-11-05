@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { cn } from 'dowel-ui'
 
 import { Sky, type Overview, type SkyState, type View } from '@/sky/Sky'
 import { NearbyStars } from '@/sky/NearbyStars'
@@ -10,8 +11,12 @@ import { RoutePanel } from '@/sky/RoutePanel'
 import { GatheringPanel } from '@/sky/GatheringPanel'
 import { addStop, removeStop } from '@/sky/route'
 import { fetchLabels, type Label } from '@/sky/labels'
+import { EMPTY_SKY, buildFog, chartLabels, chartedAt, type PersonalSky } from '@/sky/fog'
+import { bringOpenings, fetchPersonalSky, forget, openStar, remember as rememberStar, remembered as rememberedStars, type How } from '@/sky/openings'
+import { ModeChoice } from '@/ModeChoice'
 import { LanguagePicker } from '@/LanguagePicker'
 import { Button } from '@/components/ui/button'
+import { panelVariants } from '@/components/ui/panel'
 import { StarCard } from '@/sky/StarCard'
 import { Search } from '@/sky/Search'
 import { readLocation, readPage, writeLocation, type Dossier as DossierTarget, type Page } from '@/sky/location'
@@ -195,13 +200,13 @@ export function App() {
   )
 
   // The card is always the picked star's, so its place comes from there.
-  const playChannel = useCallback((uploads: string, name: string) => {
+  const playChannel = useCallback((uploads: string, name: string, mbid: string) => {
     const star = pickedRef.current
     if (!star) return
     generation.current += 1
     count('listen_opened')
     setListenNote(null)
-    setListening({ kind: 'channel', station: { id: star.artistId, name, x: star.x, y: star.y, uploads } })
+    setListening({ kind: 'channel', station: { id: star.artistId, mbid, name, x: star.x, y: star.y, uploads } })
   }, [])
 
   const tuneSignal = useCallback(() => {
@@ -329,7 +334,7 @@ export function App() {
   // arrive once the sky has loaded, so the names are asked for in the same
   // cut the tiles came from.
   const [overview, setOverview] = useState<Overview | null>(null)
-  const [labels, setLabels] = useState<Label[]>([])
+  const [allLabels, setLabels] = useState<Label[]>([])
   const onOverview = useCallback((next: Overview) => {
     setOverview(next)
     void fetchLabels(next.sky).then(setLabels, () => undefined)
@@ -467,6 +472,101 @@ export function App() {
       setTarget(profile.camera)
     }
   }, [opened])
+
+  // ------------------------------------------------------------------- fog
+  // Whose sky this is. Kept with the account it belongs to, for the reason the
+  // listening below is: signing in as someone else must not show the last
+  // person's stars for the moment before the next answer arrives.
+  const [heldSky, setHeldSky] = useState<{ user: number; sky: PersonalSky } | null>(null)
+  const person = me?.id ?? null
+  const exploring = me?.mode === 'explore'
+  const refreshSky = useCallback(
+    (signal?: AbortSignal) => {
+      if (person === null) return
+      // Personal and optional: the fog stays as it was until the next answer.
+      fetchPersonalSky(signal).then(sky => setHeldSky({ user: person, sky }), () => undefined)
+    },
+    [person]
+  )
+  useEffect(() => {
+    if (!exploring) return
+    const abort = new AbortController()
+    refreshSky(abort.signal)
+    // The ledger grows in the background, as the listening panel knows.
+    const timer = window.setInterval(() => refreshSky(abort.signal), 5 * 60_000)
+    return () => {
+      abort.abort()
+      window.clearInterval(timer)
+    }
+  }, [exploring, refreshSky])
+
+  // What this browser heard before anyone signed in moves into the account at
+  // any sign-in, and is forgotten only once the server has said it holds it: a
+  // request that fails leaves it here for the next visit.
+  useEffect(() => {
+    if (person === null) return
+    const stars = rememberedStars()
+    if (stars.length === 0) return
+    bringOpenings(stars).then(
+      () => {
+        forget()
+        refreshSky()
+      },
+      () => undefined
+    )
+  }, [person, refreshSky])
+
+  const personal = heldSky && heldSky.user === person ? heldSky.sky : EMPTY_SKY
+  const skyLoaded = heldSky?.user === person
+  const skyExtent = overview?.sky ?? null
+  const fog = useMemo(() => (exploring && skyExtent ? buildFog(skyExtent, personal) : null), [exploring, skyExtent, personal])
+  const labels = useMemo(() => (fog ? chartLabels(allLabels, fog, t('fog.uncharted')) : allLabels), [fog, allLabels, t])
+  // Nowhere this person has been, so the compass does not name it and the player
+  // has no radio to offer for it.
+  const dark = fog !== null && state !== null && !chartedAt(fog, state.view.x, state.view.y)
+
+  // A star was heard. With an account it goes to the server, without one it stays
+  // in this browser, and in the creative mode there is no progress to keep.
+  const meRef = useRef<Me | null>(null)
+  const fogRef = useRef(fog)
+  useEffect(() => {
+    meRef.current = me
+    fogRef.current = fog
+  }, [me, fog])
+  const light = useCallback(
+    (star: { id?: number; mbid: string; name: string }, how: How, reveal: boolean) => {
+      const who = meRef.current
+      if (!who) {
+        if (rememberStar(star.mbid)) count('star_opened')
+        return
+      }
+      if (who.mode === 'create') return
+      if (star.id !== undefined && fogRef.current?.opened.has(star.id)) return
+      openStar(star.mbid, how).then(
+        () => {
+          count('star_opened')
+          refreshSky()
+          if (reveal && who.mode === 'explore') setListenNote(t('fog.lit', { name: star.name }))
+        },
+        // Heard all the same, and the next listen says so again.
+        () => undefined
+      )
+    },
+    [refreshSky, t]
+  )
+  const onHeard = useCallback(
+    (station: Station) => {
+      // The signal keeps its name until the listener reaches it, and a note
+      // saying who just lit up would give it away.
+      const current = listeningRef.current
+      light(station, 'played', !(current?.kind === 'signal' && !current.found))
+    },
+    [light]
+  )
+  const onFollow = useCallback((mbid: string, name: string) => light({ mbid, name }, 'followed', false), [light])
+
+  // The question of the mode, put off for this visit if the person says so.
+  const [modeLater, setModeLater] = useState(false)
 
   // What the signed-in person's listening has come to. Read when someone signs
   // in, and again every few minutes while they stay: the server reads
@@ -674,6 +774,8 @@ export function App() {
 
   return (
     <main ref={mainRef} className="relative h-full overflow-hidden">
+      {me && me.mode === null && !modeLater && <ModeChoice overview={overview} onChosen={setMe} onLater={() => setModeLater(true)} />}
+
       <Sky
         onState={onState}
         onPick={onPick}
@@ -685,6 +787,7 @@ export function App() {
         route={routeLine}
         gathering={gatheringPoints}
         labels={labels}
+        fog={fog}
         onOverview={onOverview}
       />
 
@@ -693,6 +796,11 @@ export function App() {
         <div>
           <h1 className="m-0 text-lg font-semibold tracking-wide text-text">lyrid</h1>
           <p className="m-0 text-xs text-dim">{t('app.tagline')}</p>
+          {me?.mode && (
+            <p className="m-0 mt-0.5 font-mono text-2xs tracking-wide text-accent">
+              {me.mode === 'explore' ? t('fog.chip', { count: personal.opened.length }) : t('fog.creative')}
+            </p>
+          )}
         </div>
       </header>
 
@@ -725,10 +833,12 @@ export function App() {
               setComparing([pinned, side])
             }}
             onListen={playChannel}
+            onFollow={onFollow}
             onRadio={startRadio}
             onDossier={openDossier}
             sounding={playing?.id ?? null}
             listener={scrobbles !== null && (scrobbles.link !== null || scrobbles.listens > 0)}
+            fog={fog}
           />
         )}
         {gathering && (
@@ -769,12 +879,14 @@ export function App() {
               visible={state.visible}
               region={region}
               sounding={playing}
+              uncharted={dark}
+              fog={fog}
               onNavigate={setTarget}
             />
           )}
           <Player
             listening={listening}
-            here={region?.radio ?? null}
+            here={dark ? null : (region?.radio ?? null)}
             note={listenNote}
             tuning={tuning}
             onRadio={startRadio}
@@ -783,6 +895,7 @@ export function App() {
             onEnded={onEnded}
             onBroken={onBroken}
             onPlaying={onPlaying}
+            onHeard={onHeard}
             onGo={goToStation}
             onStop={stopListening}
           />
@@ -884,7 +997,10 @@ export function App() {
               no reachable content at all. It is also the only piece that can
               usefully be shorter, so it is the one that shrinks -- `min-h-0`
               because a flex child will not shrink below its content otherwise. */}
-          <NearbyStars className="min-h-0" visible={state.visible} onPick={goTo} />
+          {fog && skyLoaded && personal.opened.length === 0 && (
+            <p className={cn(panelVariants(), 'glass m-0 w-56 shrink-0 p-2 text-xs leading-relaxed text-text')}>{t('fog.hint')}</p>
+          )}
+          <NearbyStars className="min-h-0" visible={state.visible} onPick={goTo} fog={fog} />
           <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} onCharter={openCharter} />
           {me && (
             <ListeningPanel

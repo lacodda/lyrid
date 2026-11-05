@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { toMap } from './minimap'
+import type { Fog } from './fog'
 import type { Overview } from './Sky'
 import type { Star } from './renderer'
 import { fetchLevel } from './tiles'
@@ -20,7 +21,7 @@ const FIELD_LEVEL = 2
  * Shared by the compass and the dossiers, so the sky a roster is placed on is
  * the same small sky the compass shows.
  */
-export function useSkyField(overview: Overview, size: number): HTMLCanvasElement {
+export function useSkyField(overview: Overview, size: number, fog: Fog | null = null): HTMLCanvasElement {
   const { sky } = overview
   const [stars, setStars] = useState<Star[]>(overview.stars)
   useEffect(() => {
@@ -43,10 +44,20 @@ export function useSkyField(overview: Overview, size: number): HTMLCanvasElement
       const at = toMap(sky, size, star.x, star.y)
       // Faint, because tens of thousands of points share a few thousand
       // pixels: at full strength the sky's shape saturates into a flat disc.
-      context.globalAlpha = 0.05 + 0.6 * star.brightness
+      context.globalAlpha = (0.05 + 0.6 * star.brightness) * (fog ? 0.25 : 1)
       context.fillStyle = star.brightness > 0.5 ? '#f2ead9' : '#6f9ee0'
       context.fillRect(at.x, at.y, 1, 1)
     }
+    // In the fog the small sky is the person's: the shape is a dim hint, and
+    // what stands out on it is where they have been.
+    if (fog) {
+      context.globalAlpha = 1
+      context.fillStyle = '#ffffff'
+      for (const star of fog.opened.values()) {
+        const at = toMap(sky, size, star.x, star.y)
+        context.fillRect(at.x - 0.75, at.y - 0.75, 1.5, 1.5)
+      }
+    }
     return canvas
-  }, [sky, stars, size])
+  }, [sky, stars, size, fog])
 }

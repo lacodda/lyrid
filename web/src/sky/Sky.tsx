@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { advance } from './flight'
+import { pickInFog, placeOpenNames, type Fog } from './fog'
 import { layerFor, placeLabels, type Label } from './labels'
 import { SkyRenderer, type Camera, type Halo, type Instruments, type Star } from './renderer'
 import { fetchLevel, fetchSky, levelFor, neighbouringLevels, tileAction, type Sky as SkyMeta, type Tile } from './tiles'
@@ -76,6 +77,8 @@ interface Props {
   gathering?: readonly { x: number; y: number }[]
   /** Genre and style names to write on the sky. */
   labels?: readonly Label[]
+  /** This person's fog, in the mode that has one. */
+  fog?: Fog | null
   /**
    * Handed the sky's extent and its level-0 stars once they have loaded, for
    * whatever draws the sky small — the minimap. Handed over rather than
@@ -91,7 +94,7 @@ interface Props {
  * entirely. A component that re-rendered per frame would spend more time in
  * reconciliation than in drawing.
  */
-export function Sky({ onState, onPick, target, initial, marked, onCapture, instruments, route, gathering, labels, onOverview }: Props) {
+export function Sky({ onState, onPick, target, initial, marked, onCapture, instruments, route, gathering, labels, fog, onOverview }: Props) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   // Names are text, and text on a WebGL canvas means a glyph atlas; a 2D
@@ -156,6 +159,13 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture, instr
   useEffect(() => {
     pendingGathering.current = gathering ?? []
   }, [gathering])
+  // The fog is uploaded the same way, and read by a click as well as by the loop.
+  const fogRef = useRef<Fog | null>(null)
+  const fogChanged = useRef(false)
+  useEffect(() => {
+    fogRef.current = fog ?? null
+    fogChanged.current = true
+  }, [fog])
   const onOverviewRef = useRef(onOverview)
   useEffect(() => {
     onOverviewRef.current = onOverview
@@ -276,6 +286,10 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture, instr
               }
             }
 
+            if (fogChanged.current) {
+              renderer.setFog(fogRef.current)
+              fogChanged.current = false
+            }
             if (pendingGathering.current) {
               renderer.setGathering(pendingGathering.current)
               pendingGathering.current = null
@@ -300,7 +314,7 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture, instr
               instrumentsRef.current
             )
             if (names && context) {
-              drawNames(context, names, sky, camera.current, canvas.width, labelsRef.current)
+              drawNames(context, names, sky, camera.current, canvas.width, labelsRef.current, fogRef.current)
             }
             // Read while the frame is still in the colour buffer: after this
             // callback returns, the browser is free to discard it.
@@ -386,7 +400,10 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture, instr
       }
 
       const tile = levels.current.get(shownLevel.current)
-      onPick(tile ? nearest(tile.stars, world, 24 / camera.current.scale) : null)
+      const radius = 24 / camera.current.scale
+      const fogged = fogRef.current
+      if (fogged) onPick(pickInFog(fogged, tile?.stars ?? [], world, radius))
+      else onPick(tile ? nearest(tile.stars, world, radius) : null)
     },
     [onPick],
   )
@@ -463,14 +480,52 @@ function drawNames(
   sky: SkyMeta,
   camera: Camera,
   starWidth: number,
-  labels: readonly Label[]
+  labels: readonly Label[],
+  fog: Fog | null
 ): void {
   context.clearRect(0, 0, names.width, names.height)
-  if (labels.length === 0 || starWidth === 0) return
+  if (starWidth === 0) return
+  const ratio = names.width / starWidth
+  drawRegionNames(context, names, sky, camera, starWidth, labels, ratio)
+  if (fog) drawOpenNames(context, names, camera, fog, ratio)
+}
+
+/** The names of the stars someone opened: the part of the sky that is theirs. */
+function drawOpenNames(context: CanvasRenderingContext2D, names: HTMLCanvasElement, camera: Camera, fog: Fog, ratio: number): void {
+  const size = Math.round(11 * (names.width / names.clientWidth))
+  context.font = `500 ${String(size)}px system-ui, sans-serif`
+  context.letterSpacing = '0px'
+  context.textAlign = 'left'
+  context.textBaseline = 'middle'
+  const placed = placeOpenNames(
+    fog,
+    { x: camera.x, y: camera.y, scale: camera.scale * ratio },
+    { width: names.width, height: names.height },
+    name => context.measureText(name).width,
+    size * 1.4
+  )
+  for (const { name, x, y } of placed) {
+    context.lineWidth = size * 0.3
+    context.strokeStyle = 'rgba(7, 8, 13, 0.85)'
+    context.strokeText(name, x, y)
+    context.fillStyle = 'rgba(230, 234, 242, 0.9)'
+    context.fillText(name, x, y)
+  }
+}
+
+function drawRegionNames(
+  context: CanvasRenderingContext2D,
+  names: HTMLCanvasElement,
+  sky: SkyMeta,
+  camera: Camera,
+  starWidth: number,
+  labels: readonly Label[],
+  ratio: number
+): void {
+  if (labels.length === 0) return
   const layer = layerFor(sky, starWidth / camera.scale)
   if (!layer) return
 
-  const ratio = names.width / starWidth
   const size = Math.round((layer === 'genre' ? 13 : 12) * (names.width / names.clientWidth))
   // Genres in small capitals and spaced out, as a map letters a region;
   // styles in italic, as it letters a feature inside one.

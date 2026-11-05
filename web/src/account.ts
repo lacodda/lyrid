@@ -9,14 +9,7 @@
  * by asking `/api/me` rather than by consulting a local flag.
  */
 
-/**
- * The two modes.
- *
- * Nothing chooses between them yet: only the creative one is built, so the
- * door does not ask (decision of 2026-09-11) and every account starts there.
- * The type stays because the server still reports which mode a profile is in,
- * and the choice returns with the fog (v0.22).
- */
+/** The two modes, of which a profile holds one for good once it has chosen. */
 export type Mode = 'create' | 'explore'
 
 /** Where the sky was left. */
@@ -30,7 +23,10 @@ export interface Camera {
 export interface Me {
   id: number
   email: string
-  mode: Mode
+  /** `null` until the choice is made, which is what asks for it. */
+  mode: Mode | null
+  /** The edition of the canon this person's progress has been carried into. */
+  canon_edition: number | null
   halo_shape: string | null
   halo_colour: string | null
   /** Absent when nothing is saved, or when the sky has been rebuilt since. */
@@ -82,6 +78,18 @@ export async function logIn(email: string, password: string): Promise<Me> {
 
 export async function logOut(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
+}
+
+/** Chooses the mode, the one time it can be chosen. */
+export async function chooseMode(mode: Mode): Promise<Me> {
+  const response = await fetch('/api/me/mode', {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  })
+  if (!response.ok) throw new Error(await messageOf(response))
+  return (await response.json()) as Me
 }
 
 /** Confirms an address from the link in the letter. */

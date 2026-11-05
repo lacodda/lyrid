@@ -10,6 +10,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { useLanguage } from '@/lib/language'
 import { fetchHeard, type Heard } from '@/scrobbling'
 import type { Side } from './Compare'
+import type { Echo, Fog } from './fog'
 import type { Dossier } from './location'
 import { Spectrum } from './Spectrum'
 import { reasons } from './why'
@@ -29,7 +30,9 @@ interface Props {
   /** Compares this star with the held one. */
   onCompare: (side: Side) => void
   /** Plays this star's channel in the one player. */
-  onListen: (uploads: string, name: string) => void
+  onListen: (uploads: string, name: string, mbid: string) => void
+  /** A link out to hear this star was followed. */
+  onFollow: (mbid: string, name: string) => void
   /** Starts the radio of a nebula. */
   onRadio: (nebula: Nebula) => void
   /** Opens a station this star belongs to: a label it released on, or where it comes from. */
@@ -42,6 +45,8 @@ interface Props {
    * personal at all.
    */
   listener: boolean
+  /** This person's fog, in the mode that has one. */
+  fog: Fog | null
 }
 
 /**
@@ -57,7 +62,7 @@ interface Props {
  * of three million have no encyclopaedia article and no influence links, so an
  * empty section is the normal case, not a failure to render.
  */
-export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare, onListen, onRadio, onDossier, sounding, listener }: Props) {
+export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare, onListen, onFollow, onRadio, onDossier, sounding, listener, fog }: Props) {
   const { t } = useTranslation()
   const { resolved } = useLanguage()
   const [artist, setArtist] = useState<Artist | null>(null)
@@ -120,6 +125,7 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
           )}
 
           {listener && <HeardLine artistId={artist.id} />}
+          {fog && <FogLine fog={fog} artistId={artist.id} />}
 
           {/* The two instruments that act on this star and another: walking
               to it as part of a route, and holding it up against a second. */}
@@ -201,7 +207,8 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
             uploads={artist.youtube_uploads}
             radio={artist.radio}
             playing={sounding === artist.id}
-            onPlay={uploads => onListen(uploads, artist.name)}
+            onPlay={uploads => onListen(uploads, artist.name, artist.mbid)}
+            onFollow={() => onFollow(artist.mbid, artist.name)}
             onRadio={onRadio}
           />
 
@@ -209,7 +216,10 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
               never merged into one "related" pile. */}
           <Names heading={t('card.shapedBy')} people={artist.influenced_by} onOpen={onOpen} />
           <Names heading={t('card.wentOnToShape')} people={artist.influenced} onOpen={onOpen} />
-          <Neighbours people={artist.similar.slice(0, 6)} onOpen={onOpen} />
+          {/* In the fog the neighbours are the ones already heard; the rest are
+              what the echoes are for, three at a time. */}
+          <Neighbours people={(fog ? artist.similar.filter(person => fog.opened.has(person.id)) : artist.similar).slice(0, 6)} onOpen={onOpen} />
+          {fog && <Echoes echoes={fog.echoesOf.get(artist.id) ?? []} onOpen={onOpen} />}
         </>
       )}
     </aside>
@@ -245,6 +255,49 @@ function HeardLine({ artistId }: { artistId: number }) {
     <p className="m-0 text-xs text-light">
       {t('card.heard', { count: heard.listens, number: heard.listens.toLocaleString(resolved), since })}
     </p>
+  )
+}
+
+/** Where this star stands in this person's sky: lit, an echo of one that is, or neither yet. */
+function FogLine({ fog, artistId }: { fog: Fog; artistId: number }) {
+  const { t } = useTranslation()
+  const { resolved } = useLanguage()
+  const open = fog.opened.get(artistId)
+  if (open) {
+    const date = new Date(open.openedAt).toLocaleDateString(resolved, { day: 'numeric', month: 'long', year: 'numeric' })
+    return <p className="m-0 text-xs text-accent">{t('fog.litOn', { date })}</p>
+  }
+  const reflecting = fog.echoes.get(artistId)?.of.map(id => fog.opened.get(id)?.name).find(name => name !== undefined)
+  return (
+    <p className="m-0 text-xs text-dim">
+      {reflecting !== undefined && <span className="block">{t('fog.echoOf', { name: reflecting })}</span>}
+      {t('fog.unheard')}
+    </p>
+  )
+}
+
+/** The next steps from this star: the closest it has that have not been heard. */
+function Echoes({ echoes, onOpen }: { echoes: readonly Echo[]; onOpen: (id: number) => void }) {
+  const { t } = useTranslation()
+  if (echoes.length === 0) return null
+  return (
+    <>
+      <SectionLabel>{t('fog.echoes')}</SectionLabel>
+      <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
+        {echoes.map(echo => (
+          <li key={echo.artistId}>
+            <button
+              type="button"
+              className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-sm border border-dashed border-line px-2 py-1 text-left text-dim hover:border-accent hover:text-text"
+              onClick={() => onOpen(echo.artistId)}
+            >
+              <span className="min-w-0 truncate">◌ {echo.name}</span>
+              <span className="shrink-0 text-2xs text-accent">{t('fog.followEcho')}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
   )
 }
 
@@ -293,6 +346,7 @@ function Listen({
   radio,
   playing,
   onPlay,
+  onFollow,
   onRadio,
 }: {
   links: Link[]
@@ -300,6 +354,7 @@ function Listen({
   radio: Nebula | null
   playing: boolean
   onPlay: (uploads: string) => void
+  onFollow: () => void
   onRadio: (nebula: Nebula) => void
 }) {
   const { t } = useTranslation()
@@ -324,7 +379,7 @@ function Listen({
       <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 text-xs">
         {links.map(link => (
           <li key={link.url}>
-            <a className="text-accent underline-offset-2 hover:underline" href={link.url} target="_blank" rel="noreferrer">
+            <a className="text-accent underline-offset-2 hover:underline" href={link.url} target="_blank" rel="noreferrer" onClick={onFollow}>
               {link.service}
             </a>
           </li>

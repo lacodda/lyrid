@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Station } from '@/api'
-import { RECENT, RECENT_UPLOADS, follows, localDay, refill, sounding, stepRadio, uploadIndex, type RadioListening } from './listening'
+import { follows, HEARD_AFTER_MS, heardClock, localDay, RECENT, RECENT_UPLOADS, refill, sounding, stepRadio, type RadioListening, uploadIndex } from './listening'
 
-const station = (id: number): Station => ({ id, name: `Star ${String(id)}`, x: id, y: -id, uploads: `UU${String(id)}` })
+const station = (id: number): Station => ({ id, mbid: `mbid-${String(id)}`, name: `Star ${String(id)}`, x: id, y: -id, uploads: `UU${String(id)}` })
 
 const radio = (ids: number[], at: number): RadioListening => ({
   kind: 'radio',
@@ -84,5 +84,82 @@ describe("the listener's day", () => {
   it('is the local calendar date, padded', () => {
     expect(localDay(new Date(2026, 8, 5, 23, 59))).toBe('2026-09-05')
     expect(localDay(new Date(2026, 11, 31, 0, 1))).toBe('2026-12-31')
+  })
+})
+
+describe('the clock that says a star was heard', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('fires once the star has sounded for long enough, and only once', () => {
+    const fire = vi.fn()
+    const clock = heardClock(fire)
+    clock.playing()
+    vi.advanceTimersByTime(HEARD_AFTER_MS - 1)
+    expect(fire).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(fire).toHaveBeenCalledOnce()
+
+    // A video that ends and starts again is the same star, already heard.
+    clock.paused()
+    clock.playing()
+    vi.advanceTimersByTime(HEARD_AFTER_MS * 2)
+    expect(fire).toHaveBeenCalledOnce()
+  })
+
+  it('counts sound and not time: a pause holds it', () => {
+    const fire = vi.fn()
+    const clock = heardClock(fire)
+    clock.playing()
+    vi.advanceTimersByTime(10_000)
+    clock.paused()
+    vi.advanceTimersByTime(HEARD_AFTER_MS * 10)
+    expect(fire).not.toHaveBeenCalled()
+
+    clock.playing()
+    vi.advanceTimersByTime(HEARD_AFTER_MS - 10_000 - 1)
+    expect(fire).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(fire).toHaveBeenCalledOnce()
+  })
+
+  it('does not start over when the player says it is playing twice', () => {
+    const fire = vi.fn()
+    const clock = heardClock(fire)
+    clock.playing()
+    vi.advanceTimersByTime(20_000)
+    clock.playing()
+    vi.advanceTimersByTime(HEARD_AFTER_MS - 20_000)
+    expect(fire).toHaveBeenCalledOnce()
+
+    // And it has not left a second timer behind to fire later.
+    vi.advanceTimersByTime(HEARD_AFTER_MS)
+    expect(fire).toHaveBeenCalledOnce()
+  })
+
+  it('never fires for a player that never plays', () => {
+    const fire = vi.fn()
+    const clock = heardClock(fire)
+    clock.paused()
+    vi.advanceTimersByTime(HEARD_AFTER_MS * 10)
+    expect(fire).not.toHaveBeenCalled()
+  })
+
+  it('never fires once the player is gone', () => {
+    const fire = vi.fn()
+    const clock = heardClock(fire)
+    clock.playing()
+    vi.advanceTimersByTime(HEARD_AFTER_MS - 1)
+    clock.stop()
+    vi.advanceTimersByTime(HEARD_AFTER_MS)
+    expect(fire).not.toHaveBeenCalled()
+
+    clock.playing()
+    vi.advanceTimersByTime(HEARD_AFTER_MS)
+    expect(fire).not.toHaveBeenCalled()
   })
 })

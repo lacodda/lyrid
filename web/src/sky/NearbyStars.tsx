@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from 'dowel-ui'
 
 import { fetchNearby, type NearbyStar } from '@/api'
 import { panelVariants, SectionLabel } from '@/components/ui/panel'
+import { listInFog, type Fog } from './fog'
 import type { Bounds } from './Sky'
 import type { Place } from './renderer'
 
@@ -27,6 +28,10 @@ import type { Place } from './renderer'
  * the twelve most prominent names in view, and moving the view is how you get
  * different ones. A complete alternative to a two-million-star map is another
  * map, not a list.
+ *
+ * In the fog the list answers from what the person already holds and the server is
+ * not asked: the names in view are the stars they have opened, and the next steps
+ * from those are echoes, listed without a name until they are reached.
  */
 
 interface Props {
@@ -34,12 +39,23 @@ interface Props {
   visible: Bounds
   /** Opening a star from the list does what clicking it on the canvas does. */
   onPick: (star: Place) => void
+  /** This person's fog, in the mode that has one. */
+  fog?: Fog | null
   className?: string
 }
 
-export function NearbyStars({ visible, onPick, className }: Props) {
+/** A line of the list, wherever it came from. */
+interface Line {
+  id: number
+  x: number
+  y: number
+  name: string
+  comment: string | null
+}
+
+export function NearbyStars({ visible, onPick, fog, className }: Props) {
   const { t } = useTranslation()
-  const [stars, setStars] = useState<NearbyStar[]>([])
+  const [nearby, setNearby] = useState<NearbyStar[]>([])
 
   // The view is quantised before it becomes a dependency. `visible` is a fresh
   // object on every animation frame, so depending on it directly would fire a
@@ -49,13 +65,30 @@ export function NearbyStars({ visible, onPick, className }: Props) {
   // whether the object has.
   const key = boundsKey(visible)
 
+  const inFog = useMemo<Line[] | null>(
+    () =>
+      fog
+        ? listInFog(fog, parseKey(key)).map(star => ({
+            id: star.id,
+            x: star.x,
+            y: star.y,
+            name: star.name ?? (star.echoOf === null ? t('fog.echo') : t('fog.echoOf', { name: star.echoOf })),
+            comment: null,
+          }))
+        : null,
+    [fog, key, t]
+  )
+  const stars: Line[] = inFog ?? nearby
+
+  const asking = !fog
   useEffect(() => {
+    if (!asking) return
     const abort = new AbortController()
     // Debounced, because a pan is a hundred meaningful moves in a row and only
     // the last one is a view somebody is looking at.
     const timer = window.setTimeout(() => {
       fetchNearby(parseKey(key), abort.signal)
-        .then(setStars)
+        .then(setNearby)
         .catch(() => {
           // The canvas still shows the sky, so there is nothing to apologise
           // for; the next move asks again.
@@ -66,7 +99,7 @@ export function NearbyStars({ visible, onPick, className }: Props) {
       window.clearTimeout(timer)
       abort.abort()
     }
-  }, [key])
+  }, [key, asking])
 
   return (
     // `overflow-hidden`: this is the piece of the corner stack that yields,
@@ -91,7 +124,7 @@ export function NearbyStars({ visible, onPick, className }: Props) {
       <p className="m-0 text-2xs text-dim">{t('sky.nearby.hint')}</p>
 
       {stars.length === 0 ? (
-        <p className="m-0 text-2xs text-dim">{t('sky.nearby.empty')}</p>
+        <p className="m-0 text-2xs text-dim">{fog ? t('fog.nearbyEmpty') : t('sky.nearby.empty')}</p>
       ) : (
         <ul className="m-0 flex max-h-64 min-h-0 list-none flex-col overflow-y-auto p-0">
           {stars.map(star => (

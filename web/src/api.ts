@@ -366,6 +366,8 @@ export interface Nebula {
 /** A star that can be played: where it is, and its channel's uploads. */
 export interface Station {
   id: number
+  /** What a person's progress names the star by: `id` changes with the canon. */
+  mbid: string
   name: string
   x: number
   y: number

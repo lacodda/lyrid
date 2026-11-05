@@ -71,6 +71,9 @@ export function Charter({ me, onSignedOut, onClose }: Props) {
             <strong>{t('charter.withAccount.lastfm')}</strong> {t('charter.withAccount.lastfmBody')}
           </li>
           <li>
+            <strong>{t('charter.withAccount.opened')}</strong> {t('charter.withAccount.openedBody')}
+          </li>
+          <li>
             <strong>{t('charter.withAccount.born')}</strong> {t('charter.withAccount.bornBody')}
           </li>
           <li>

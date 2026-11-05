@@ -76,6 +76,7 @@ const glsl = (n: number) => (Number.isInteger(n) ? `${String(n)}.0` : String(n))
 
 const VERTEX = `#version 300 es
 precision highp float;
+precision highp sampler2D;
 
 // Per instance; the quad itself comes from gl_VertexID, so the buffer holds
 // nothing but stars.
@@ -94,11 +95,19 @@ uniform float u_until;
 uniform float u_lens;
 uniform vec3 u_palette[${String(ERA_COLOURS.length + 1)}];
 uniform float u_eras[${String(ERAS.length)}];
+// 1 when the fog is over this pass. The field has it and a person's own stars
+// do not: those are what the fog is measured from.
+uniform float u_fog;
+// How much light reaches each place, and where the texture sits on the sky:
+// its lowest corner, and one over its span.
+uniform sampler2D u_coverage;
+uniform vec3 u_coverageMap;
 
 out float v_brightness;
 out vec2 v_offset;
 out vec3 v_colour;
 out float v_lensed;
+out float v_lit;
 
 // The same rule as timeWeight() in decades.ts.
 float timeWeight(float year, float until) {
@@ -126,15 +135,23 @@ void main() {
     return;
   }
 
+  // Sampled here and not per pixel: a star is a few pixels across, and the fog's
+  // edge is soft enough that one value per star is all it can show. Skipped
+  // altogether with no fog over the pass, so the creative sky pays nothing.
+  float lit = u_fog > 0.5 ? texture(u_coverage, (a_position - u_coverageMap.xy) * u_coverageMap.z).r : 1.0;
+
   // Size follows brightness and not zoom: stars are points of light, not
   // discs, and swelling them on approach would read as balloons. A star in
   // its first years under the time machine is drawn larger as well as
-  // brighter, which is what makes it read as lighting up.
-  float size = mix(2.0, 7.0, a_brightness) * min(weight, 1.6);
+  // brighter, which is what makes it read as lighting up. A silhouette is a
+  // little smaller than the star it will become.
+  float size = mix(2.0, 7.0, a_brightness) * min(weight, 1.6) * mix(0.8, 1.0, lit);
 
   // A per-star phase from its position, so neighbours do not pulse together.
+  // What is in the fog holds still: light is what twinkles.
   float phase = a_position.x * 0.7 + a_position.y * 1.3;
-  size *= 1.0 - u_twinkle * 0.1 + u_twinkle * 0.1 * sin(u_time * 1.7 + phase);
+  float twinkle = u_twinkle * lit;
+  size *= 1.0 - twinkle * 0.1 + twinkle * 0.1 * sin(u_time * 1.7 + phase);
 
   vec2 corner = vec2(
     (gl_VertexID == 0 || gl_VertexID == 3 || gl_VertexID == 5) ? -1.0 : 1.0,
@@ -148,6 +165,7 @@ void main() {
   v_offset = corner;
   v_colour = eraColour(a_year);
   v_lensed = u_lens;
+  v_lit = lit;
 }`
 
 const FRAGMENT = `#version 300 es
@@ -157,6 +175,7 @@ in float v_brightness;
 in vec2 v_offset;
 in vec3 v_colour;
 in float v_lensed;
+in float v_lit;
 out vec4 fragment;
 
 void main() {
@@ -172,7 +191,12 @@ void main() {
   vec3 natural = mix(vec3(0.29, 0.56, 0.91), vec3(1.0, 0.94, 0.85), v_brightness * v_brightness);
   vec3 colour = mix(natural, v_colour, v_lensed);
   float alpha = glow * (0.35 + 0.65 * clamp(v_brightness, 0.0, 1.0));
-  fragment = vec4(colour * glow, alpha);
+
+  // In the fog a star is a grey silhouette: its place and its weight show, and
+  // neither its colour nor anything the lens would say about it.
+  vec3 silhouette = vec3(0.42, 0.47, 0.56);
+  float faint = glow * (0.2 + 0.3 * clamp(v_brightness, 0.0, 1.0));
+  fragment = vec4(mix(silhouette, colour, v_lit) * glow, mix(faint, alpha, v_lit));
 }`
 
 /**
@@ -242,6 +266,68 @@ void main() {
 
 /** The gathering's gold, the same #e0a040 the dossier's map marks a roster with. */
 const GATHER_COLOUR: [number, number, number] = [0.878, 0.627, 0.251]
+
+/**
+ * An echo: a star not heard yet that an open star reflects, marked wherever it
+ * is so there is always a next step in sight.
+ *
+ * A dashed ring round a trace of light, a fixed size in pixels like the
+ * gathering's rings, breathing slowly. Grey, because it is not lit yet, and
+ * dashed, so it does not read as one of the gathering's solid gold rings.
+ */
+const ECHO_VERTEX = `#version 300 es
+precision highp float;
+
+in vec2 a_point;
+uniform vec2 u_camera;
+uniform float u_scale;
+uniform vec2 u_viewport;
+uniform float u_time;
+uniform float u_twinkle;
+out float v_breath;
+
+void main() {
+  vec2 screen = (a_point - u_camera) * u_scale;
+  gl_Position = vec4(screen / (u_viewport * 0.5), 0.0, 1.0);
+  gl_PointSize = 15.0;
+  // From its position, so the echoes in a view do not pulse in step.
+  float phase = a_point.x * 0.7 + a_point.y * 1.3;
+  v_breath = mix(0.8, 0.65 + 0.35 * sin(u_time * 0.9 + phase), u_twinkle);
+}`
+
+const ECHO_FRAGMENT = `#version 300 es
+precision highp float;
+
+in float v_breath;
+uniform vec3 u_colour;
+out vec4 fragment;
+
+void main() {
+  vec2 offset = gl_PointCoord * 2.0 - 1.0;
+  float distance = length(offset);
+  float ring = smoothstep(0.62, 0.72, distance) * (1.0 - smoothstep(0.84, 0.96, distance));
+  float dashes = step(0.0, sin(atan(offset.y, offset.x) * 5.0));
+  float trace = exp(-26.0 * distance * distance) * 0.5;
+  float light = ring * dashes + trace;
+  if (light <= 0.01) discard;
+  fragment = vec4(u_colour * light, light * v_breath);
+}`
+
+/** An echo's grey: the fog's, a little brighter, because it is there to be noticed. */
+const ECHO_COLOUR: [number, number, number] = [0.68, 0.74, 0.86]
+
+/** One person's fog, as the renderer needs it. See `fog.ts`. */
+export interface FogLayer {
+  /** `side * side` values, 0..255. */
+  coverage: Uint8Array
+  side: number
+  originX: number
+  originY: number
+  span: number
+  /** Their open stars, as (x, y, brightness, year) quadruples. */
+  packed: Float32Array
+  echoPoints: readonly { x: number; y: number }[]
+}
 
 /**
  * The halo around the one star being looked at.
@@ -389,7 +475,7 @@ export class SkyRenderer {
   private readonly program: WebGLProgram
   private readonly buffer: WebGLBuffer
   private readonly uniforms: Record<
-    'camera' | 'scale' | 'viewport' | 'time' | 'twinkle' | 'until' | 'lens' | 'palette' | 'eras',
+    'camera' | 'scale' | 'viewport' | 'time' | 'twinkle' | 'until' | 'lens' | 'palette' | 'eras' | 'fog' | 'coverage' | 'coverageMap',
     WebGLUniformLocation | null
   >
   private readonly route: WebGLProgram
@@ -402,6 +488,21 @@ export class SkyRenderer {
   private readonly gatherVao: WebGLVertexArrayObject | null
   private readonly gatherBuffer: WebGLBuffer
   private gatherPoints = 0
+  private readonly echo: WebGLProgram
+  private readonly echoUniforms: Record<'camera' | 'scale' | 'viewport' | 'time' | 'twinkle' | 'colour', WebGLUniformLocation | null>
+  private readonly echoVao: WebGLVertexArrayObject | null
+  private readonly echoBuffer: WebGLBuffer
+  private echoPoints = 0
+  // A person's own stars: the field's program over a buffer of their own, so
+  // they are drawn whatever the zoom. The pyramid's levels filter by
+  // brightness, and what someone finds for themselves is mostly dim.
+  private readonly fieldVao: WebGLVertexArrayObject | null
+  private readonly mineVao: WebGLVertexArrayObject | null
+  private readonly mineBuffer: WebGLBuffer
+  private mineInstances = 0
+  private readonly coverage: WebGLTexture
+  private fogged = false
+  private coverageMap: [number, number, number] = [0, 0, 1]
   private readonly halo: WebGLProgram
   private readonly haloUniforms: Record<
     'position' | 'camera' | 'scale' | 'viewport' | 'time' | 'twinkle' | 'shape' | 'colour',
@@ -434,24 +535,35 @@ export class SkyRenderer {
     if (!buffer) throw new Error('could not create a buffer')
     this.buffer = buffer
 
-    const vao = gl.createVertexArray()
-    gl.bindVertexArray(vao)
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-
     // Interleaved (x, y, brightness, year), which is what `upload` packs.
     const bytes = STRIDE * 4
     const position = gl.getAttribLocation(program, 'a_position')
     const brightness = gl.getAttribLocation(program, 'a_brightness')
     const year = gl.getAttribLocation(program, 'a_year')
-    gl.enableVertexAttribArray(position)
-    gl.vertexAttribPointer(position, 2, gl.FLOAT, false, bytes, 0)
-    gl.vertexAttribDivisor(position, 1)
-    gl.enableVertexAttribArray(brightness)
-    gl.vertexAttribPointer(brightness, 1, gl.FLOAT, false, bytes, 8)
-    gl.vertexAttribDivisor(brightness, 1)
-    gl.enableVertexAttribArray(year)
-    gl.vertexAttribPointer(year, 1, gl.FLOAT, false, bytes, 12)
-    gl.vertexAttribDivisor(year, 1)
+    const describeStars = (stars: WebGLBuffer) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, stars)
+      gl.enableVertexAttribArray(position)
+      gl.vertexAttribPointer(position, 2, gl.FLOAT, false, bytes, 0)
+      gl.vertexAttribDivisor(position, 1)
+      gl.enableVertexAttribArray(brightness)
+      gl.vertexAttribPointer(brightness, 1, gl.FLOAT, false, bytes, 8)
+      gl.vertexAttribDivisor(brightness, 1)
+      gl.enableVertexAttribArray(year)
+      gl.vertexAttribPointer(year, 1, gl.FLOAT, false, bytes, 12)
+      gl.vertexAttribDivisor(year, 1)
+    }
+
+    const mineBuffer = gl.createBuffer()
+    if (!mineBuffer) throw new Error('could not create a buffer')
+    this.mineBuffer = mineBuffer
+    this.mineVao = gl.createVertexArray()
+    gl.bindVertexArray(this.mineVao)
+    describeStars(mineBuffer)
+
+    const vao = gl.createVertexArray()
+    this.fieldVao = vao
+    gl.bindVertexArray(vao)
+    describeStars(buffer)
 
     this.uniforms = {
       camera: gl.getUniformLocation(program, 'u_camera'),
@@ -463,10 +575,27 @@ export class SkyRenderer {
       lens: gl.getUniformLocation(program, 'u_lens'),
       palette: gl.getUniformLocation(program, 'u_palette'),
       eras: gl.getUniformLocation(program, 'u_eras'),
+      fog: gl.getUniformLocation(program, 'u_fog'),
+      coverage: gl.getUniformLocation(program, 'u_coverage'),
+      coverageMap: gl.getUniformLocation(program, 'u_coverageMap'),
     }
     // Constant for the life of the page, so set once rather than per frame.
     gl.uniform3fv(this.uniforms.palette, paletteUniform())
     gl.uniform1fv(this.uniforms.eras, boundariesUniform())
+    gl.uniform1i(this.uniforms.coverage, 0)
+
+    // Something valid from the first frame: a sampler with no texture behind it
+    // is a warning per draw, even in a branch that is never taken.
+    const coverage = gl.createTexture()
+    if (!coverage) throw new Error('could not create a texture')
+    this.coverage = coverage
+    gl.bindTexture(gl.TEXTURE_2D, coverage)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(1))
 
     const halo = gl.createProgram()
     if (!halo) throw new Error('could not create a program')
@@ -539,6 +668,33 @@ export class SkyRenderer {
     gl.enableVertexAttribArray(gathered)
     gl.vertexAttribPointer(gathered, 2, gl.FLOAT, false, 8, 0)
 
+    const echo = gl.createProgram()
+    if (!echo) throw new Error('could not create a program')
+    gl.attachShader(echo, compile(gl, gl.VERTEX_SHADER, ECHO_VERTEX))
+    gl.attachShader(echo, compile(gl, gl.FRAGMENT_SHADER, ECHO_FRAGMENT))
+    gl.linkProgram(echo)
+    if (!gl.getProgramParameter(echo, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(echo) ?? 'the echo program failed to link')
+    }
+    this.echo = echo
+    this.echoUniforms = {
+      camera: gl.getUniformLocation(echo, 'u_camera'),
+      scale: gl.getUniformLocation(echo, 'u_scale'),
+      viewport: gl.getUniformLocation(echo, 'u_viewport'),
+      time: gl.getUniformLocation(echo, 'u_time'),
+      twinkle: gl.getUniformLocation(echo, 'u_twinkle'),
+      colour: gl.getUniformLocation(echo, 'u_colour'),
+    }
+    const echoBuffer = gl.createBuffer()
+    if (!echoBuffer) throw new Error('could not create a buffer')
+    this.echoBuffer = echoBuffer
+    this.echoVao = gl.createVertexArray()
+    gl.bindVertexArray(this.echoVao)
+    gl.bindBuffer(gl.ARRAY_BUFFER, echoBuffer)
+    const echoed = gl.getAttribLocation(echo, 'a_point')
+    gl.enableVertexAttribArray(echoed)
+    gl.vertexAttribPointer(echoed, 2, gl.FLOAT, false, 8, 0)
+
     gl.bindVertexArray(vao)
 
     // Additive blending, because light adds: overlapping stars brighten
@@ -574,6 +730,33 @@ export class SkyRenderer {
     this.gatherPoints = points.length
   }
 
+  /**
+   * Puts one person's fog over the sky, or takes it away.
+   *
+   * Uploaded when it changes, which is when a star opens: the coverage is a
+   * megabyte, and the frame only ever reads it.
+   */
+  setFog(fog: FogLayer | null): void {
+    const gl = this.gl
+    this.fogged = fog !== null
+    if (fog) {
+      gl.bindTexture(gl.TEXTURE_2D, this.coverage)
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, fog.side, fog.side, 0, gl.RED, gl.UNSIGNED_BYTE, fog.coverage)
+      this.coverageMap = [fog.originX, fog.originY, 1 / fog.span]
+    }
+    const packed = fog?.packed ?? new Float32Array(0)
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.mineBuffer)
+    gl.bufferData(gl.ARRAY_BUFFER, packed, gl.DYNAMIC_DRAW)
+    this.mineInstances = packed.length / STRIDE
+
+    const points = fog?.echoPoints ?? []
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.echoBuffer)
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points.flatMap(point => [point.x, point.y])), gl.DYNAMIC_DRAW)
+    this.echoPoints = points.length
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer)
+  }
+
   resize(width: number, height: number): void {
     this.gl.viewport(0, 0, width, height)
   }
@@ -605,9 +788,36 @@ export class SkyRenderer {
     gl.uniform1f(this.uniforms.twinkle, twinkle)
     gl.uniform1f(this.uniforms.until, instruments.until ?? 0)
     gl.uniform1f(this.uniforms.lens, instruments.lens ? 1 : 0)
+    gl.uniform1f(this.uniforms.fog, this.fogged ? 1 : 0)
+    gl.uniform3f(this.uniforms.coverageMap, ...this.coverageMap)
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, this.coverage)
 
     // The whole sky, one call.
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.instances)
+
+    // A person's own stars over it, out of the fog they are the measure of.
+    if (this.mineInstances > 0) {
+      gl.uniform1f(this.uniforms.fog, 0)
+      gl.bindVertexArray(this.mineVao)
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.mineInstances)
+      gl.bindVertexArray(this.fieldVao)
+    }
+
+    // The echoes over those, and under everything that marks one star.
+    if (this.echoPoints > 0) {
+      const vao = gl.getParameter(gl.VERTEX_ARRAY_BINDING) as WebGLVertexArrayObject | null
+      gl.bindVertexArray(this.echoVao)
+      gl.useProgram(this.echo)
+      gl.uniform2f(this.echoUniforms.camera, camera.x, camera.y)
+      gl.uniform1f(this.echoUniforms.scale, camera.scale)
+      gl.uniform2f(this.echoUniforms.viewport, viewport[0], viewport[1])
+      gl.uniform1f(this.echoUniforms.time, seconds)
+      gl.uniform1f(this.echoUniforms.twinkle, twinkle)
+      gl.uniform3f(this.echoUniforms.colour, ...ECHO_COLOUR)
+      gl.drawArrays(gl.POINTS, 0, this.echoPoints)
+      gl.bindVertexArray(vao)
+    }
 
     // The route over the field and under the halo: a line is context, the
     // halo is the one star being looked at.

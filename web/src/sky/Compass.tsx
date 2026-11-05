@@ -7,6 +7,7 @@ import type { Region } from '@/api'
 import { fromMap, keyMove, toMap, viewRect } from './minimap'
 import type { Bounds, Overview, View } from './Sky'
 import { useSkyField } from './field'
+import type { Fog } from './fog'
 
 interface Props {
   overview: Overview
@@ -16,6 +17,10 @@ interface Props {
   region: Region | null
   /** The star the player is sounding, marked on the small sky. */
   sounding: { x: number; y: number } | null
+  /** Whether the middle of the view is somewhere this person has not been. */
+  uncharted?: boolean
+  /** This person's fog, in the mode that has one. */
+  fog?: Fog | null
   onNavigate: (view: View) => void
   className?: string
 }
@@ -31,7 +36,7 @@ const SIZE = 168
  * `+` and `-` zoom, Home shows everything — because the canvas itself has no
  * content a keyboard can land on. A pointer drags or clicks on it to fly.
  */
-export function Compass({ overview, view, visible, region, sounding, onNavigate, className }: Props) {
+export function Compass({ overview, view, visible, region, sounding, uncharted = false, fog = null, onNavigate, className }: Props) {
   const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const dragging = useRef(false)
@@ -39,7 +44,7 @@ export function Compass({ overview, view, visible, region, sounding, onNavigate,
 
   // The stars are drawn once into a bitmap of their own; each frame after
   // that is one copy and one rectangle.
-  const field = useSkyField(overview, SIZE)
+  const field = useSkyField(overview, SIZE, fog)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -116,7 +121,7 @@ export function Compass({ overview, view, visible, region, sounding, onNavigate,
       {/* Spoken when it changes: the region is the answer to "where am I",
           and a reader panning by keyboard should hear it change. */}
       <p className="m-0 max-w-[10.5rem] truncate text-2xs text-dim" aria-live="polite">
-        {where ? t('compass.in', { place: where }) : t('compass.nowhere')}
+        {uncharted ? t('compass.uncharted') : where ? t('compass.in', { place: where }) : t('compass.nowhere')}
       </p>
     </section>
   )

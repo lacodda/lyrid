@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { panelVariants } from '@/components/ui/panel'
 import { PasswordField } from '@/components/ui/password-field'
 import { Truncate } from '@/components/ui/truncate'
+import { remembered } from '@/sky/openings'
 
 /**
  * Signing in, signing up, and signing out.
@@ -17,10 +18,9 @@ import { Truncate } from '@/components/ui/truncate'
  * an account; this is a door beside it, not a gate in front of it — which is
  * why a visitor sees "sign in" rather than a form they must pass.
  *
- * The form asks for two things and nothing else. It used to ask for a mode as
- * well, and that question is gone (decision of 2026-09-11): only one of the
- * two modes is built, so the choice was between a thing and a description of a
- * thing. It returns with the fog (v0.22), asked once, of everyone.
+ * The form asks for two things and nothing else. The mode is asked on the screen
+ * after it (`ModeChoice`), the same screen everyone from before the fog is asked
+ * on.
  */
 
 interface Props {
@@ -134,6 +134,9 @@ function AccountForm({ onSignedIn, onClose, onCharter }: { onSignedIn: (me: Me) 
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Read when the form opens: what is said here is a promise about what this
+  // browser holds now.
+  const [bringing] = useState(() => remembered().length)
 
   const go = (next: Tab) => {
     setTab(next)
@@ -235,6 +238,7 @@ function AccountForm({ onSignedIn, onClose, onCharter }: { onSignedIn: (me: Me) 
       )}
 
       {tab === 'forgot' && <p className="text-2xs text-dim">{t('account.forgotHint')}</p>}
+      {tab !== 'forgot' && bringing > 0 && <p className="text-2xs text-dim">{t('fog.comeWith', { count: bringing })}</p>}
       {error && (
         <p role="alert" className="text-2xs text-bad">
           {error}

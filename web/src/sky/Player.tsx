@@ -5,7 +5,7 @@ import { cn } from 'dowel-ui'
 import type { Nebula, Station } from '@/api'
 import { Button } from '@/components/ui/button'
 import { panelVariants, SectionLabel } from '@/components/ui/panel'
-import { uploadIndex, type Listening } from './listening'
+import { heardClock, uploadIndex, type Listening } from './listening'
 import { STATE, createPlayer, loadYouTube, type YouTubePlayer } from './youtube'
 
 interface Props {
@@ -26,6 +26,8 @@ interface Props {
   onBroken: () => void
   /** Something is actually playing. */
   onPlaying: () => void
+  /** A star has really sounded for long enough to count as heard. */
+  onHeard: (station: Station) => void
   /** Flies to the star that is playing and opens it. */
   onGo: (station: Station) => void
   onStop: () => void
@@ -179,7 +181,7 @@ const PATIENCE_MS = 6_000
  * the latest few is chosen, and when it ends the radio moves on. A channel or
  * the signal plays the uploads through, as the card's player always did.
  */
-function Screen({ listening, onEnded, onBroken, onPlaying }: Props & { listening: Listening }) {
+function Screen({ listening, onEnded, onBroken, onPlaying, onHeard }: Props & { listening: Listening }) {
   const { t } = useTranslation()
   const station = listening.kind === 'channel' ? listening.station : listening.stations[listening.at]
   const single = listening.kind === 'radio'
@@ -190,10 +192,10 @@ function Screen({ listening, onEnded, onBroken, onPlaying }: Props & { listening
 
   // The player's callbacks are registered when it is made and read these, so
   // a new callback from the parent does not cost a new player.
-  const handlers = useRef({ onEnded, onBroken, onPlaying })
+  const handlers = useRef({ onEnded, onBroken, onPlaying, onHeard })
   useEffect(() => {
-    handlers.current = { onEnded, onBroken, onPlaying }
-  }, [onEnded, onBroken, onPlaying])
+    handlers.current = { onEnded, onBroken, onPlaying, onHeard }
+  }, [onEnded, onBroken, onPlaying, onHeard])
 
   useEffect(() => {
     if (!station) return
@@ -205,6 +207,7 @@ function Screen({ listening, onEnded, onBroken, onPlaying }: Props & { listening
     // video has been asked for, and its end is the radio's cue to move on.
     let phase: 'cueing' | 'playing' = single ? 'cueing' : 'playing'
     let watchdog: number | undefined
+    const heard = heardClock(() => handlers.current.onHeard(station))
 
     loadYouTube().then(
       api => {
@@ -219,6 +222,8 @@ function Screen({ listening, onEnded, onBroken, onPlaying }: Props & { listening
           },
           onStateChange: event => {
             window.clearTimeout(watchdog)
+            if (event.data === STATE.playing) heard.playing()
+            else heard.paused()
             if (event.data === STATE.cued && phase === 'cueing') {
               const uploads = event.target.getPlaylist() ?? []
               const video = uploads[uploadIndex(seed, station.id, uploads.length)]
@@ -250,6 +255,7 @@ function Screen({ listening, onEnded, onBroken, onPlaying }: Props & { listening
     return () => {
       cancelled = true
       window.clearTimeout(watchdog)
+      heard.stop()
       made?.destroy()
       mount.remove()
     }
