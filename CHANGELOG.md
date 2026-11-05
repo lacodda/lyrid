@@ -7,10 +7,14 @@ All notable changes to this project are documented in this file.
 ### Documentation
 - Measure a whole Wikidata import read on every core
 - The fog, the two modes as built, and carrying progress across a canon
+- Measure the slice, the fog's frames and a canon under accounts
 
 ### Features
 - Keep which stars a person opened, and carry them across editions
 - Light the sky by listening, under a soft fog
+
+### Performance
+- Delete artists and labels without the triggers they no longer need
 
 
 ## [0.21.0] - 2026-10-29
