@@ -101,12 +101,7 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
         bail!("no table references artist: refusing to cut a slice against an unexpected schema");
     }
 
-    // By now the cascades have nothing left to find, so this is a plain delete.
-    let removed = sqlx::query("DELETE FROM artist WHERE id NOT IN (SELECT id FROM kept_artist)")
-        .execute(&mut *tx)
-        .await
-        .context("failed to remove artists outside the slice")?
-        .rows_affected();
+    let removed = remove_outside(&mut tx, "artist", "kept_artist").await?;
 
     let labels = prune_labels(&mut tx).await?;
 
@@ -221,6 +216,94 @@ async fn prune_children(tx: &mut PgConnection, parent: &str, kept: &str) -> Resu
     Ok(children.len())
 }
 
+/// Deletes the rows of `parent` outside `kept`, once nothing points at them.
+///
+/// The cascades have nothing left to find by now, but their triggers still run:
+/// one per foreign key per row, nineteen for each of 2.86 million artists, queued
+/// in memory for the length of the transaction. That was fifty minutes, and enough
+/// memory that the process running it was stopped for it on 2026-11-05. So the
+/// triggers are switched off for this one statement, which is safe only because
+/// the catalogue's every key into `parent` is asked first whether anything still
+/// points outside: a reference left behind stops the slice, rather than becoming a
+/// dangling key nothing would ever report.
+///
+/// Switching them off takes more than owning the tables. Without that right the
+/// delete runs with its triggers on: slower, and just as correct.
+async fn remove_outside(tx: &mut PgConnection, parent: &str, kept: &str) -> Result<u64> {
+    if ![parent, kept].into_iter().all(is_plain_identifier) {
+        bail!("refusing to delete from `{parent}` by `{kept}`: not a plain identifier");
+    }
+    let delete = format!("DELETE FROM {parent} WHERE id NOT IN (SELECT id FROM {kept})");
+
+    let may_switch: bool = sqlx::query_scalar("SELECT current_setting('is_superuser') = 'on' OR has_parameter_privilege('session_replication_role', 'SET')")
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to ask whether triggers can be switched off")?;
+    if !may_switch {
+        tracing::warn!(
+            table = parent,
+            "this role cannot switch triggers off: deleting with them on, which is much slower"
+        );
+        return Ok(sqlx::raw_sql(AssertSqlSafe(delete))
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("failed to remove {parent} outside the slice"))?
+            .rows_affected());
+    }
+
+    nothing_points_outside(tx, parent, kept).await?;
+
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tx)
+        .await
+        .context("failed to switch triggers off")?;
+    let removed = sqlx::raw_sql(AssertSqlSafe(delete))
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("failed to remove {parent} outside the slice"))?
+        .rows_affected();
+    // Straight back on: what follows in this transaction relies on its cascades.
+    sqlx::query("SET LOCAL session_replication_role = origin")
+        .execute(&mut *tx)
+        .await
+        .context("failed to switch triggers back on")?;
+    Ok(removed)
+}
+
+/// Refuses if any foreign key into `parent`, of whatever kind, still has a value
+/// outside `kept`. From the catalogue, for the reason `prune_children` is: a table
+/// added later is covered without this being edited.
+async fn nothing_points_outside(tx: &mut PgConnection, parent: &str, kept: &str) -> Result<()> {
+    let keys: Vec<(String, String)> = sqlx::query_as(
+        "SELECT c.relname::text, a.attname::text
+         FROM pg_constraint con
+         JOIN pg_class c ON c.oid = con.conrelid
+         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY (con.conkey)
+         WHERE con.contype = 'f' AND con.confrelid = to_regclass($1)
+         ORDER BY c.relname, a.attname",
+    )
+    .bind(parent)
+    .fetch_all(&mut *tx)
+    .await
+    .with_context(|| format!("failed to read the keys into {parent}"))?;
+
+    for (table, column) in &keys {
+        if ![table.as_str(), column].into_iter().all(is_plain_identifier) {
+            bail!("refusing to check `{table}`.`{column}`: not a plain identifier");
+        }
+        let question = format!("SELECT EXISTS (SELECT 1 FROM {table} WHERE {column} NOT IN (SELECT id FROM {kept}))");
+        let row = sqlx::raw_sql(AssertSqlSafe(question))
+            .fetch_one(&mut *tx)
+            .await
+            .with_context(|| format!("failed to check {table}.{column}"))?;
+        let dangling: bool = sqlx::Row::try_get(&row, 0).with_context(|| format!("failed to read the check of {table}.{column}"))?;
+        if dangling {
+            bail!("{table}.{column} still points at {parent} outside the slice: refusing to delete under it");
+        }
+    }
+    Ok(())
+}
+
 /// Keeps the labels a slice can still open, and returns how many went.
 ///
 /// A label stays when it has a roster among the kept artists -- the pruning
@@ -269,12 +352,7 @@ async fn prune_labels(tx: &mut PgConnection) -> Result<u64> {
     .await
     .context("failed to detach the labels outside the slice")?;
 
-    let removed = sqlx::query("DELETE FROM label WHERE id NOT IN (SELECT id FROM kept_label)")
-        .execute(&mut *tx)
-        .await
-        .context("failed to remove labels outside the slice")?
-        .rows_affected();
-    Ok(removed)
+    remove_outside(tx, "label", "kept_label").await
 }
 
 /// Whether a name is safe to interpolate into a statement unquoted: the
@@ -346,6 +424,126 @@ mod tests {
                 "the refusal should name the flag, got: {error}"
             );
         }
+    }
+
+    /// A parent and a child with a real foreign key, and a table saying which
+    /// parents stay, in a schema of the test's own inside a transaction that is
+    /// rolled back. A trigger that refuses every delete is on the parent, so a test
+    /// can tell whether triggers were really off.
+    async fn tiny_canon(conn: &mut PgConnection) {
+        let schema = format!("cut_{:016x}", rand::random::<u64>());
+        for statement in [
+            format!("CREATE SCHEMA {schema}"),
+            format!("SET LOCAL search_path TO {schema}, pg_temp"),
+            "CREATE TABLE star (id integer PRIMARY KEY)".to_string(),
+            "CREATE TABLE moon (star_id integer REFERENCES star (id) ON DELETE CASCADE)".to_string(),
+            "CREATE TABLE kept_star (id integer PRIMARY KEY)".to_string(),
+            "INSERT INTO star VALUES (1), (2), (3)".to_string(),
+            "INSERT INTO kept_star VALUES (1)".to_string(),
+            "INSERT INTO moon VALUES (1)".to_string(),
+        ] {
+            sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut *conn).await.unwrap();
+        }
+    }
+
+    async fn refuse_deletes(conn: &mut PgConnection) {
+        sqlx::raw_sql(
+            "CREATE FUNCTION refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'a trigger ran'; END $$;
+             CREATE TRIGGER refuse BEFORE DELETE ON star FOR EACH ROW EXECUTE FUNCTION refuse();",
+        )
+        .execute(conn)
+        .await
+        .unwrap();
+    }
+
+    async fn stars(conn: &mut PgConnection) -> Vec<i32> {
+        sqlx::query_scalar("SELECT id FROM star ORDER BY id").fetch_all(conn).await.unwrap()
+    }
+
+    async fn test_pool() -> Option<PgPool> {
+        let _ = dotenvy::dotenv();
+        let Ok(url) = std::env::var("LYRID_TEST_DATABASE_URL") else {
+            eprintln!("LYRID_TEST_DATABASE_URL is not set: the delete of a slice was NOT checked against a database");
+            return None;
+        };
+        Some(PgPoolOptions::new().max_connections(1).connect(&url).await.expect("test database"))
+    }
+
+    #[tokio::test]
+    async fn the_delete_runs_with_triggers_off_and_turns_them_back_on() {
+        let Some(pool) = test_pool().await else { return };
+        let mut tx = pool.begin().await.unwrap();
+        tiny_canon(&mut tx).await;
+        refuse_deletes(&mut tx).await;
+
+        // The refusing trigger would stop this if triggers were on.
+        let removed = remove_outside(&mut tx, "star", "kept_star").await.expect("nothing points outside");
+        assert_eq!(removed, 2);
+        assert_eq!(stars(&mut tx).await, [1]);
+
+        // And they are on again for whatever the transaction does next.
+        let role: String = sqlx::query_scalar("SHOW session_replication_role").fetch_one(&mut *tx).await.unwrap();
+        assert_eq!(role, "origin");
+        sqlx::raw_sql("SAVEPOINT back_on").execute(&mut *tx).await.unwrap();
+        let refused = sqlx::raw_sql("DELETE FROM star WHERE id = 1").execute(&mut *tx).await;
+        assert!(refused.is_err(), "a trigger should run again after the delete");
+        sqlx::raw_sql("ROLLBACK TO SAVEPOINT back_on").execute(&mut *tx).await.unwrap();
+
+        tx.rollback().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_reference_left_behind_stops_the_delete_rather_than_dangling() {
+        let Some(pool) = test_pool().await else { return };
+        let mut tx = pool.begin().await.unwrap();
+        tiny_canon(&mut tx).await;
+        sqlx::raw_sql("INSERT INTO moon VALUES (2)").execute(&mut *tx).await.unwrap();
+
+        let error = remove_outside(&mut tx, "star", "kept_star").await.expect_err("a moon still points at star 2");
+        assert!(error.to_string().contains("moon.star_id"), "the refusal should name the key, got: {error}");
+        assert_eq!(stars(&mut tx).await, [1, 2, 3], "nothing was deleted");
+        tx.rollback().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn every_kind_of_key_is_asked_and_not_only_the_cascading_ones() {
+        let Some(pool) = test_pool().await else { return };
+        let mut tx = pool.begin().await.unwrap();
+        tiny_canon(&mut tx).await;
+        sqlx::raw_sql("CREATE TABLE ring (star_id integer REFERENCES star (id) ON DELETE SET NULL); INSERT INTO ring VALUES (3);")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+
+        let error = remove_outside(&mut tx, "star", "kept_star").await.expect_err("a ring still points at star 3");
+        assert!(error.to_string().contains("ring.star_id"), "got: {error}");
+        tx.rollback().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_role_that_cannot_switch_triggers_off_deletes_with_them_on() {
+        let Some(pool) = test_pool().await else { return };
+        let mut tx = pool.begin().await.unwrap();
+        tiny_canon(&mut tx).await;
+        // Here a moon pointing outside is fine: its cascade is what removes it.
+        sqlx::raw_sql("INSERT INTO moon VALUES (2)").execute(&mut *tx).await.unwrap();
+
+        let schema: String = sqlx::query_scalar("SELECT current_schema()::text").fetch_one(&mut *tx).await.unwrap();
+        let role = format!("cut_{:016x}", rand::random::<u64>());
+        for statement in [
+            format!("CREATE ROLE {role}"),
+            format!("GRANT USAGE ON SCHEMA {schema} TO {role}"),
+            format!("GRANT ALL ON ALL TABLES IN SCHEMA {schema} TO {role}"),
+            format!("SET LOCAL ROLE {role}"),
+        ] {
+            sqlx::raw_sql(AssertSqlSafe(statement)).execute(&mut *tx).await.unwrap();
+        }
+
+        assert_eq!(remove_outside(&mut tx, "star", "kept_star").await.expect("slower, and just as correct"), 2);
+        assert_eq!(stars(&mut tx).await, [1]);
+        let moons: Vec<i32> = sqlx::query_scalar("SELECT star_id FROM moon").fetch_all(&mut *tx).await.unwrap();
+        assert_eq!(moons, [1], "the cascade ran");
+        tx.rollback().await.unwrap();
     }
 
     /// The slice keeps the most listened stars of the newest sky, and that sky
