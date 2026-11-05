@@ -27,7 +27,7 @@ The universe is assembled locally from open dumps and datasets — MusicBrainz, 
 
 ## Status
 
-Pre-alpha. The sky is 283,062 artists in WebGL2, placed by the people who listen to them on ListenBrainz and as bright as how many do, with cards, radio, dossiers, your own listening history and a live feed of who is rising; English and Russian. The fog of war comes next. What landed when: the [CHANGELOG](https://github.com/lacodda/lyrid/blob/main/CHANGELOG.md).
+Pre-alpha. The sky is 283,062 artists in WebGL2, placed by the people who listen to them on ListenBrainz and as bright as how many do, with cards, radio, dossiers, your own listening history and a live feed of who is rising; English and Russian. Two modes now, chosen once: the whole sky as a daily instrument, or a sky that starts dark and that you light yourself by listening, with echoes showing where to go next. The ship and the light economy come next. What landed when: the [CHANGELOG](https://github.com/lacodda/lyrid/blob/main/CHANGELOG.md).
 
 ## Documentation
 

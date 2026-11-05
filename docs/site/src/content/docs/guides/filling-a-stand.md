@@ -114,9 +114,9 @@ tools/stage-seed.sh --dump .local/lyrid-slice-100k.dump --tiles .local/tiles \
 
 The accounts, their listening, their letters and the stand's own weather —
 `app_user` and what hangs off it, `feed_run`, `listening_day`, `artist_day`,
-`star_rising`, `new_release` — stay as they are. Listening is keyed by
-MusicBrainz id, not by the canon's own numbers, so it finds its stars again in
-the new canon.
+`star_rising`, `new_release` — stay as they are. Listening and the
+fog's openings are keyed by MusicBrainz id, not by the canon's own numbers, so
+they find their stars again in the new canon.
 
 One thing outside the canon does point into it: a profile remembers the layout
 its camera was on. So the named tables are not simply truncated — Postgres
@@ -126,6 +126,16 @@ says: the camera forgets a layout that is gone, and the next visit opens on the
 whole sky. A table outside the list that would lose rows with the canon, or
 block it, stops the script before anything is emptied. Measured on a slice of
 100,000 artists: one second.
+
+## Carrying people's progress
+
+Whenever the canon's tables are replaced under accounts, `tools/stage-seed.sh` finishes by running `lyrid canon carry-over` in the stand's server: an id MusicBrainz merged becomes the star it merged into, in each person's openings and in the credits of their listens, and the profile records the edition it has reached. It runs once per edition per person, so running it twice changes nothing, and a server does the same whenever it starts, which is what catches a stand filled by hand.
+
+```sh
+docker compose -f docker-compose.prod.yml exec server lyrid canon carry-over
+```
+
+The redirects live in the canon (`artist_redirect`), so name that table with the rest when replacing it. A redirect goes with the artist it points at, which means a merge whose target was cut from the slice is not followed on that stand: that opening stays under its old id until a canon holding the target arrives. Nothing is lost by this. See [ADR 0026](https://github.com/lacodda/lyrid/blob/main/docs/adr/0026-the-fog-and-progress-across-editions.md).
 
 ## Carrying the edition
 

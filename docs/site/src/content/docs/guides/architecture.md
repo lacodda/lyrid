@@ -94,6 +94,7 @@ next to the code it constrains:
 - [0023 · Editions of the canon](https://github.com/lacodda/lyrid/blob/main/docs/adr/0023-editions-of-the-canon.md)
 - [0024 · The sky from the people who listen](https://github.com/lacodda/lyrid/blob/main/docs/adr/0024-the-sky-from-the-people-who-listen.md)
 - [0025 · bzip2 on every core, and most lines never parsed](https://github.com/lacodda/lyrid/blob/main/docs/adr/0025-bzip2-on-every-core.md)
+- [0026 · The fog, and progress that survives a new canon](https://github.com/lacodda/lyrid/blob/main/docs/adr/0026-the-fog-and-progress-across-editions.md)
 
 ## Releases
 

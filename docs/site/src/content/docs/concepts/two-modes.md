@@ -3,24 +3,26 @@ title: Two modes
 description: Exploration and creative — what each one is for, and why the choice is made once and kept.
 ---
 
-lyrid is two products over one universe. You choose which one you are playing when you create your account, and that choice stays.
+lyrid is two products over one universe. You are asked which one you are playing on the first screen after creating your account, and that choice stays.
 
 ## Exploration
 
-The sky starts dark. You are given a ship, a home sector near an artist you already love, and fuel that runs out.
+The sky starts dark, and every artist you really listen to becomes a star you lit yourself. [The fog](/lyrid/concepts/the-fog/) says how that works.
 
-- **Fog of war** — stars appear as you discover them; unheard regions stay dark, with echoes hinting at what is nearby.
-- **Light** is the currency, and the only way to earn it is to listen: a preview scan pays a little, a full landing pays properly, and something you have never heard pays more than a re-listen.
-- **Contracts and quests** give the wandering a shape — a chain of notes leading through a scene, an expedition that is really a course in a genre's history.
-- **Upgrades** — engine, scanner, antenna, hold — decide how far you can travel and how much you can see from a distance.
+Built so far:
+
+- **Fog of war:** unheard stars are grey silhouettes, regions you have not been to are uncharted, and an open star lights what is around it.
+- **Echoes:** each open star reflects its three closest unheard stars, so there is always a next step in sight.
+
+Still to come, each in a version of its own: a home sector near an artist you love, a ship, fuel, light as a currency you can spend, contracts and quests, and the upgrades that decide how far you can travel and how much you can see from a distance.
 
 The reward for playing well is a sky that is genuinely yours, lit only where you have actually been.
 
 ## Creative
 
-The whole sky is open from the first minute. No fuel, no fog gating anything, no progression to grind through.
+The whole sky is open from the first minute. No fog gating anything and no progression to grind through.
 
-This is the mode for the daily instrument: look up an artist, read the card, compare two spectra, follow the influence currents, put a nebula on the radio, export a poster of a region. Everything the exploration mode unlocks over months is simply available.
+This is the mode for the daily instrument: look up an artist, read the card, compare two spectra, put a nebula on the radio, export a poster of a region. It keeps no openings, because there is nothing for them to open.
 
 ## Why the choice is permanent
 
@@ -30,4 +32,4 @@ So the two modes are not difficulty settings; they are two different relationshi
 
 ## What is shared
 
-The universe itself: the layout, the artists, the similarity, the genre nebulae. Both modes read the same canonical sky, and both record your listening. Only what the interface does with that record differs.
+The universe itself: the layout, the artists, the similarity, the genre nebulae. Both modes read the same canonical sky, and a linked listening account is read the same way in both. The choice can be put off, and you have the whole sky in the meantime; once made, the server will not change it for anyone.

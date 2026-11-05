@@ -353,13 +353,14 @@ play them, fifty at most.
   "name": "Soul",
   "kind": "style",
   "stations": [
-    { "id": 46, "name": "Dusty Springfield", "x": 1.07, "y": 3.66, "uploads": "UUBVqdwqJHO5fSQskJb8BljA" },
-    { "id": 132, "name": "The Temptations", "x": -2.43, "y": 15.49, "uploads": "UUee8VNCWfOCYccbFhDM8B_A" }
+    { "id": 46, "mbid": "6a1f2f9e-1c1b-4d2e-9d57-1a2b3c4d5e6f", "name": "Dusty Springfield", "x": 1.07, "y": 3.66, "uploads": "UUBVqdwqJHO5fSQskJb8BljA" },
+    { "id": 132, "mbid": "7b2a3f0e-2d2c-4e3f-8e68-2b3c4d5e6f70", "name": "The Temptations", "x": -2.43, "y": 15.49, "uploads": "UUee8VNCWfOCYccbFhDM8B_A" }
   ]
 }
 ```
 
-`kind` is `genre` or `style` — "Rock" the genre and "Rock" the style are
+`mbid` is what a person's progress names the star by, since `id` changes with
+the canon. `kind` is `genre` or `style` — "Rock" the genre and "Rock" the style are
 different nebulae. A member is a star whose **main** genre or style this is: the
 one most of its releases carry, the same "main" the names on the sky are built
 from, so the radio of a name plays the stars written under it.
@@ -491,6 +492,27 @@ Measured on the full canon: of the **206,636 artists with a place in the sky**,
 better-known names lead the list — it is not a strength of influence, which
 Wikidata does not record.
 
+## `GET /api/me/sky`
+
+Needs a session. The stars that are this person's, in the sky being shown now, for [the fog](/lyrid/concepts/the-fog/). Arrays and not objects, because a long history is tens of thousands of stars and the field names would be most of the answer.
+
+```json
+{
+  "opened": [[12153, 21.26, 153.43, 0.58, 1978, "Joy Division", "2026-11-05T10:00:00Z"]],
+  "echoes": [[846, -62.46, 171.0, "New Order", [12153]]]
+}
+```
+
+An entry of `opened` is `[id, x, y, brightness, year, name, opened_at]`, where `opened_at` is the earliest moment any record has of the star. An entry of `echoes` is `[id, x, y, name, of]`, where `of` lists the open stars that reflect it. Each open star reflects at most three.
+
+## `PUT /api/me/openings/{mbid}`
+
+Needs a session. A star was listened to here: `{"how": "played"}` for thirty seconds of real sound in the player, or `{"how": "followed"}` for a link out followed to hear them. Answers `204`. Safe to send twice: the star stays open from the first time. An id the canon has merged lands on the star it became. A creative profile keeps nothing, and is answered the same.
+
+## `POST /api/me/openings/brought`
+
+Needs a session. Moves what a browser opened before anyone signed in into the account: `{"stars": [{"mbid": "…", "at": 1793877858948}]}`, where `at` is milliseconds since the epoch by the browser's clock, held to no later than now. At most 5,000 stars at once; more answers `400`. Answers `204`, and is safe to send twice, keeping the earliest moment of each star. These are recorded as `brought`: only the browser said so.
+
 ## `GET /api/youth/{from}`
 
 The stars of a youth: who was putting music out in the six years from `from`,
@@ -600,6 +622,7 @@ route_opened      radio_started     signal_heard
 signal_found      dossier_opened    listening_linked
 heard_shown       home_flown        youth_shown
 lastfm_brought    letter_asked      changes_opened
+mode_chosen       star_opened
 ```
 
 A name outside the list answers `404`. The list is what stops a client
@@ -629,11 +652,11 @@ leaves the counters untouched: they hold no row about that person to remove.
 - **No endpoint returns the sky.** Positions are in tiles; an API that served
   200,000 stars per pan would defeat the architecture
   ([ADR 0003](https://github.com/lacodda/lyrid/blob/main/docs/adr/0003-sky-map-architecture.md)).
-- **Nothing per-user on these routes.** The sky, the card and the search never
-  ask who is asking, and they answer the same for a visitor as for a
+- **Nothing per-user on the public routes.** The sky, the card and the search
+  never ask who is asking, and they answer the same for a visitor as for a
   signed-in account. Accounts and the profile have
-  [their own endpoints](/lyrid/reference/accounts/); the fog of war and the
-  rest of the game arrive with their own versions.
+  [their own endpoints](/lyrid/reference/accounts/), the fog has the three under
+  `/api/me` above, and the rest of the game arrives with its own versions.
 - **No pagination on search.** Twelve hits is a search box, not a catalogue;
   browsing the canon is what the map is for.
 - **No track previews.** A thirty-second preview needs a per-track lookup

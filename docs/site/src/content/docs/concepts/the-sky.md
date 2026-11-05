@@ -62,9 +62,9 @@ taken from outside would save an empty image.
 
 ## The fog is yours
 
-The only per-user layer of the map is the fog of war: what you have and have not heard. It is a small coverage texture, kilobytes in size, sampled while stars are drawn.
+The only per-user layer of the map is the fog of war: what you have and have not heard. It is a small coverage texture worked out in your browser from the stars you have opened, sampled by the star shader, so the map itself stays the same for everyone and nothing about light is stored anywhere.
 
-In **exploration** mode the fog starts closed and lifts as you listen. In **creative** mode the sky is open from the first minute — the fog is still recorded, but as a record of your listening rather than a gate on it.
+In **exploration** mode the fog starts closed and lifts as you listen ([the fog](/lyrid/concepts/the-fog/)). In **creative** mode there is none, and the sky is open from the first minute.
 
 ## Why it renders the way it does
 
