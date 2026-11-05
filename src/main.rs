@@ -5,6 +5,7 @@ mod auth;
 mod canon;
 mod config;
 mod feed;
+mod fog;
 mod import;
 mod layout;
 mod letter;
@@ -64,6 +65,10 @@ enum CanonCommand {
     /// changed since the edition before. Run at the end of the canon
     /// pipeline, after the layout and the tiles, and before cutting a slice.
     Seal,
+    /// Carry people's progress into the newest edition: an id the canon merged
+    /// becomes the star it merged into. Run at the end of filling a stand, and
+    /// by the server whenever it starts; running it twice changes nothing.
+    CarryOver,
 }
 
 #[derive(Subcommand)]
@@ -171,6 +176,10 @@ async fn main() -> Result<()> {
             let pool = connect(&config).await?;
             canon::run(&pool).await
         }
+        Some(Command::Canon(CanonCommand::CarryOver)) => {
+            let pool = connect(&config).await?;
+            fog::run(&pool).await.context("failed to carry people's progress into the new canon")
+        }
         Some(Command::Feed(command)) => {
             let pool = connect(&config).await?;
             feed::command(&pool, &config, &command).await
@@ -215,6 +224,19 @@ async fn serve(config: &config::Config) -> Result<()> {
     // the first person to press play does not wait for them.
     let dial = api::listening::Dial::default();
     tokio::spawn(dial.clone().warm(pool.clone()));
+
+    // A stand filled by hand catches up here: a new edition of the canon may
+    // have arrived since this server last ran. Nothing waits on it, and a
+    // failure is only logged, since progress not carried yet is merely dark
+    // until the next start.
+    tokio::spawn({
+        let pool = pool.clone();
+        async move {
+            if let Err(error) = fog::run(&pool).await {
+                tracing::error!(%error, "failed to carry people's progress into the new canon");
+            }
+        }
+    });
 
     // Linked accounts are read in the background for as long as the server
     // runs. Nothing waits on it: a person who wants their listening now has a

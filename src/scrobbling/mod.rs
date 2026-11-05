@@ -4,9 +4,10 @@
 //! token that is checked and dropped. lyrid then reads their whole history --
 //! from the first listen ListenBrainz holds -- and after that what they listen
 //! to, in the background every quarter of an hour or at once when they ask,
-//! writing each listen into a ledger with the light it paid. Openings are not
-//! stored at all: a star is open once a listen names it, and the ledger
-//! already says so. See ADR 0019, and ADR 0020 for the history.
+//! writing each listen into a ledger with the light it paid. What this listening
+//! opens is not stored again: a star is open once a listen names it, and the
+//! ledger already says so. See ADR 0019, ADR 0020 for the history, and `fog` for
+//! what the rest of the sky makes of it.
 //!
 //! Nothing here sits between a visitor and the sky. The card and the tiles
 //! never wait for ListenBrainz; a read that fails leaves its reason on the

@@ -33,6 +33,7 @@ force=no
 do_db=yes
 do_tiles=yes
 tables=
+carry=no
 
 while [ $# -gt 0 ]; do
     case $1 in
@@ -116,6 +117,9 @@ if [ "$do_db" = yes ] && [ -n "$tables" ]; then
         rows=$(remote_psql -tAc "'select count(*) from $table'")
         echo "stage-seed: the stand holds $rows rows in $table"
     done
+    case ",$tables," in
+        *,canon_edition,*) carry=yes ;;
+    esac
     do_db=no
 fi
 
@@ -161,6 +165,16 @@ if [ "$do_db" = yes ]; then
     restored=$(remote_psql -tAc "'select count(*) from artist'")
     placed=$(remote_psql -tAc "'select count(*) from artist_position'")
     echo "stage-seed: the stand holds $restored artists, $placed of them placed"
+    carry=yes
+fi
+
+# A new canon can merge an id someone's progress names. Carried here rather than
+# left for the next restart, so the sky is right the moment it arrives. Failing
+# to carry is not failing to fill: a server does this whenever it starts.
+if [ "$carry" = yes ]; then
+    echo "stage-seed: carrying people's progress into the new canon"
+    remote "docker compose -f docker-compose.prod.yml exec -T server lyrid canon carry-over" ||
+        echo "stage-seed: could not carry it now; the server will when it next starts" >&2
 fi
 
 if [ "$do_tiles" = yes ]; then

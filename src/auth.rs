@@ -23,24 +23,6 @@ pub const SESSION_DAYS: i64 = 30;
 /// less than length.
 pub const MIN_PASSWORD: usize = 10;
 
-/// The mode every account starts in, and for now the only one (decision of
-/// 2026-09-11).
-///
-/// The two modes of Vision principle 5 are 'explore' and 'create', and the set
-/// is held closed by the check constraint on `user_profile.mode` -- which is
-/// where it can actually be enforced. There is deliberately no list and no
-/// validator here: no route takes a mode from a client, so a validator would
-/// be code kept warm for a screen that does not exist. Both come back with the
-/// fog (v0.22), next to the thing that reads them.
-///
-/// The creative mode is the one that is built: everything open, no currency,
-/// no fog. Asking at the door which of two games you want to play, when only
-/// one of them exists, is asking someone to decide the shape of a thing they
-/// have not seen. ADR 0012's "once and never" is unchanged -- it begins when
-/// the fog arrives (v0.22) and the choice is offered, once, to the profiles
-/// that predate it.
-pub const DEFAULT_MODE: &str = "create";
-
 /// How long a confirmation link lasts. Generous: it is read in a mail client,
 /// possibly on another device, possibly tomorrow morning.
 pub const CONFIRM_HOURS: i64 = 24;
@@ -260,24 +242,6 @@ mod tests {
         assert_eq!(
             check_credentials("ada@example.com", &short).unwrap_err().to_string(),
             check_password(&short).unwrap_err().to_string()
-        );
-    }
-
-    #[test]
-    fn the_default_mode_is_one_the_schema_accepts() {
-        // The set of modes lives in a check constraint, and this constant is
-        // what every registration lands on. A value outside the constraint
-        // would make every registration fail at the database -- so the
-        // migration is read rather than a second list being kept here to
-        // agree with it.
-        let migration = include_str!("../migrations/0008_accounts.sql");
-        let constraint = migration
-            .lines()
-            .find(|line| line.contains("CHECK (mode IN"))
-            .expect("migration 0008 declares the set of modes");
-        assert!(
-            constraint.contains(&format!("'{DEFAULT_MODE}'")),
-            "the default mode {DEFAULT_MODE} is not in {constraint}"
         );
     }
 

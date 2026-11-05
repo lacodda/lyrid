@@ -341,12 +341,7 @@ async fn spend(tx: &mut Transaction<'_, Postgres>, token: &str, purpose: &str) -
 }
 
 #[tokio::test]
-async fn a_new_profile_lands_in_the_creative_mode_without_being_told() {
-    // The door stopped asking (decision of 2026-09-11), so the column's
-    // default is the only thing left deciding. If it were dropped, every
-    // registration would fail on the NOT NULL rather than quietly pick wrong
-    // -- but a default that changed value would be silent, which is what this
-    // pins.
+async fn a_new_profile_has_chosen_nothing_and_a_chosen_mode_is_final() {
     let pool = pool().await;
     let mut tx = pool.begin().await.unwrap();
 
@@ -354,19 +349,51 @@ async fn a_new_profile_lands_in_the_creative_mode_without_being_told() {
         .fetch_one(&mut *tx)
         .await
         .unwrap();
-    // Exactly the insert `create_account` performs: no mode named.
+    // Exactly what `create_account` leaves unsaid: no mode named, and none
+    // decided by a default, because the choice has not been made.
     sqlx::query("INSERT INTO user_profile (user_id) VALUES ($1)")
         .bind(id)
         .execute(&mut *tx)
         .await
         .unwrap();
-
-    let (mode,): (String,) = sqlx::query_as("SELECT mode FROM user_profile WHERE user_id = $1")
+    let (mode,): (Option<String>,) = sqlx::query_as("SELECT mode FROM user_profile WHERE user_id = $1")
         .bind(id)
         .fetch_one(&mut *tx)
         .await
         .unwrap();
-    assert_eq!(mode, "create", "a profile made without a mode must land in the mode that is actually built");
+    assert_eq!(mode, None, "a default here would answer the question before anyone was asked it");
+
+    sqlx::query("UPDATE user_profile SET mode = 'explore' WHERE user_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .expect("the first choice goes through");
+
+    // A savepoint, because the failing statement would otherwise take the whole
+    // transaction down with it and the checks after it could not run.
+    sqlx::query("SAVEPOINT before_changing_mind").execute(&mut *tx).await.unwrap();
+    let changed = sqlx::query("UPDATE user_profile SET mode = 'create' WHERE user_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await;
+    assert!(changed.is_err(), "a chosen mode was changed: no code path may do that");
+    sqlx::query("ROLLBACK TO SAVEPOINT before_changing_mind").execute(&mut *tx).await.unwrap();
+
+    // And forgetting is not a way round: back to nothing would let it be chosen again.
+    sqlx::query("SAVEPOINT before_forgetting").execute(&mut *tx).await.unwrap();
+    let forgotten = sqlx::query("UPDATE user_profile SET mode = NULL WHERE user_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await;
+    assert!(forgotten.is_err(), "a chosen mode was forgotten, which is the long way of changing it");
+    sqlx::query("ROLLBACK TO SAVEPOINT before_forgetting").execute(&mut *tx).await.unwrap();
+
+    // The rest of the row is still anybody's to update.
+    sqlx::query("UPDATE user_profile SET born = 1980 WHERE user_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .expect("the trigger guards the mode and nothing else");
 
     tx.rollback().await.unwrap();
 }

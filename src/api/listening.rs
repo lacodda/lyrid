@@ -35,6 +35,9 @@ pub fn routes() -> Router<AppState> {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Station {
     pub id: i32,
+    /// What a person's progress names the star by: the id above is renumbered by
+    /// every rebuild of the canon.
+    pub mbid: uuid::Uuid,
     pub name: String,
     pub x: f32,
     pub y: f32,
@@ -180,7 +183,7 @@ async fn tune(connection: &mut PgConnection, layout: LayoutKey, drawn: usize) ->
     // Every placed star with a channel link, and its main genre and style.
     // Driven from the channel links, which are the few, rather than from the
     // stars, which are the many -- and "main" is asked of those few only.
-    let rows = sqlx::query_as::<_, (i32, String, f32, f32, f32, String, Option<String>, Option<String>)>(
+    let rows = sqlx::query_as::<_, (i32, uuid::Uuid, String, f32, f32, f32, String, Option<String>, Option<String>)>(
         "WITH channel AS (
              SELECT artist_id, url FROM artist_url
              WHERE kind = 'youtube' AND url LIKE '%/channel/UC%'
@@ -190,7 +193,7 @@ async fn tune(connection: &mut PgConnection, layout: LayoutKey, drawn: usize) ->
              FROM main_genres(ARRAY(SELECT DISTINCT artist_id FROM channel)) m
              JOIN genre g ON g.id = m.genre_id
          )
-         SELECT a.id, a.name, p.x, p.y, COALESCE(al.listeners, 0)::real, c.url, genre.name, style.name
+         SELECT a.id, a.mbid, a.name, p.x, p.y, COALESCE(al.listeners, 0)::real, c.url, genre.name, style.name
          FROM channel c
          JOIN artist_position p ON p.artist_id = c.artist_id AND p.layout_id = $1
          JOIN artist a ON a.id = c.artist_id
@@ -208,13 +211,13 @@ async fn tune(connection: &mut PgConnection, layout: LayoutKey, drawn: usize) ->
     let stars = rows
         .chunk_by(|a, b| a.0 == b.0)
         .filter_map(|links| {
-            let (id, name, x, y, listeners, _, genre, style) = links[0].clone();
-            let uploads = channel_of(links.iter().map(|link| link.5.as_str()))?;
+            let (id, mbid, name, x, y, listeners, _, genre, style) = links[0].clone();
+            let uploads = channel_of(links.iter().map(|link| link.6.as_str()))?;
             // After the edge in the tile order: dimmer, or as bright and
             // later by id.
             let dark = edge.is_some_and(|(edge_listeners, edge_id)| edge_listeners.total_cmp(&listeners).then(id.cmp(&edge_id)).is_gt());
             Some(Tuned {
-                station: Station { id, name, x, y, uploads },
+                station: Station { id, mbid, name, x, y, uploads },
                 brightness: brightness(listeners, brightest),
                 dark,
                 genre,
@@ -518,6 +521,7 @@ mod tests {
         Tuned {
             station: Station {
                 id,
+                mbid: uuid::Uuid::nil(),
                 name: format!("Star {id}"),
                 x: 0.0,
                 y: 0.0,

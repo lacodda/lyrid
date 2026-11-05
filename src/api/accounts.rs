@@ -3,21 +3,18 @@
 //! What an account is for, at this version: it remembers the mode you chose,
 //! where you left the sky, how you like your marked star drawn and -- if you
 //! say -- the year you were born; what your listening has opened and gathered
-//! (`api::scrobbling`, with its own tables); and whether you asked for the
-//! weekly letter (`api::letter`). Fog and a journal arrive with the game and
-//! bring theirs. What is settled here is the shape everything after it hangs
-//! from.
+//! (`api::scrobbling` and `api::fog`, with their own tables); and whether you
+//! asked for the weekly letter (`api::letter`). A journal arrives with the game
+//! and brings its own. What is settled here is the shape everything after it
+//! hangs from.
 //!
 //! Two rules in this module are product rules rather than implementation
 //! detail, and both are enforced on the server:
 //!
 //! - **The mode is chosen once and never changes** (Vision, principle 5).
-//!   There is no route that writes it after creation, and the column has no
-//!   UPDATE path: a rule the client alone enforces is a rule until the first
-//!   `curl`. What changed in v0.11 is only *when* the choice happens: nothing
-//!   is asked at the door, every account starts creative, and the choice
-//!   arrives with the fog (v0.22) offered once. "Once and never" is unchanged;
-//!   it simply has not started yet.
+//!   A profile starts with none. One route writes it, only over nothing, and a
+//!   trigger on the column refuses to change a mode that has been chosen: a
+//!   rule the client alone enforces is a rule until the first `curl`.
 //! - **Everything an account holds can be taken back or destroyed.** The
 //!   charter is not a page of prose with an email address at the bottom: the
 //!   export and the deletion are routes, they are one press each, and the
@@ -30,7 +27,7 @@
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::{Json, Router, routing::get, routing::post};
+use axum::{Json, Router, routing::get, routing::post, routing::put};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use time::OffsetDateTime;
@@ -49,14 +46,15 @@ pub fn routes() -> Router<AppState> {
         .route("/api/auth/forgot", post(forgot_password))
         .route("/api/auth/reset", post(reset_password))
         .route("/api/me", get(me).patch(update_profile).delete(delete_account))
+        .route("/api/me/mode", put(choose_mode))
         .route("/api/me/export", get(export_account))
 }
 
 /// What a client sends to create an account.
 ///
-/// No mode: it is not asked for at the door any more (decision of
-/// 2026-09-11), and leaving the field out of the struct is what makes that
-/// true -- a client that sends one is sending something nothing will read.
+/// No mode: that is asked on the screen after this one, the same screen a
+/// profile from before the fog is asked on, so leaving the field out of the
+/// struct leaves one way to arrive at a mode.
 #[derive(Deserialize)]
 struct Registration {
     email: String,
@@ -73,8 +71,9 @@ struct Login {
 ///
 /// Every field is optional and only the present ones are written, so a client
 /// saving a camera position does not have to send back a marker it never
-/// touched. `mode` is absent from this struct on purpose: it is not editable,
-/// and leaving it out is what makes that true rather than a comment saying so.
+/// touched. `mode` is absent from this struct on purpose: it is chosen once on
+/// a route of its own and never edited, and leaving it out is what makes that
+/// true rather than a comment saying so.
 #[derive(Deserialize)]
 struct ProfileUpdate {
     halo_shape: Option<String>,
@@ -115,7 +114,10 @@ struct Camera {
 struct Me {
     id: i32,
     email: String,
-    mode: String,
+    /// `null` until the choice is made, which is what asks for it.
+    mode: Option<String>,
+    /// The edition of the canon this person's progress has been carried into.
+    canon_edition: Option<i16>,
     halo_shape: Option<String>,
     halo_colour: Option<String>,
     /// Absent when there is nothing saved, or when what is saved belongs to a
@@ -235,9 +237,8 @@ async fn register(State(state): State<AppState>, Json(body): Json<Registration>)
 /// Creates the account, its profile, its first session and its confirmation
 /// token in one transaction.
 ///
-/// One transaction because an account without a profile is an account with no
-/// mode, and the mode is the one thing that cannot be set later. The
-/// confirmation token joins it for the same reason: an account whose token
+/// One transaction because an account without a profile has nowhere to keep
+/// anything. The confirmation token joins it for the same reason: an account whose token
 /// insert failed is an account that can never be confirmed and can never be
 /// told why.
 ///
@@ -261,13 +262,14 @@ async fn create_account(pool: &PgPool, email: &str, hash: &str, secure: bool) ->
         return Ok(None);
     };
 
-    // The mode is not passed in: nothing asks for one any more, and the
-    // column's default is what decides it. Naming the column here would put a
-    // second answer beside the migration's.
-    sqlx::query("INSERT INTO user_profile (user_id) VALUES ($1)")
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+    // No mode: it is chosen on the next screen. Someone new has no progress
+    // to carry, so they start in the edition on show; marked here rather than
+    // left for the next carry, which would otherwise read them for nothing.
+    let canon_edition: Option<i16> =
+        sqlx::query_scalar("INSERT INTO user_profile (user_id, canon_edition) VALUES ($1, (SELECT max(id) FROM canon_edition)) RETURNING canon_edition")
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await?;
 
     let session = auth::session_token();
     sqlx::query("INSERT INTO user_session (token, user_id, expires_at) VALUES ($1, $2, now() + ($3 || ' days')::interval)")
@@ -293,7 +295,8 @@ async fn create_account(pool: &PgPool, email: &str, hash: &str, secure: bool) ->
     let me = Me {
         id: user_id,
         email: email.to_string(),
-        mode: auth::DEFAULT_MODE.to_string(),
+        mode: None,
+        canon_edition,
         halo_shape: None,
         halo_colour: None,
         camera: None,
@@ -381,6 +384,51 @@ async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
         .into_response()
 }
 
+#[derive(Deserialize)]
+struct ModeChoice {
+    mode: crate::fog::Mode,
+}
+
+/// Chooses the mode, the one time it can be chosen.
+///
+/// Answered with the profile, so the interface moves on from what the server
+/// actually holds. A second choice is refused rather than ignored: someone who
+/// thinks they have changed their mode should hear that they have not.
+async fn choose_mode(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<ModeChoice>) -> Response {
+    let session = match current_session(&state.pool, &headers).await {
+        Ok(Some(session)) => session,
+        Ok(None) => return unauthorised(),
+        Err(error) => {
+            tracing::error!(%error, "failed to read a session");
+            return server_error("the session could not be read");
+        }
+    };
+
+    let chosen = match state.pool.acquire().await {
+        Ok(mut conn) => crate::fog::choose_mode(&mut conn, session.user_id, body.mode).await,
+        Err(error) => Err(error),
+    };
+    match chosen {
+        Ok(true) => match load_me(&state.pool, session.user_id).await {
+            Ok(Some(me)) => Json(me).into_response(),
+            Ok(None) => unauthorised(),
+            Err(error) => {
+                tracing::error!(%error, "failed to read a profile");
+                server_error("the profile could not be read")
+            }
+        },
+        Ok(false) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": "the mode has been chosen, and it stays" })),
+        )
+            .into_response(),
+        Err(error) => {
+            tracing::error!(%error, "failed to choose a mode");
+            server_error("the mode could not be chosen")
+        }
+    }
+}
+
 async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let session = match current_session(&state.pool, &headers).await {
         Ok(Some(session)) => session,
@@ -411,8 +459,8 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
     // Dropped by the query rather than by a second one: the profile itself
     // must come back either way, and a WHERE clause on the layout would hide
     // the whole account behind a camera it no longer needs.
-    let Some((id, email, mode, halo_shape, halo_colour, x, y, scale, confirmed, born, letter)) = sqlx::query_as::<_, MeRow>(
-        "SELECT u.id, u.email, p.mode, p.halo_shape, p.halo_colour,
+    let Some((id, email, mode, canon_edition, halo_shape, halo_colour, x, y, scale, confirmed, born, letter)) = sqlx::query_as::<_, MeRow>(
+        "SELECT u.id, u.email, p.mode, p.canon_edition, p.halo_shape, p.halo_colour,
                     CASE WHEN current.keep THEN p.camera_x END,
                     CASE WHEN current.keep THEN p.camera_y END,
                     CASE WHEN current.keep THEN p.camera_scale END,
@@ -451,6 +499,7 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
         id,
         email,
         mode,
+        canon_edition,
         halo_shape,
         halo_colour,
         camera,
@@ -463,7 +512,8 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
 type MeRow = (
     i32,
     String,
-    String,
+    Option<String>,
+    Option<i16>,
     Option<String>,
     Option<String>,
     Option<f32>,
@@ -837,7 +887,8 @@ async fn export_account(State(state): State<AppState>, headers: HeaderMap) -> Re
 }
 
 type ProfileRow = (
-    String,
+    Option<String>,
+    Option<i16>,
     Option<String>,
     Option<String>,
     Option<f32>,
@@ -868,7 +919,7 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
     };
 
     let profile = sqlx::query_as::<_, ProfileRow>(
-        "SELECT p.mode, p.halo_shape, p.halo_colour, p.camera_x, p.camera_y, p.camera_scale, l.key, p.born
+        "SELECT p.mode, p.canon_edition, p.halo_shape, p.halo_colour, p.camera_x, p.camera_y, p.camera_scale, l.key, p.born
          FROM user_profile p LEFT JOIN sky_layout l ON l.id = p.layout_id
          WHERE p.user_id = $1",
     )
@@ -906,6 +957,14 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
     .fetch_all(pool)
     .await?;
 
+    // The stars opened here rather than heard elsewhere; those are the listens.
+    let openings = sqlx::query_as::<_, (uuid::Uuid, OffsetDateTime, String)>(
+        "SELECT artist_mbid, opened_at, how FROM star_opening WHERE user_id = $1 ORDER BY opened_at, artist_mbid",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
     Ok(Some(serde_json::json!({
         "exported_at": stamp(OffsetDateTime::now_utc()),
         "note": "Everything lyrid holds about this account. The sky itself is built from public data and belongs to nobody.",
@@ -915,8 +974,9 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             "email_confirmed_at": confirmed_at.map(stamp),
             "created_at": stamp(created_at),
         },
-        "profile": profile.map(|(mode, halo_shape, halo_colour, x, y, scale, layout, born)| serde_json::json!({
+        "profile": profile.map(|(mode, canon_edition, halo_shape, halo_colour, x, y, scale, layout, born)| serde_json::json!({
             "mode": mode,
+            "canon_edition": canon_edition,
             "halo_shape": halo_shape,
             "halo_colour": halo_colour,
             "born": born,
@@ -939,6 +999,14 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             "language": language,
             "subscribed_at": stamp(subscribed_at),
         })),
+        "openings": openings
+            .into_iter()
+            .map(|(mbid, opened_at, how)| serde_json::json!({
+                "artist_mbid": mbid,
+                "opened_at": stamp(opened_at),
+                "how": how,
+            }))
+            .collect::<Vec<_>>(),
         "listens": listens
             .into_iter()
             .map(|(listened_at, recording, artists, seconds, light, source)| serde_json::json!({
@@ -1117,11 +1185,9 @@ mod tests {
 
     #[test]
     fn a_registration_carrying_a_mode_carries_nothing() {
-        // The door does not ask for a mode any more (decision of 2026-09-11),
-        // and the struct is what makes that true: a client sending one --
-        // including an old build of this SPA, or someone with curl hoping to
-        // pick the mode that is not built yet -- is sending a field nothing
-        // reads. The column's default decides.
+        // The door does not ask for a mode, and the struct is what makes that
+        // true: a client sending one is sending a field nothing reads, and the
+        // profile starts with the question still open.
         let registration: Registration =
             serde_json::from_value(serde_json::json!({"email": "ada@example.com", "password": "a long enough passphrase", "mode": "explore"})).unwrap();
         assert_eq!(registration.email, "ada@example.com");

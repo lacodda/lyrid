@@ -194,7 +194,7 @@ async fn stars(pool: &PgPool, layout_id: i16) -> Result<Vec<Star>> {
 /// or the very end of the slider and nowhere near its era. Such a star is
 /// treated as undated, which the client draws as undated -- honest, where a
 /// wrong year would not be.
-fn plausible_year(year: Option<i16>) -> i16 {
+pub(crate) fn plausible_year(year: Option<i16>) -> i16 {
     match year {
         Some(year) if (1000..=2100).contains(&year) => year,
         _ => 0,
