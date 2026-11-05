@@ -95,6 +95,11 @@ plainly how far a person has been brought.
 
 ## Consequences
 
+- **Drawing the fog costs nothing a person can see.** Measured on a slice of 100,000
+  stars with six open and eighteen echoes, at 1440x900 on a laptop's integrated
+  graphics, moving the camera at every zoom: the same 11.1 ms a frame in both modes,
+  which is that screen's 90 Hz and so a ceiling rather than a cost. A sky with very
+  many open stars was not measured.
 - **Reading a sky costs a query that grows with the person.** Measured on the slice,
   on a laptop: 3.7 s for the echoes of 20,000 open stars from a cold cache, a case
   only a very long history reaches. Most people hold hundreds. It is asked once on
@@ -105,6 +110,11 @@ plainly how far a person has been brought.
 - **On a stand, a merge whose target was cut from the slice cannot be followed.** The
   redirect goes with the artist it points at, so that opening stays under its old id,
   dark, until a canon that holds the target arrives.
+- **Edition 3 went under a live account on a real stand.** Openings and listens were
+  made through the API on stars MusicBrainz then merged, the canon's tables were
+  replaced, and the account came out with each merge followed, the earliest moment
+  kept, a star that left the canon still recorded, and nothing else changed. Run a
+  second time, the carry changed nothing.
 - **Half the sky can only be opened by a link followed or a scrobble.** That is the
   honest size of the embedded player, not a rule of this version.
 - **YouTube is out of the loop in automated browsers.** Playback was refused in the

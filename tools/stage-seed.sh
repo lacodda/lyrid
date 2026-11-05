@@ -4,7 +4,7 @@
 # Deploying ships code; this ships data, and the two move on different clocks.
 # A stand rebuilds on every release, but the slice only changes when the canon
 # is imported again - which is a matter of hours and happens every few stages
-# at most. Tying them together would push 119 MB across the network on every
+# at most. Tying them together would push 242 MB across the network on every
 # tag to rewrite a database with what it already holds.
 #
 # Neither machine has a PostgreSQL client installed: here and on the stand,

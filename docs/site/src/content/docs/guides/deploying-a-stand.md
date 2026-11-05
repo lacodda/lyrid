@@ -54,14 +54,18 @@ Three things worth knowing:
 - **Run `lyrid layout` first.** Brightness comes from the layout, so the
   command refuses to run before one exists.
 - **It is not quick, and it is not stuck.** Removing 2.86M artists means
-  clearing fourteen child tables first — see
+  clearing their child tables first — see
   [ADR 0010](https://github.com/lacodda/lyrid/blob/main/docs/adr/0010-a-slice-for-a-small-stand.md)
   for why that order matters. Measured end to end on the real canon it took
-  **about an hour** on a desktop, and a small machine will be slower. Each
-  table is logged as it finishes, so progress is visible.
+  **five and a half minutes** on a desktop, and a small machine will be slower.
+  Each table is logged as it finishes, so progress is visible. The last delete
+  runs with its triggers off once the catalogue's every key has said nothing
+  still points at what is going, which takes a superuser or the right to set
+  `session_replication_role`. Without that right it runs with them on: about an
+  hour, and enough memory to matter.
 - **Space returns only after `VACUUM FULL`.** Postgres marks the deleted rows
   dead but keeps the files, so the database still measures its old size until
-  the tables are rewritten. Measured on the real canon: **4251 MB before, 897
+  the tables are rewritten. Measured on the real canon: **5568 MB before, 1484
   MB after** — on a machine chosen for being small, this is the step that
   actually frees the disk, not an optional tidy-up.
 

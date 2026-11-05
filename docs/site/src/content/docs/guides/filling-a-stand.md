@@ -11,7 +11,7 @@ the canon is data, and it arrives separately.
 
 The importers read dumps measured in tens and hundreds of gigabytes — a
 MusicBrainz export is 7 GB compressed, the Wikidata dump 102.7 GB. Building the
-canon takes hours on a desktop, and the result is 4251 MB before it is cut down.
+canon takes hours on a desktop, and the result is 5568 MB before it is cut down.
 A small machine cannot do that work and does not need to: the canon is built
 once where the dumps are, cut to a slice, and the slice is moved.
 
@@ -47,10 +47,11 @@ client installed — `pg_dump` lives inside the database container:
 docker compose exec -T db pg_dump -U lyrid -d lyrid -Fc -Z6 > .local/lyrid-slice-100k.dump
 ```
 
-Measured on the real canon: **119 MB compressed**, from an 897 MB database
-(4251 MB before `VACUUM FULL` — see
+Measured on the real canon, edition 3: **242 MB compressed**, from a 1484 MB
+database (5568 MB before `VACUUM FULL` — see
 [Deploying a stand](/lyrid/guides/deploying-a-stand/)). The tile pyramid is a
-further 6.3 MB.
+further 2.9 MB. From the layout already sealed, the slice, its vacuum, the tiles
+and the dump took eight minutes on a desktop.
 
 Keep the dump out of the repository; `.local/` is ignored for this.
 
@@ -126,6 +127,12 @@ says: the camera forgets a layout that is gone, and the next visit opens on the
 whole sky. A table outside the list that would lose rows with the canon, or
 block it, stops the script before anything is emptied. Measured on a slice of
 100,000 artists: one second.
+
+Replacing all thirty tables of the canon under accounts, on a small single-board
+stand over a home network, took eleven and a half minutes. For as long as the rows
+are loading the old sky stays drawn from its tiles while cards and search find
+nothing, because the tables are emptied first. Take a backup before it; `pg_dump`
+runs in the same container.
 
 ## Carrying people's progress
 

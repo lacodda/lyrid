@@ -222,10 +222,10 @@ async fn prune_children(tx: &mut PgConnection, parent: &str, kept: &str) -> Resu
 /// one per foreign key per row, nineteen for each of 2.86 million artists, queued
 /// in memory for the length of the transaction. That was fifty minutes, and enough
 /// memory that the process running it was stopped for it on 2026-11-05. So the
-/// triggers are switched off for this one statement, which is safe only because
-/// the catalogue's every key into `parent` is asked first whether anything still
-/// points outside: a reference left behind stops the slice, rather than becoming a
-/// dangling key nothing would ever report.
+/// triggers are switched off for this one statement, and the whole cut takes five
+/// and a half. That is safe only because the catalogue's every key into `parent` is
+/// asked first whether anything still points outside: a reference left behind stops
+/// the slice, rather than becoming a dangling key nothing would ever report.
 ///
 /// Switching them off takes more than owning the tables. Without that right the
 /// delete runs with its triggers on: slower, and just as correct.
