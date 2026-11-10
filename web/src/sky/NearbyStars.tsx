@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from 'dowel-ui'
 
 import { fetchNearby, type NearbyStar } from '@/api'
 import { panelVariants, SectionLabel } from '@/components/ui/panel'
+import { retrying } from '@/retry'
 import { listInFog, type Fog } from './fog'
 import type { Bounds } from './Sky'
 import type { Place } from './renderer'
@@ -55,7 +56,14 @@ interface Line {
 
 export function NearbyStars({ visible, onPick, fog, className }: Props) {
   const { t } = useTranslation()
-  const [nearby, setNearby] = useState<NearbyStar[]>([])
+  // `failed` when the server could not be read even after asking again: the
+  // list says so rather than calling the sky empty.
+  const [nearby, setNearby] = useState<NearbyStar[] | 'failed'>([])
+  // The first view is never empty -- it is the saved camera, a link, or the
+  // whole sky -- so an empty first answer came from a server in the middle of
+  // starting or of having its canon replaced, and is asked again. Later views
+  // can be empty for real: someone zoomed into the dark between nebulae.
+  const looked = useRef(false)
 
   // The view is quantised before it becomes a dependency. `visible` is a fresh
   // object on every animation frame, so depending on it directly would fire a
@@ -78,7 +86,8 @@ export function NearbyStars({ visible, onPick, fog, className }: Props) {
         : null,
     [fog, key, t]
   )
-  const stars: Line[] = inFog ?? nearby
+  const failed = !inFog && nearby === 'failed'
+  const stars: Line[] = inFog ?? (nearby === 'failed' ? [] : nearby)
 
   const asking = !fog
   useEffect(() => {
@@ -87,12 +96,22 @@ export function NearbyStars({ visible, onPick, fog, className }: Props) {
     // Debounced, because a pan is a hundred meaningful moves in a row and only
     // the last one is a view somebody is looking at.
     const timer = window.setTimeout(() => {
-      fetchNearby(parseKey(key), abort.signal)
-        .then(setNearby)
-        .catch(() => {
-          // The canvas still shows the sky, so there is nothing to apologise
-          // for; the next move asks again.
-        })
+      const first = !looked.current
+      retrying(
+        () => fetchNearby(parseKey(key), abort.signal),
+        abort.signal,
+        stars => first && stars.length === 0
+      ).then(
+        stars => {
+          looked.current = true
+          setNearby(stars)
+        },
+        () => {
+          // Asked again and still not read. The canvas still shows the sky;
+          // the list says it could not be read, and the next move asks again.
+          if (!abort.signal.aborted) setNearby('failed')
+        }
+      )
     }, 400)
 
     return () => {
@@ -124,7 +143,9 @@ export function NearbyStars({ visible, onPick, fog, className }: Props) {
       <p className="m-0 text-2xs text-dim">{t('sky.nearby.hint')}</p>
 
       {stars.length === 0 ? (
-        <p className="m-0 text-2xs text-dim">{fog ? t('fog.nearbyEmpty') : t('sky.nearby.empty')}</p>
+        <p className="m-0 text-2xs text-dim" role={failed ? 'status' : undefined}>
+          {failed ? t('sky.nearby.failed') : fog ? t('fog.nearbyEmpty') : t('sky.nearby.empty')}
+        </p>
       ) : (
         <ul className="m-0 flex max-h-64 min-h-0 list-none flex-col overflow-y-auto p-0">
           {stars.map(star => (

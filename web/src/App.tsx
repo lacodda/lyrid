@@ -39,6 +39,7 @@ import { SkyChanges } from '@/SkyChanges'
 import { AdminPage } from '@/AdminPage'
 import { fetchChanges, type SkyChanges as Changes } from '@/changes'
 import { count } from '@/metrics'
+import { retrying } from '@/retry'
 import { useLanguage } from '@/lib/language'
 import type { Place, Star } from '@/sky/renderer'
 
@@ -483,8 +484,9 @@ export function App() {
   const refreshSky = useCallback(
     (signal?: AbortSignal) => {
       if (person === null) return
-      // Personal and optional: the fog stays as it was until the next answer.
-      fetchPersonalSky(signal).then(sky => setHeldSky({ user: person, sky }), () => undefined)
+      // Personal and optional: the fog stays as it was until the next answer,
+      // which comes sooner than the next five minutes when this one failed.
+      retrying(() => fetchPersonalSky(signal), signal).then(sky => setHeldSky({ user: person, sky }), () => undefined)
     },
     [person]
   )
@@ -651,7 +653,10 @@ export function App() {
   const [changesOpen, setChangesOpen] = useState(false)
   useEffect(() => {
     const abort = new AbortController()
-    fetchChanges(abort.signal).then(setChanges, () => undefined)
+    // Asked again when it fails, or when it names no edition: a stand whose
+    // canon is being replaced has none for a moment, and the status line kept
+    // that moment until the next visit.
+    retrying(() => fetchChanges(abort.signal), abort.signal, answer => answer.edition === null).then(setChanges, () => undefined)
     return () => abort.abort()
   }, [])
 

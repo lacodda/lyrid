@@ -12,6 +12,7 @@
       "heading": "Nearest stars",
       "hint": "The sky is drawn on a canvas. These are the stars nearest the middle of the view, as a list that can be read and reached by keyboard.",
       "empty": "No stars in view. Zoom out or pan to find some.",
+      "failed": "The sky could not be read here. Move the view to ask again.",
       "pick": "{{name}}, {{distance}} from the centre of the view",
       "distance": "{{value}} away"
     }

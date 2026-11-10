@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { fetchRegion, type Region } from '@/api'
+import { retrying } from '@/retry'
 import { middle } from './minimap'
 import { boundsKey } from './NearbyStars'
 import type { Bounds } from './Sky'
@@ -17,13 +18,27 @@ import type { Bounds } from './Sky'
 export function useRegion(visible: Bounds | null): Region | null {
   const [region, setRegion] = useState<Region | null>(null)
   const key = visible ? boundsKey(middle(visible)) : null
+  // The first view is somewhere: an answer that knows nothing of it came from
+  // a server between two states, and is asked again -- see `retrying`.
+  const looked = useRef(false)
 
   useEffect(() => {
     if (key === null) return
     const abort = new AbortController()
     const [minX = 0, minY = 0, maxX = 0, maxY = 0] = key.split(',').map(Number)
     const timer = window.setTimeout(() => {
-      fetchRegion({ minX, minY, maxX, maxY }, abort.signal).then(setRegion, () => undefined)
+      const first = !looked.current
+      retrying(
+        () => fetchRegion({ minX, minY, maxX, maxY }, abort.signal),
+        abort.signal,
+        answer => first && answer.genre === null && answer.style === null
+      ).then(
+        answer => {
+          looked.current = true
+          setRegion(answer)
+        },
+        () => undefined
+      )
     }, 400)
     return () => {
       window.clearTimeout(timer)
