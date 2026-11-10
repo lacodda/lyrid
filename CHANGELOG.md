@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.23.0] - 2026-11-10
+
+### Bug Fixes
+- Answer a hole in the pyramid with 204, not 404
+- Keep special purpose artists out of search, nearby, radio and echoes
+- Ask the first view's questions again when the answer was not one
+- Drop the founding probes and date a Wikidata import by its dump
+- Format the Wikidata version, allow libbzip2's license, page lyrid serve
+- Split the export's progress out, and give the search fixture an mbid
+- Name the home port dialog apart from the expedition module
+
+### Build
+- Draw the mark's rasters with lyrn assets
+- Release with furca's engine from release.toml
+- Move onto dowel-ui 0.43 and bring the copies level
+- Allow esbuild and sharp to run their install scripts
+- Keep a version number out of a comment the bump rewrites
+
+### CI
+- Adopt the lyrn service standard
+
+### Documentation
+- Build without the two warnings it carried since its start
+- Say the modes as built and keep the status to one short paragraph
+
+### Features
+- Set out from an artist you love, with a first contract
+
 ## [0.22.0] - 2026-11-05
 
 ### Documentation
