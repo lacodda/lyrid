@@ -36,6 +36,8 @@ export type Mechanic =
   | 'changes_opened'
   | 'mode_chosen'
   | 'star_opened'
+  | 'expedition_begun'
+  | 'contract_done'
 
 /**
  * Counts one use.

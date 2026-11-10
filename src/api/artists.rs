@@ -465,6 +465,12 @@ async fn releases(pool: &PgPool, id: i32) -> sqlx::Result<Vec<Release>> {
     .collect())
 }
 
+/// The uploads playlist a star's card plays, if it has a channel that embeds:
+/// what the player needs to land on a star nobody has opened a card for yet.
+pub(crate) async fn uploads_of(pool: &PgPool, id: i32) -> sqlx::Result<Option<String>> {
+    Ok(listen(pool, id).await?.1)
+}
+
 /// Where the artist can be heard, newest-known service first, and the channel
 /// the card can play.
 ///
@@ -684,6 +690,8 @@ struct SearchQuery {
 #[derive(Serialize, Clone)]
 struct Hit {
     id: i32,
+    /// What a person's progress names the star by: `id` changes with the canon.
+    mbid: uuid::Uuid,
     name: String,
     comment: Option<String>,
     x: Option<f32>,
@@ -735,8 +743,8 @@ async fn run_search(pool: &PgPool, term: &str) -> sqlx::Result<Found> {
     // MusicBrainz's special purpose artists are not acts, and are never an
     // answer: "Various Artists" is on the sky until the next layout leaves it
     // out, and a person naming the artist they love must not be offered it.
-    let rows = sqlx::query_as::<_, (i32, String, Option<String>, Option<f32>, Option<f32>)>(
-        "SELECT a.id, a.name, a.comment, p.x, p.y
+    let rows = sqlx::query_as::<_, (i32, uuid::Uuid, String, Option<String>, Option<f32>, Option<f32>)>(
+        "SELECT a.id, a.mbid, a.name, a.comment, p.x, p.y
          FROM artist a
          JOIN artist_position p ON p.artist_id = a.id
              AND p.layout_id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
@@ -756,7 +764,10 @@ async fn run_search(pool: &PgPool, term: &str) -> sqlx::Result<Found> {
     .fetch_all(pool)
     .await?;
 
-    let stars = rows.into_iter().map(|(id, name, comment, x, y)| Hit { id, name, comment, x, y }).collect();
+    let stars = rows
+        .into_iter()
+        .map(|(id, mbid, name, comment, x, y)| Hit { id, mbid, name, comment, x, y })
+        .collect();
 
     // Labels with a roster only: a label nobody on this sky released on has
     // nothing to open. Ranked like the stars -- the exact name first, then by
@@ -858,8 +869,8 @@ fn parse_ids(raw: &str) -> Option<Vec<i32>> {
 }
 
 async fn run_stars(pool: &PgPool, ids: &[i32]) -> sqlx::Result<Vec<Hit>> {
-    let rows = sqlx::query_as::<_, (i32, String, Option<String>, Option<f32>, Option<f32>)>(
-        "SELECT a.id, a.name, a.comment, p.x, p.y
+    let rows = sqlx::query_as::<_, (i32, uuid::Uuid, String, Option<String>, Option<f32>, Option<f32>)>(
+        "SELECT a.id, a.mbid, a.name, a.comment, p.x, p.y
          FROM artist a
          LEFT JOIN artist_position p
              ON p.artist_id = a.id
@@ -872,7 +883,7 @@ async fn run_stars(pool: &PgPool, ids: &[i32]) -> sqlx::Result<Vec<Hit>> {
 
     let by_id: std::collections::HashMap<i32, Hit> = rows
         .into_iter()
-        .map(|(id, name, comment, x, y)| (id, Hit { id, name, comment, x, y }))
+        .map(|(id, mbid, name, comment, x, y)| (id, Hit { id, mbid, name, comment, x, y }))
         .collect();
     Ok(ids.iter().filter_map(|id| by_id.get(id)).cloned().collect())
 }

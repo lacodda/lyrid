@@ -27,6 +27,11 @@ export interface Me {
   mode: Mode | null
   /** The edition of the canon this person's progress has been carried into. */
   canon_edition: number | null
+  /**
+   * The MusicBrainz id of the star the expedition set out from: `null` until it
+   * has, which is what asks for it in the exploration mode.
+   */
+  home_port: string | null
   halo_shape: string | null
   halo_colour: string | null
   /** Absent when nothing is saved, or when the sky has been rebuilt since. */

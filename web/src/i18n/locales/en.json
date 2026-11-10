@@ -611,5 +611,32 @@
     "echoes": "Echoes · unexplored",
     "followEcho": "follow echo →",
     "nearbyEmpty": "Nothing is lit in this part of the sky."
+  },
+  "expedition": {
+    "askTitle": "Name an artist you love",
+    "askBody": "Your expedition sets out from their star. It lights at once, and its echoes show where to go next.",
+    "placeholder": "an artist you love",
+    "results": "Stars by that name",
+    "nothing": "No star on this sky by that name. The sky holds the most listened artists: try another one you love.",
+    "what": "This star becomes your home port, chosen once. Then the first contract: open three new stars near it, by really listening.",
+    "later": "Not now",
+    "failed": "The expedition could not begin. Try again.",
+    "begin": "Name an artist you love",
+    "contractLabel": "Contract",
+    "doneLabel": "Contract fulfilled",
+    "homeTitle": "Chart your home sector",
+    "homeBody_one": "Open {{count}} new star near {{name}}. Its echoes, the dashed rings, are the way.",
+    "homeBody_other": "Open {{count}} new stars near {{name}}. Its echoes, the dashed rings, are the way.",
+    "doneTitle": "Home sector charted",
+    "doneBody_one": "{{count}} new star around {{name}} is lit on your sky.",
+    "doneBody_other": "{{count}} new stars around {{name}} are lit on your sky.",
+    "progress": "{{progress}} of {{goal}}",
+    "how": "Thirty seconds of listening, or a link followed out from the card, opens a star.",
+    "toEcho": "Fly to an echo",
+    "toHome": "Fly home",
+    "close": "Put away",
+    "homeUnknown": "your home port",
+    "landed": "{{name}} is your home port. Its echoes are the dashed rings around it.",
+    "silent": "{{name}} is your home port. It has no channel that plays here: follow a link from its card to listen."
   }
 }

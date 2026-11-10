@@ -118,6 +118,9 @@ struct Me {
     mode: Option<String>,
     /// The edition of the canon this person's progress has been carried into.
     canon_edition: Option<i16>,
+    /// The MusicBrainz id of the star the expedition set out from: `null`
+    /// until it has, which is what asks for it in the exploration mode.
+    home_port: Option<uuid::Uuid>,
     halo_shape: Option<String>,
     halo_colour: Option<String>,
     /// Absent when there is nothing saved, or when what is saved belongs to a
@@ -297,6 +300,7 @@ async fn create_account(pool: &PgPool, email: &str, hash: &str, secure: bool) ->
         email: email.to_string(),
         mode: None,
         canon_edition,
+        home_port: None,
         halo_shape: None,
         halo_colour: None,
         camera: None,
@@ -459,8 +463,8 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
     // Dropped by the query rather than by a second one: the profile itself
     // must come back either way, and a WHERE clause on the layout would hide
     // the whole account behind a camera it no longer needs.
-    let Some((id, email, mode, canon_edition, halo_shape, halo_colour, x, y, scale, confirmed, born, letter)) = sqlx::query_as::<_, MeRow>(
-        "SELECT u.id, u.email, p.mode, p.canon_edition, p.halo_shape, p.halo_colour,
+    let Some((id, email, mode, canon_edition, home_port, halo_shape, halo_colour, x, y, scale, confirmed, born, letter)) = sqlx::query_as::<_, MeRow>(
+        "SELECT u.id, u.email, p.mode, p.canon_edition, p.home_port, p.halo_shape, p.halo_colour,
                     CASE WHEN current.keep THEN p.camera_x END,
                     CASE WHEN current.keep THEN p.camera_y END,
                     CASE WHEN current.keep THEN p.camera_scale END,
@@ -500,6 +504,7 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
         email,
         mode,
         canon_edition,
+        home_port,
         halo_shape,
         halo_colour,
         camera,
@@ -514,6 +519,7 @@ type MeRow = (
     String,
     Option<String>,
     Option<i16>,
+    Option<uuid::Uuid>,
     Option<String>,
     Option<String>,
     Option<f32>,
@@ -889,6 +895,7 @@ async fn export_account(State(state): State<AppState>, headers: HeaderMap) -> Re
 type ProfileRow = (
     Option<String>,
     Option<i16>,
+    Option<uuid::Uuid>,
     Option<String>,
     Option<String>,
     Option<f32>,
@@ -919,7 +926,7 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
     };
 
     let profile = sqlx::query_as::<_, ProfileRow>(
-        "SELECT p.mode, p.canon_edition, p.halo_shape, p.halo_colour, p.camera_x, p.camera_y, p.camera_scale, l.key, p.born
+        "SELECT p.mode, p.canon_edition, p.home_port, p.halo_shape, p.halo_colour, p.camera_x, p.camera_y, p.camera_scale, l.key, p.born
          FROM user_profile p LEFT JOIN sky_layout l ON l.id = p.layout_id
          WHERE p.user_id = $1",
     )
@@ -965,6 +972,15 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
     .fetch_all(pool)
     .await?;
 
+    // The contracts as issued, with the moment each was fulfilled. Progress is
+    // not here because it is not held: it is the openings above, counted.
+    let contracts = sqlx::query_as::<_, (String, uuid::Uuid, i16, OffsetDateTime, Option<OffsetDateTime>)>(
+        "SELECT kind, star_mbid, goal, issued_at, done_at FROM contract WHERE user_id = $1 ORDER BY issued_at, id",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
     Ok(Some(serde_json::json!({
         "exported_at": stamp(OffsetDateTime::now_utc()),
         "note": "Everything lyrid holds about this account. The sky itself is built from public data and belongs to nobody.",
@@ -974,9 +990,10 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             "email_confirmed_at": confirmed_at.map(stamp),
             "created_at": stamp(created_at),
         },
-        "profile": profile.map(|(mode, canon_edition, halo_shape, halo_colour, x, y, scale, layout, born)| serde_json::json!({
+        "profile": profile.map(|(mode, canon_edition, home_port, halo_shape, halo_colour, x, y, scale, layout, born)| serde_json::json!({
             "mode": mode,
             "canon_edition": canon_edition,
+            "home_port": home_port,
             "halo_shape": halo_shape,
             "halo_colour": halo_colour,
             "born": born,
@@ -1005,6 +1022,16 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
                 "artist_mbid": mbid,
                 "opened_at": stamp(opened_at),
                 "how": how,
+            }))
+            .collect::<Vec<_>>(),
+        "contracts": contracts
+            .into_iter()
+            .map(|(kind, star_mbid, goal, issued_at, done_at)| serde_json::json!({
+                "kind": kind,
+                "star_mbid": star_mbid,
+                "goal": goal,
+                "issued_at": stamp(issued_at),
+                "done_at": done_at.map(stamp),
             }))
             .collect::<Vec<_>>(),
         "listens": listens

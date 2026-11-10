@@ -165,6 +165,8 @@ export interface OnLabel {
 /** A search result, with a place to fly to. */
 export interface Hit {
   id: number
+  /** What a person's progress names the star by: `id` changes with the canon. */
+  mbid: string
   name: string
   comment: string | null
   x: number | null

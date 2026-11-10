@@ -31,8 +31,8 @@ letter would match a large share of three million artists. What
 ```json
 {
   "stars": [
-    { "id": 20134, "name": "Detroit Emeralds", "comment": null, "x": 43.61, "y": -53.48 },
-    { "id": 242839, "name": "Mitch Ryder & The Detroit Wheels", "comment": null, "x": 51.98, "y": 128.04 }
+    { "id": 20134, "mbid": "2d1c686d-3546-4b03-9c6c-e376bb9c9583", "name": "Detroit Emeralds", "comment": null, "x": 43.61, "y": -53.48 },
+    { "id": 242839, "mbid": "4ddc78bb-bf16-470c-8115-48709bedebbd", "name": "Mitch Ryder & The Detroit Wheels", "comment": null, "x": 51.98, "y": 128.04 }
   ],
   "labels": [{ "id": 20459, "name": "Detroit Underground", "artists": 27 }],
   "scenes": [{ "qid": 12439, "name": "Detroit", "artists": 209 }]
@@ -59,7 +59,10 @@ first; after that the artist most people listen to leads. Otherwise
 `nirvana` leads with a sitar ensemble.
 
 Only artists that **have a position** are returned: a result the map cannot
-fly to is a dead end.
+fly to is a dead end. MusicBrainz's special purpose artists - Various Artists,
+`[unknown]` and the rest of its documented set - are never returned: they are
+credits, not acts. `mbid` is what a person's progress names a star by, since
+`id` changes when the canon is built again.
 
 ## `GET /api/nearby?min_x=…&min_y=…&max_x=…&max_y=…`
 
@@ -315,8 +318,8 @@ with their places, in the order asked:
 
 ```json
 [
-  { "id": 962, "name": "Marvin Gaye", "comment": null, "x": -5.50, "y": 7.09 },
-  { "id": 132, "name": "The Temptations", "comment": "Motown soul vocal group", "x": -2.43, "y": 15.49 }
+  { "id": 962, "mbid": "afdb7919-059d-43c1-b668-ba1d265e7e42", "name": "Marvin Gaye", "comment": null, "x": -5.50, "y": 7.09 },
+  { "id": 132, "mbid": "d8df96ae-8fcf-4997-b3e6-e5d1aaf0f69e", "name": "The Temptations", "comment": "Motown soul vocal group", "x": -2.43, "y": 15.49 }
 ]
 ```
 
@@ -505,6 +508,39 @@ Needs a session. The stars that are this person's, in the sky being shown now, f
 
 An entry of `opened` is `[id, x, y, brightness, year, name, opened_at]`, where `opened_at` is the earliest moment any record has of the star. An entry of `echoes` is `[id, x, y, name, of]`, where `of` lists the open stars that reflect it. Each open star reflects at most three.
 
+## `GET /api/me/expedition`
+
+Needs a session. The [expedition](/lyrid/concepts/the-expedition/): the home port it set out from, and every contract with its progress, oldest first.
+
+```json
+{
+  "home": {
+    "mbid": "afdb7919-059d-43c1-b668-ba1d265e7e42",
+    "id": 962, "name": "Marvin Gaye", "x": -5.5, "y": 7.09,
+    "uploads": "UU…"
+  },
+  "contracts": [
+    {
+      "id": 1,
+      "kind": "home_sector",
+      "star": { "mbid": "afdb7919-059d-43c1-b668-ba1d265e7e42", "id": 962, "name": "Marvin Gaye", "x": -5.5, "y": 7.09 },
+      "goal": 3,
+      "progress": 1,
+      "issued_at": "2026-11-10T10:00:00Z",
+      "done_at": null
+    }
+  ]
+}
+```
+
+`home` is `null` until the expedition has begun. A star is always named by its MusicBrainz id; `id`, `name`, `x` and `y` are `null` when the sky on show does not hold it. `uploads` is the playlist the player lands on, as on the [card](#get-apiartistsid), or `null`. `progress` counts the stars of the contract's sector first opened at or after `issued_at`, by any record, up to `goal`; it is worked out from the openings on every request and never stored. `done_at` is the moment of the opening that reached the goal, written down the first time it is seen, and stays once written.
+
+## `PUT /api/me/expedition`
+
+Needs a session. Sets out from an artist someone loves: `{"mbid": "…"}`. The star becomes the home port and is opened as `named`, and the first contract is issued: open three new stars of the home sector, or as many as it still has unopened when that is fewer. Answers with the whole expedition, as `GET` does. An id the canon has merged lands on the star it became.
+
+Refused with `400` when the artist is not a star on this sky (or is one of MusicBrainz's special purpose artists), and with `409` when the profile is not in the exploration mode or the expedition has already begun - it begins once.
+
 ## `PUT /api/me/openings/{mbid}`
 
 Needs a session. A star was listened to here: `{"how": "played"}` for thirty seconds of real sound in the player, or `{"how": "followed"}` for a link out followed to hear them. Answers `204`. Safe to send twice: the star stays open from the first time. An id the canon has merged lands on the star it became. A creative profile keeps nothing, and is answered the same.
@@ -622,7 +658,8 @@ route_opened      radio_started     signal_heard
 signal_found      dossier_opened    listening_linked
 heard_shown       home_flown        youth_shown
 lastfm_brought    letter_asked      changes_opened
-mode_chosen       star_opened
+mode_chosen       star_opened       expedition_begun
+contract_done
 ```
 
 A name outside the list answers `404`. The list is what stops a client

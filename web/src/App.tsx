@@ -14,6 +14,17 @@ import { fetchLabels, type Label } from '@/sky/labels'
 import { EMPTY_SKY, buildFog, chartLabels, chartedAt, type PersonalSky } from '@/sky/fog'
 import { bringOpenings, fetchPersonalSky, forget, openStar, remember as rememberStar, remembered as rememberedStars, type How } from '@/sky/openings'
 import { ModeChoice } from '@/ModeChoice'
+import { Expedition } from '@/Expedition'
+import { ContractPanel } from '@/sky/ContractPanel'
+import {
+  NO_EXPEDITION,
+  asksForHome,
+  contractToShow,
+  echoesOf,
+  fetchExpedition,
+  newlyFulfilled,
+  type Expedition as ExpeditionState,
+} from '@/expedition'
 import { LanguagePicker } from '@/LanguagePicker'
 import { Button } from '@/components/ui/button'
 import { panelVariants } from '@/components/ui/panel'
@@ -518,8 +529,46 @@ export function App() {
     )
   }, [person, refreshSky])
 
+  // --------------------------------------------------------- expedition
+  // The home port and the contracts, kept with the account they belong to for
+  // the reason the sky above is. Read with the sky, because every opening that
+  // changes one can change the other.
+  const [heldExpedition, setHeldExpedition] = useState<{ user: number; expedition: ExpeditionState } | null>(null)
+  const lastExpedition = useRef<{ user: number; expedition: ExpeditionState } | null>(null)
+  // Contracts fulfilled while this page was open, and the ones put away since:
+  // a contract fulfilled is worth seeing once, at the moment it happened.
+  const [fulfilledHere, setFulfilledHere] = useState<ReadonlySet<number>>(() => new Set())
+  const [putAway, setPutAway] = useState<ReadonlySet<number>>(() => new Set())
+  const keepExpedition = useCallback((user: number, next: ExpeditionState) => {
+    const before = lastExpedition.current
+    if (before?.user === user) {
+      const fresh = newlyFulfilled(before.expedition, next)
+      if (fresh.length > 0) {
+        fresh.forEach(() => count('contract_done'))
+        setFulfilledHere(current => new Set([...current, ...fresh]))
+      }
+    }
+    lastExpedition.current = { user, expedition: next }
+    setHeldExpedition(lastExpedition.current)
+  }, [])
+  const refreshExpedition = useCallback(
+    (signal?: AbortSignal) => {
+      if (person === null) return
+      retrying(() => fetchExpedition(signal), signal).then(next => keepExpedition(person, next), () => undefined)
+    },
+    [person, keepExpedition]
+  )
+  useEffect(() => {
+    if (!exploring) return
+    const abort = new AbortController()
+    refreshExpedition(abort.signal)
+    return () => abort.abort()
+  }, [exploring, refreshExpedition])
+  const expedition = heldExpedition && heldExpedition.user === person ? heldExpedition.expedition : NO_EXPEDITION
+
   const personal = heldSky && heldSky.user === person ? heldSky.sky : EMPTY_SKY
   const skyLoaded = heldSky?.user === person
+  const contract = exploring ? contractToShow(expedition, fulfilledHere, putAway) : null
   const skyExtent = overview?.sky ?? null
   const fog = useMemo(() => (exploring && skyExtent ? buildFog(skyExtent, personal) : null), [exploring, skyExtent, personal])
   const labels = useMemo(() => (fog ? chartLabels(allLabels, fog, t('fog.uncharted')) : allLabels), [fog, allLabels, t])
@@ -548,13 +597,14 @@ export function App() {
         () => {
           count('star_opened')
           refreshSky()
+          refreshExpedition()
           if (reveal && who.mode === 'explore') setListenNote(t('fog.lit', { name: star.name }))
         },
         // Heard all the same, and the next listen says so again.
         () => undefined
       )
     },
-    [refreshSky, t]
+    [refreshSky, refreshExpedition, t]
   )
   const onHeard = useCallback(
     (station: Station) => {
@@ -569,6 +619,38 @@ export function App() {
 
   // The question of the mode, put off for this visit if the person says so.
   const [modeLater, setModeLater] = useState(false)
+  // And the expedition's first question, the same way.
+  const [expeditionLater, setExpeditionLater] = useState(false)
+
+  // The expedition has begun: the home port is lit, the camera lands on it,
+  // and its own channel plays -- the landing of the Vision, "a full track on
+  // YouTube". A star with no channel that embeds says so, and its card offers
+  // the links out.
+  const onBegun = useCallback(
+    (next: ExpeditionState, star: Hit) => {
+      if (person === null) return
+      setMe(current => current && { ...current, home_port: next.home?.mbid ?? star.mbid })
+      keepExpedition(person, next)
+      refreshSky()
+      const home = next.home
+      const id = home?.id ?? star.id
+      const x = home?.x ?? star.x
+      const y = home?.y ?? star.y
+      const name = home?.name ?? star.name
+      if (x === null || y === null) return
+      goTo({ artistId: id, x, y })
+      generation.current += 1
+      if (home?.uploads) {
+        count('listen_opened')
+        setListenNote(t('expedition.landed', { name }))
+        setListening({ kind: 'channel', station: { id, mbid: home.mbid, name, x, y, uploads: home.uploads } })
+      } else {
+        setListening(null)
+        setListenNote(t('expedition.silent', { name }))
+      }
+    },
+    [person, keepExpedition, refreshSky, goTo, t]
+  )
 
   // What the signed-in person's listening has come to. Read when someone signs
   // in, and again every few minutes while they stay: the server reads
@@ -780,6 +862,7 @@ export function App() {
   return (
     <main ref={mainRef} className="relative h-full overflow-hidden">
       {me && me.mode === null && !modeLater && <ModeChoice overview={overview} onChosen={setMe} onLater={() => setModeLater(true)} />}
+      {asksForHome(me) && !expeditionLater && <Expedition onBegun={onBegun} onLater={() => setExpeditionLater(true)} />}
 
       <Sky
         onState={onState}
@@ -1003,7 +1086,24 @@ export function App() {
               usefully be shorter, so it is the one that shrinks -- `min-h-0`
               because a flex child will not shrink below its content otherwise. */}
           {fog && skyLoaded && personal.opened.length === 0 && (
-            <p className={cn(panelVariants(), 'glass m-0 w-56 shrink-0 p-2 text-xs leading-relaxed text-text')}>{t('fog.hint')}</p>
+            <div className={cn(panelVariants(), 'glass flex w-56 shrink-0 flex-col gap-2 p-2')}>
+              <p className="m-0 text-xs leading-relaxed text-text">{t('fog.hint')}</p>
+              {asksForHome(me) && (
+                <Button size="sm" variant="primary" className="self-start" onClick={() => setExpeditionLater(false)}>
+                  {t('expedition.begin')}
+                </Button>
+              )}
+            </div>
+          )}
+          {/* The contract in hand: the expedition's way forward, above the
+              list it points into. */}
+          {fog && contract && (
+            <ContractPanel
+              contract={contract}
+              echoes={echoesOf(personal, contract.star.id)}
+              onGo={goTo}
+              onClose={() => setPutAway(current => new Set([...current, contract.id]))}
+            />
           )}
           <NearbyStars className="min-h-0" visible={state.visible} onPick={goTo} fog={fog} />
           <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} onCharter={openCharter} />

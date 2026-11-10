@@ -391,6 +391,25 @@ async fn carry_one(conn: &mut PgConnection, user: i32, edition: i16) -> sqlx::Re
         .rows_affected()
     };
 
+    // The expedition names stars by id too: the home port and the star each
+    // contract is about follow a merge the way an opening does.
+    sqlx::query(
+        "UPDATE user_profile p SET home_port = a.mbid
+         FROM artist_redirect r JOIN artist a ON a.id = r.artist_id
+         WHERE p.user_id = $1 AND p.home_port = r.mbid",
+    )
+    .bind(user)
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query(
+        "UPDATE contract c SET star_mbid = a.mbid
+         FROM artist_redirect r JOIN artist a ON a.id = r.artist_id
+         WHERE c.user_id = $1 AND c.star_mbid = r.mbid",
+    )
+    .bind(user)
+    .execute(&mut *conn)
+    .await?;
+
     sqlx::query("UPDATE user_profile SET canon_edition = $2 WHERE user_id = $1")
         .bind(user)
         .bind(edition)
@@ -431,6 +450,7 @@ mod tests {
             "listen",
             "star_opening",
             "user_profile",
+            "contract",
         ] {
             sqlx::query(sqlx::AssertSqlSafe(format!(
                 "CREATE TABLE {schema}.{table} (LIKE public.{table} INCLUDING ALL)"
@@ -813,6 +833,43 @@ mod tests {
 
         // Carrying again changes nothing.
         assert_eq!(carry_one(&mut tx, 1, 3).await.unwrap(), (0, 0));
+        tx.rollback().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn carrying_moves_the_home_port_and_the_star_of_a_contract() {
+        let Some(pool) = database().await else { return };
+        let mut tx = pool.begin().await.unwrap();
+        sandbox(&mut tx).await;
+        star(&mut tx, 10, id(10), "Survivor").await;
+        sqlx::query("INSERT INTO artist_redirect (mbid, artist_id) VALUES ($1, 10)")
+            .bind(id(91))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        // One person set out from a star MusicBrainz then merged; another from
+        // a star that stayed, whose contract must not move.
+        sqlx::query("INSERT INTO user_profile (user_id, mode, home_port) VALUES (1, 'explore', $1), (2, 'explore', $2)")
+            .bind(id(91))
+            .bind(id(20))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO contract (user_id, kind, star_mbid, goal) VALUES (1, 'home_sector', $1, 3), (2, 'home_sector', $2, 3)")
+            .bind(id(91))
+            .bind(id(20))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+
+        carry_one(&mut tx, 1, 3).await.unwrap();
+        carry_one(&mut tx, 2, 3).await.unwrap();
+        let held: Vec<(Option<Uuid>, Uuid)> =
+            sqlx::query_as("SELECT p.home_port, c.star_mbid FROM user_profile p JOIN contract c ON c.user_id = p.user_id ORDER BY p.user_id")
+                .fetch_all(&mut *tx)
+                .await
+                .unwrap();
+        assert_eq!(held, [(Some(id(10)), id(10)), (Some(id(20)), id(20))]);
         tx.rollback().await.unwrap();
     }
 

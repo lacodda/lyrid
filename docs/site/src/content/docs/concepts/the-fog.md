@@ -21,6 +21,7 @@ The silhouettes stay visible so the dark keeps its size and its shape. Regions y
 - **Thirty seconds of sound** from the player on the sky, whether you pressed play on the star's channel or a radio or the signal reached it. Only time the player reports as playing counts: a pause, a stall or a channel that will not play adds nothing.
 - **Following a link out** to hear them, from the star's card. It is what there is for the half of the sky with no channel that embeds, and lyrid remembers that this is how the star was opened.
 - **Your listening elsewhere**, read from a [linked ListenBrainz account or a Last.fm file](/lyrid/concepts/scrobbling/). Linking lights everyone you have ever heard.
+- **Naming an artist you love**, once, when the [expedition](/lyrid/concepts/the-expedition/) begins. That star is your home port, and lyrid remembers it was named.
 
 Search and the card are not hidden. You can look up any artist, fly there and read about them, and the star stays dark until you listen.
 

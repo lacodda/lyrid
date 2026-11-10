@@ -30,6 +30,8 @@ An account adds memory to the sky and takes nothing away from it. The map, the s
 | `GET` | `/api/me/heard/{id}` | How often and since when one star has been heard. |
 | `PUT` | `/api/me/letter` | Ask for the weekly letter. Body: `language` (`en` or `ru`). Needs a confirmed address. |
 | `DELETE` | `/api/me/letter` | Stop the weekly letter. |
+| `GET` | `/api/me/expedition` | The home port and the contracts, with their progress. |
+| `PUT` | `/api/me/expedition` | Set out from an artist you love, once. Body: `mbid`. |
 | `POST` | `/api/letter/stop?token=…` | Stop the weekly letter by the token in its link. No session. |
 
 All answer JSON. A refusal carries `{"error": "..."}` written for a person to read, and the client shows those words as they are rather than substituting its own.
@@ -42,6 +44,7 @@ All answer JSON. A refusal carries `{"error": "..."}` written for a person to re
   "email": "ada@example.com",
   "mode": "explore",
   "canon_edition": 3,
+  "home_port": "afdb7919-059d-43c1-b668-ba1d265e7e42",
   "halo_shape": "ring",
   "halo_colour": "azure",
   "camera": { "x": -31.22, "y": 187.08, "scale": 12.0 },
@@ -51,7 +54,7 @@ All answer JSON. A refusal carries `{"error": "..."}` written for a person to re
 }
 ```
 
-`PATCH /api/me` accepts `halo_shape`, `halo_colour`, `camera` and `born`, each optional. Only the fields present are written, so saving a camera does not clear a marker the client never touched. `born` is a year from 1900 to this one; `null` forgets it, and leaving it out leaves it alone. It returns the whole profile as it now stands. `letter` is `null` until the weekly letter is asked for. `mode` is `null` until a mode is chosen. `canon_edition` is the edition of the canon this person's progress has been [carried into](/lyrid/concepts/the-fog/#when-the-canon-changes), and is not written by any client.
+`PATCH /api/me` accepts `halo_shape`, `halo_colour`, `camera` and `born`, each optional. Only the fields present are written, so saving a camera does not clear a marker the client never touched. `born` is a year from 1900 to this one; `null` forgets it, and leaving it out leaves it alone. It returns the whole profile as it now stands. `letter` is `null` until the weekly letter is asked for. `mode` is `null` until a mode is chosen. `canon_edition` is the edition of the canon this person's progress has been [carried into](/lyrid/concepts/the-fog/#when-the-canon-changes), and is not written by any client. `home_port` is the MusicBrainz id of the star the [expedition](/lyrid/concepts/the-expedition/) set out from, `null` until it has; it is written only by `PUT /api/me/expedition`.
 
 ## The mode is chosen once
 
@@ -98,9 +101,9 @@ Reset links last 1 hour, shorter than confirmation links, because a reset link i
 
 ## The privacy charter: export and delete
 
-`GET /api/me/export` needs a session and returns the whole account as a JSON file, sent with `Content-Disposition: attachment` so a browser saves it rather than displaying it — the point is to hand the data over, not show it. It holds `exported_at`, a short `note`, `account` (id, email, when it was confirmed, when it was created), `profile` (mode, the edition its progress reached, marker shape and colour, the camera and the layout key it belongs to), `openings` (every star opened here, by MusicBrainz id, with when and how), `sessions` (only their creation and expiry times), `listenbrainz` (the linked name, when it was linked and last read, where its history begins, or `null`), `weekly_letter` (its language and when it was asked for, or `null`) and `listens` — every row of the listening ledger, with its time, source (`listenbrainz` or `lastfm`), recording id, artist MBIDs, length and light (`null` for a listen that paid nothing). The profile carries `born`. Session tokens and the letter's stop token are left out on purpose:  a token is a live credential, and an export is a file that gets mailed around and left in a downloads folder — handing over working keys to the account is not the same as handing over the data about it.
+`GET /api/me/export` needs a session and returns the whole account as a JSON file, sent with `Content-Disposition: attachment` so a browser saves it rather than displaying it — the point is to hand the data over, not show it. It holds `exported_at`, a short `note`, `account` (id, email, when it was confirmed, when it was created), `profile` (mode, the edition its progress reached, the home port, marker shape and colour, the camera and the layout key it belongs to), `openings` (every star opened here, by MusicBrainz id, with when and how), `contracts` (each contract's kind, the star it is about, its goal, when it was issued and when it was fulfilled - progress is not held, it is the openings counted), `sessions` (only their creation and expiry times), `listenbrainz` (the linked name, when it was linked and last read, where its history begins, or `null`), `weekly_letter` (its language and when it was asked for, or `null`) and `listens` — every row of the listening ledger, with its time, source (`listenbrainz` or `lastfm`), recording id, artist MBIDs, length and light (`null` for a listen that paid nothing). The profile carries `born`. Session tokens and the letter's stop token are left out on purpose:  a token is a live credential, and an export is a file that gets mailed around and left in a downloads folder — handing over working keys to the account is not the same as handing over the data about it.
 
-`DELETE /api/me` needs a session and destroys the account immediately and completely: one `DELETE FROM app_user`, and the profile, sessions, tokens, the ListenBrainz link, every listen, every opening and the weekly letter go with it through `ON DELETE CASCADE`. Not a flag, not a queue, not a promise to remove it within 30 days — a promise kept by a background job is a promise the user cannot check.
+`DELETE /api/me` needs a session and destroys the account immediately and completely: one `DELETE FROM app_user`, and the profile, sessions, tokens, the ListenBrainz link, every listen, every opening, every contract and the weekly letter go with it through `ON DELETE CASCADE`. Not a flag, not a queue, not a promise to remove it within 30 days — a promise kept by a background job is a promise the user cannot check.
 
 The usage counters described [below](/lyrid/reference/api/#usage-metrics) are untouched by a deletion, and correctly so: they hold no row about that person to delete.
 

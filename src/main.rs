@@ -4,6 +4,7 @@ mod app;
 mod auth;
 mod canon;
 mod config;
+mod expedition;
 mod feed;
 mod fog;
 mod import;

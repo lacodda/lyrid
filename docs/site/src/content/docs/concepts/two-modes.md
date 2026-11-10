@@ -13,8 +13,9 @@ Built so far:
 
 - **Fog of war:** unheard stars are grey silhouettes, regions you have not been to are uncharted, and an open star lights what is around it.
 - **Echoes:** each open star reflects its three closest unheard stars, so there is always a next step in sight.
+- **The expedition:** you name an artist you love, their star becomes your home port, and the first contract asks you to chart the home sector around it. [The expedition](/lyrid/concepts/the-expedition/) says how.
 
-Still to come, each in a version of its own: a home sector near an artist you love, a ship, fuel, light as a currency you can spend, contracts and quests, and the upgrades that decide how far you can travel and how much you can see from a distance.
+Still to come, each in a version of its own: a ship, fuel, light as a currency you can spend, more contracts and quests, and the upgrades that decide how far you can travel and how much you can see from a distance.
 
 The reward for playing well is a sky that is genuinely yours, lit only where you have actually been.
 

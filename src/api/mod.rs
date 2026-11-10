@@ -8,6 +8,7 @@ pub mod admin;
 pub mod artists;
 pub mod changes;
 pub mod dossiers;
+pub mod expedition;
 pub mod fog;
 pub mod letter;
 pub mod listening;
