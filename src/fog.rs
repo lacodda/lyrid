@@ -231,7 +231,9 @@ pub async fn echoes(conn: &mut PgConnection, opened: &[i32]) -> sqlx::Result<Vec
              FROM edge
              JOIN shown ON true
              JOIN artist_position p ON p.layout_id = shown.id AND p.artist_id = edge.other
+             JOIN artist other ON other.id = edge.other
              WHERE NOT EXISTS (SELECT 1 FROM open_star s WHERE s.id = edge.other)
+               AND other.mbid <> ALL($3::uuid[])
          )
          SELECT a.id, a.name, r.x, r.y, array_agg(r.star ORDER BY r.star)
          FROM ranked r
@@ -242,6 +244,9 @@ pub async fn echoes(conn: &mut PgConnection, opened: &[i32]) -> sqlx::Result<Vec
     )
     .bind(opened)
     .bind(ECHOES_PER_STAR)
+    // MusicBrainz's special purpose artists are not acts: "Various Artists"
+    // is similar to half the sky by the listening, and is no next step.
+    .bind(crate::import::special::special_purpose())
     .fetch_all(conn)
     .await?;
     Ok(rows.into_iter().map(|(id, name, x, y, of)| Echo { id, name, x, y, of }).collect())
@@ -679,6 +684,27 @@ mod tests {
         let six = got.iter().find(|echo| echo.id == 6);
         assert!(six.is_some_and(|echo| echo.of == [7]), "star 7's only neighbour echoes it: {got:?}");
         assert_eq!(echoes(&mut tx, &[]).await.unwrap(), Vec::<Echo>::new());
+        tx.rollback().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_special_purpose_artist_is_never_an_echo() {
+        let Some(pool) = database().await else { return };
+        let mut tx = pool.begin().await.unwrap();
+        sandbox(&mut tx).await;
+        let various = Uuid::parse_str(crate::import::special::SPECIAL_PURPOSE[0]).unwrap();
+        star(&mut tx, 1, id(1), "One").await;
+        star(&mut tx, 2, various, "Various Artists").await;
+        star(&mut tx, 3, id(3), "Three").await;
+        // On the sky, and the closest by far: the listening of every compilation.
+        run(
+            &mut tx,
+            "INSERT INTO artist_similarity (metric_id, source_id, target_id, score) VALUES (1, 1, 2, 0.99), (1, 1, 3, 0.1)",
+        )
+        .await;
+
+        let got = echoes(&mut tx, &[1]).await.unwrap();
+        assert_eq!(got.iter().map(|echo| echo.id).collect::<Vec<_>>(), [3]);
         tx.rollback().await.unwrap();
     }
 

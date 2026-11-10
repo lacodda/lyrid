@@ -183,10 +183,14 @@ async fn tune(connection: &mut PgConnection, layout: LayoutKey, drawn: usize) ->
     // Every placed star with a channel link, and its main genre and style.
     // Driven from the channel links, which are the few, rather than from the
     // stars, which are the many -- and "main" is asked of those few only.
+    // MusicBrainz's special purpose artists are not acts, and are no station
+    // of any radio or the signal, whatever channel someone linked to them.
     let rows = sqlx::query_as::<_, (i32, uuid::Uuid, String, f32, f32, f32, String, Option<String>, Option<String>)>(
         "WITH channel AS (
-             SELECT artist_id, url FROM artist_url
-             WHERE kind = 'youtube' AND url LIKE '%/channel/UC%'
+             SELECT u.artist_id, u.url FROM artist_url u
+             JOIN artist a ON a.id = u.artist_id
+             WHERE u.kind = 'youtube' AND u.url LIKE '%/channel/UC%'
+               AND a.mbid <> ALL($2::uuid[])
          ),
          main AS (
              SELECT m.artist_id, m.is_style, g.name
@@ -203,6 +207,7 @@ async fn tune(connection: &mut PgConnection, layout: LayoutKey, drawn: usize) ->
          ORDER BY a.id, c.url",
     )
     .bind(layout.id)
+    .bind(crate::import::special::special_purpose())
     .fetch_all(&mut *connection)
     .await?;
 

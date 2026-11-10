@@ -24,6 +24,7 @@ use crate::api::listening::{Dial, Nebula, radio_here, radio_of};
 use crate::api::relations::{Why, why_many};
 use crate::api::spectrum::{self, Spectrum};
 use crate::app::AppState;
+use crate::import::special::special_purpose;
 use crate::layout::tiles::brightness;
 
 pub fn routes() -> Router<AppState> {
@@ -730,6 +731,10 @@ async fn run_search(pool: &PgPool, term: &str) -> sqlx::Result<Found> {
     // first, then how many people listen to the artist. Listeners beat
     // where the match falls, or searching "beatles" leads with a band called
     // "Beatless" simply because the word starts its name.
+    //
+    // MusicBrainz's special purpose artists are not acts, and are never an
+    // answer: "Various Artists" is on the sky until the next layout leaves it
+    // out, and a person naming the artist they love must not be offered it.
     let rows = sqlx::query_as::<_, (i32, String, Option<String>, Option<f32>, Option<f32>)>(
         "SELECT a.id, a.name, a.comment, p.x, p.y
          FROM artist a
@@ -737,6 +742,7 @@ async fn run_search(pool: &PgPool, term: &str) -> sqlx::Result<Found> {
              AND p.layout_id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
          LEFT JOIN artist_listeners al ON al.artist_id = a.id
          WHERE a.name ILIKE '%' || $1 || '%'
+           AND a.mbid <> ALL($2::uuid[])
          ORDER BY
              (lower(a.name) = lower($1)) DESC,
              COALESCE(al.listeners, 0) DESC,
@@ -746,6 +752,7 @@ async fn run_search(pool: &PgPool, term: &str) -> sqlx::Result<Found> {
          LIMIT 12",
     )
     .bind(term)
+    .bind(special_purpose())
     .fetch_all(pool)
     .await?;
 
@@ -947,6 +954,7 @@ async fn run_nearby(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f3
          WHERE l.id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
            AND p.x BETWEEN $1 AND $3
            AND p.y BETWEEN $2 AND $4
+           AND a.mbid <> ALL($6::uuid[])
          ORDER BY COALESCE(al.listeners, 0) DESC, a.name
          LIMIT $5",
     )
@@ -955,6 +963,8 @@ async fn run_nearby(pool: &PgPool, min_x: f32, min_y: f32, max_x: f32, max_y: f3
     .bind(max_x)
     .bind(max_y)
     .bind(NEARBY_LIMIT)
+    // Not acts: see `run_search`.
+    .bind(special_purpose())
     .fetch_all(pool)
     .await?;
 
