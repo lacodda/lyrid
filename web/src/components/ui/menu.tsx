@@ -1,7 +1,7 @@
 import { Menu as Base } from '@base-ui/react/menu'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from 'dowel-ui'
-import { usePopupContainer } from './layer'
+import { popupRoom, usePopupContainer } from './layer'
 
 /*
  * Menu.
@@ -26,6 +26,8 @@ import { usePopupContainer } from './layer'
 export const menuPopupVariants = cva(
   [
     'min-w-40 rounded-md border border-line bg-raise p-1 text-text shadow-raise',
+    // A long menu scrolls inside the window rather than running off it.
+    popupRoom,
     'focus-visible:outline-none',
     '[transition:opacity_var(--duration-quick)_var(--ease-out),transform_var(--duration-quick)_var(--ease-out)]',
     'data-[closed]:scale-[0.98] data-[closed]:opacity-0',

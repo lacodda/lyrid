@@ -17,7 +17,7 @@
     "@base-ui/react": "^1.9.0",
     "@tailwindcss/vite": "^4.3.4",
     "class-variance-authority": "^0.7.1",
-    "dowel-ui": "^0.41.0",
+    "dowel-ui": "^0.43.0",
     "i18next": "^26.7.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

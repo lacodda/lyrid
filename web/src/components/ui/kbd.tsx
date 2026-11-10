@@ -1,6 +1,10 @@
 import { Fragment, type HTMLAttributes } from 'react'
 import { cn } from 'dowel-ui'
-import { isApplePlatform, parseKeys, strokeParts } from './shortcut'
+import { isApplePlatform, keyLabel, parseKeys, strokeParts } from './shortcut'
+
+// The names of the keys live with the notation, where a product without
+// Tailwind can take them; this export keeps the place they were first found.
+export { keyLabel }
 
 /*
  * Kbd.
@@ -20,35 +24,6 @@ import { isApplePlatform, parseKeys, strokeParts } from './shortcut'
  * English the product cannot translate, and the notation has no key by that
  * name, so it cannot be mistaken for one.
  */
-
-/** What a key is called on this platform. `Mod` is the one that differs most:
- * command on Apple platforms, control everywhere else. */
-export function keyLabel(key: string, apple: boolean = isApplePlatform()): string {
-  const shared: Record<string, string> = {
-    Enter: '↵',
-    Escape: 'Esc',
-    ArrowUp: '↑',
-    ArrowDown: '↓',
-    ArrowLeft: '←',
-    ArrowRight: '→',
-    Backspace: '⌫',
-    Delete: 'Del',
-    Tab: '⇥',
-    Space: '␣',
-    PageUp: 'PgUp',
-    PageDown: 'PgDn',
-  }
-  const perPlatform: Record<string, [apple: string, other: string]> = {
-    Mod: ['⌘', 'Ctrl'],
-    Ctrl: ['⌃', 'Ctrl'],
-    Alt: ['⌥', 'Alt'],
-    Shift: ['⇧', 'Shift'],
-  }
-
-  const platform = perPlatform[key]
-  if (platform) return apple ? platform[0] : platform[1]
-  return shared[key] ?? key
-}
 
 export interface KbdProps extends HTMLAttributes<HTMLElement> {
   /** A shortcut in the line's notation - `Mod+K`, `G D`, `?`. Given this, the

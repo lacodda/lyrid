@@ -45,7 +45,9 @@ export const selectTriggerVariants = cva([fieldClasses, 'flex items-center justi
 
 export const selectPopupVariants = cva(
   [
-    'max-h-[min(24rem,var(--available-height))] overflow-y-auto',
+    // The room an anchored popup has (`popupRoom` in layer.tsx), with the
+    // height stopped sooner: a list of options is read, not paged through.
+    'max-h-[min(24rem,var(--available-height))] max-w-[var(--available-width)] overflow-y-auto overscroll-contain',
     'rounded-md border border-line bg-raise p-1 text-text shadow-raise',
     'focus-visible:outline-none',
     '[transition:opacity_var(--duration-quick)_var(--ease-out),transform_var(--duration-quick)_var(--ease-out)]',
@@ -193,7 +195,11 @@ export function SelectItem({
   className,
   children,
   ...props
-}: Base.Item.Props & { indicator?: boolean }) {
+}: Base.Item.Props & {
+  /** Draw the tick on the chosen item. Pass `false` for a list where the choice
+   * is obvious some other way. */
+  indicator?: boolean
+}) {
   return (
     <Base.Item className={cn(selectItemVariants(), className)} {...props}>
       {children}

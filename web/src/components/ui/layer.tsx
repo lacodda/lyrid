@@ -85,6 +85,15 @@ export function usePopupContainer(): RefObject<HTMLElement | null> | undefined {
   return useContext(LayerContext)?.host
 }
 
+/** The room a popup placed against an anchor has: no more, on either axis,
+ * than its positioner says is left between the anchor and the window's edges
+ * (`--available-width`, `--available-height`), and scrolling inside itself
+ * past that - without handing the scroll on to the page when it reaches an
+ * end. Both axes, because a ceiling on one is a defect waiting for the long
+ * case: the short example on the stand always fits. Held, in a browser, by
+ * `tests/ceilings.test.ts`. */
+export const popupRoom = 'max-h-[var(--available-height)] max-w-[var(--available-width)] overflow-y-auto overscroll-contain'
+
 /** The floor of a layer above `rung`, as the frame declares it: one above the
  * larger of the rung and the floor it is nested in. `--z-layer` is unset
  * outside every layer, and the fallback makes the rung win there. */

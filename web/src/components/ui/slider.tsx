@@ -25,20 +25,26 @@ import { cn } from 'dowel-ui'
 export interface SliderProps {
   /** A number for one thumb, an array for a range. */
   value?: number | readonly number[]
+  /** The starting value for an uncontrolled slider: a number, or an array for a range. */
   defaultValue?: number | readonly number[]
   /* `readonly` because that is what Base UI hands over, and narrowing it here
    * only moves the cast into every caller. */
+  /** Called on every change while the thumb moves, with a number or an array to match `value`. */
   onValueChange?: (value: number | readonly number[]) => void
   /** Fires once when the drag ends, for the expensive thing a product does
    * not want to run on every pixel of movement. */
   onValueCommitted?: (value: number | readonly number[]) => void
+  /** The lowest value; Base UI's default is `0`. */
   min?: number
+  /** The highest value; Base UI's default is `100`. */
   max?: number
+  /** The increment a thumb moves by; Base UI's default is `1`. */
   step?: number
   /** How close the thumbs of a range may come, in steps. */
   minStepsBetweenValues?: number
   /** How the value reads when it is shown: `Intl.NumberFormat` options. */
   format?: Intl.NumberFormatOptions
+  /** The direction the track runs. A vertical slider is a fixed `h-40` tall. */
   orientation?: 'horizontal' | 'vertical'
   /** Show the current value beside the track. Off by default: on a row of
    * settings the numbers are noise, and where the figure matters a
@@ -53,8 +59,11 @@ export interface SliderProps {
    * which is right for one and merely adequate for two: a range wants
    * "Lowest price" and "Highest price", not the same word twice. */
   getThumbLabel?: (index: number) => string
+  /** Stops the slider taking input. */
   disabled?: boolean
+  /** The field name, for a form that posts the value. */
   name?: string
+  /** Names the slider as a group, and is the fallback label of every thumb. */
   'aria-label'?: string
   className?: string
 }

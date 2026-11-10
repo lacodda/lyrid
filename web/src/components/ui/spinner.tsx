@@ -10,12 +10,14 @@ import { cn } from 'dowel-ui'
  * does have to say *something* to a screen reader, or a page that is busy is
  * silently identical to a page that is empty.
  *
- * Under `prefers-reduced-motion` the theme stops the animation. That is not a
+ * Under `prefers-reduced-motion` the ring stands still, and says so itself
+ * (`motion-reduce:animate-none`) rather than leaving it to the theme's rule,
+ * which would run the turn once and stop wherever it ended. That is not a
  * detail: for some readers a spinning thing is not decoration but a symptom.
- * A stopped spinner still says "busy" through `role`, which is the part that
- * carried the meaning all along.
+ * A still ring keeps its gap and still says "busy" through `role`, which is
+ * the part that carried the meaning all along.
  */
-export const spinnerVariants = cva('inline-block animate-spin rounded-full border-2 border-current', {
+export const spinnerVariants = cva('inline-block animate-spin motion-reduce:animate-none rounded-full border-2 border-current', {
   variants: {
     size: {
       sm: 'size-3.5 border-[1.5px]',

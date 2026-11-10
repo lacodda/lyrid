@@ -246,9 +246,14 @@ export function ComboboxItem({ className, ...props }: Base.Item.Props) {
   return <Base.Item className={cn(comboboxItemVariants(), className)} {...props} />
 }
 
-/** What is shown when nothing matched. The words are the product's. */
+/** What is shown when nothing matched. The words are the product's.
+ *
+ * Mounted all the time for its announcement, so its padding was spent over
+ * every list that did match - a 24px gap above the rows (found by austeris).
+ * It takes no room while it is empty; not `hidden`, which would take the live
+ * region out of the page and its announcement with it. */
 export function ComboboxEmpty({ className, ...props }: Base.Empty.Props) {
-  return <Base.Empty className={cn('px-2 py-3 text-center text-sm text-faint', className)} {...props} />
+  return <Base.Empty className={cn('px-2 py-3 text-center text-sm text-faint empty:p-0', className)} {...props} />
 }
 
 /** One chosen value, in a multiple combobox. Focusable, so it can be reached

@@ -26,13 +26,22 @@ export interface SwitchProps {
   /** The words next to the switch. A switch with no label is a light with no
    * caption - give `aria-label` if the meaning is genuinely in the context. */
   children?: ReactNode
+  /** Whether the switch is on, when the caller owns the state. Pair it with
+   * `onCheckedChange`. */
   checked?: boolean
+  /** Whether the switch starts on, when it manages its own state. */
   defaultChecked?: boolean
+  /** Told the new state when the switch is flipped. */
   onCheckedChange?: (checked: boolean) => void
+  /** The switch cannot be flipped; it and its label dim. */
   disabled?: boolean
+  /** Marks the switch as required for a form. */
   required?: boolean
+  /** The state shows but cannot be changed by the reader. */
   readOnly?: boolean
+  /** The field name submitted with a form. */
   name?: string
+  /** Names the switch for a screen reader when it has no `children`. */
   'aria-label'?: string
   className?: string
 }

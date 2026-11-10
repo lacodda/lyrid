@@ -16,6 +16,7 @@ import { fieldClasses } from './input'
  * reports its own height and never shrinks back.
  */
 export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+  /** A ref to the underlying `<textarea>` element, as a function or an object. */
   ref?: Ref<HTMLTextAreaElement>
   /** Grow to fit the content instead of scrolling. */
   autoResize?: boolean

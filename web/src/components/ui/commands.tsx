@@ -43,6 +43,10 @@ import {
  *     focus, which they press. A command declared `within` an element answers
  *     only while the focus is inside it, and it wins over the rest of the
  *     application there.
+ *   - **When a key is answered.** After whatever has the focus has had its
+ *     turn, so a dialog's Escape and a list's arrows stay theirs - unless the
+ *     command is declared `capture`, and takes the key first: an editor's own
+ *     keymap would otherwise keep a key the person rebound onto it.
  *   - **Conflicts.** Two commands on the same keys in the same place, or one
  *     on a prefix of the other's sequence, cannot both work. The one declared
  *     first keeps the keys - mounted earlier, or earlier in the tree when
@@ -80,6 +84,25 @@ export interface Command {
   whileTyping?: boolean
   /** Answer only while the focus is inside this element. */
   within?: RefObject<Element | null>
+  /**
+   * Answer before whatever has the focus sees the key - in the capture phase,
+   * rather than after it has had its turn. For a key the application keeps
+   * even from an editor or a terminal with a keymap of its own: without it,
+   * the editor answers any key its keymap binds and calls `preventDefault`,
+   * and a command the person rebound onto that key is listed with it and does
+   * nothing there.
+   */
+  capture?: boolean
+  /**
+   * Whether a list offers it to be run - the palette. Every command with
+   * something to run is offered, except one declared `within`, whose work is
+   * usually about where the focus is. `true` offers one whose key belongs in
+   * one place but whose work does not need the focus there: folding in an
+   * editor folds the editor the person was last in, wherever the focus is
+   * now. `false` keeps one out - the command that opens the palette, which
+   * would do nothing from inside it.
+   */
+  offered?: boolean
 }
 
 /** A command as the palette and the sheet read it. */
@@ -92,8 +115,8 @@ export interface ListedCommand {
    * and without any it lost to a conflict. */
   keys: string[]
   /** Present when it can be run from a list - it has something to run, it is
-   * enabled, and it is not tied to where the focus is. The palette lists
-   * exactly these. */
+   * enabled, and it is offered: not tied to where the focus is, or declared
+   * to be offered anyway. The palette lists exactly these. */
   run?: () => void
 }
 
@@ -195,6 +218,8 @@ function signatureOf(commands: readonly Command[]): string {
         command.whileTyping ? 1 : 0,
         command.run ? 1 : 0,
         refId(command.within),
+        command.capture ? 1 : 0,
+        command.offered === undefined ? '' : command.offered ? 1 : 0,
       ].join('\u0000'),
     )
     .join('\u0001')
@@ -281,7 +306,8 @@ function read(): Snapshot {
       // one line in a list.
       if (seen.has(command.id)) return
       seen.add(command.id)
-      const runnable = command.run !== undefined && command.enabled !== false && command.within === undefined
+      const offered = command.offered ?? command.within === undefined
+      const runnable = command.run !== undefined && command.enabled !== false && offered
       list.push({
         id: command.id,
         label: command.label,
@@ -330,17 +356,11 @@ function answers(binding: Placed, target: Element | null, stroke: Stroke): boole
   return true
 }
 
-function onKeyDown(event: KeyboardEvent): void {
-  if (event.defaultPrevented) return
-  // A key held down while a sequence waits is the same key, not the next one.
-  if (event.repeat && pending !== null) return
-  const stroke = strokeOf(event)
-  if (stroke === null) return
+/** What the list makes of the keys typed so far: the binding they finish, or
+ * the bindings they begin, at the innermost place that has either. */
+type Answer = { finished: Placed } | { begun: Placed[] }
 
-  const typed = pending === null ? [stroke] : [...pending.strokes, stroke]
-  dropPending()
-
-  const target = event.target instanceof Element ? event.target : null
+function resolve(target: Element | null, typed: Stroke[], stroke: Stroke): Answer | null {
   const live = place().kept.filter(
     (binding) => binding.command.run !== undefined && answers(binding, target, stroke),
   )
@@ -349,19 +369,54 @@ function onKeyDown(event: KeyboardEvent): void {
   for (const depth of depths) {
     const here = live.filter((binding) => depthOf(binding.scope) === depth)
     const exact = here.find((binding) => binding.steps.length === typed.length && startsWith(binding.steps, typed))
-    if (exact) {
-      event.preventDefault()
-      registrations.get(exact.token)?.commands[exact.index]?.run?.()
-      return
-    }
-    if (here.some((binding) => binding.steps.length > typed.length && startsWith(binding.steps, typed))) {
-      event.preventDefault()
-      pending = { strokes: typed, timer: setTimeout(dropPending, SEQUENCE_WINDOW) }
-      return
-    }
+    if (exact) return { finished: exact }
+    const begun = here.filter((binding) => binding.steps.length > typed.length && startsWith(binding.steps, typed))
+    if (begun.length > 0) return { begun }
   }
-  // Nothing answers. A key that ended a sequence is spent on ending it.
+  return null
 }
+
+/**
+ * The keyboard, heard twice: in the capture phase, before whatever has the
+ * focus, and in the bubble phase, after it.
+ *
+ * Both phases ask the same question of the same list, so where a key is
+ * answered does not depend on the phase. What the phase decides is only when
+ * the answer is acted on: a command declared `capture` takes the key on the
+ * way down, before an editor's keymap can; every other command waits for the
+ * way back up, so that something nearer - a dialog's Escape, a list's arrows
+ * - keeps a key it handles.
+ */
+function onKeyDown(event: KeyboardEvent, capturing: boolean): void {
+  if (event.defaultPrevented) return
+  // A key held down while a sequence waits is the same key, not the next one.
+  if (event.repeat && pending !== null) return
+  const stroke = strokeOf(event)
+  if (stroke === null) return
+
+  const typed = pending === null ? [stroke] : [...pending.strokes, stroke]
+  const answer = resolve(event.target instanceof Element ? event.target : null, typed, stroke)
+  if (capturing) {
+    const takes =
+      answer !== null &&
+      ('finished' in answer ? answer.finished.command.capture : answer.begun.some((binding) => binding.command.capture))
+    // Not this command's phase: the sequence waits, untouched, for the other.
+    if (!takes) return
+  }
+  dropPending()
+
+  // Nothing answers. A key that ended a sequence is spent on ending it.
+  if (answer === null) return
+  event.preventDefault()
+  if ('finished' in answer) {
+    registrations.get(answer.finished.token)?.commands[answer.finished.index]?.run?.()
+  } else {
+    pending = { strokes: typed, timer: setTimeout(dropPending, SEQUENCE_WINDOW) }
+  }
+}
+
+const onKeyDownCapturing = (event: KeyboardEvent) => onKeyDown(event, true)
+const onKeyDownBubbling = (event: KeyboardEvent) => onKeyDown(event, false)
 
 let listening = false
 let reportScheduled = false
@@ -392,10 +447,12 @@ function scheduleReport(): void {
 function changed(): void {
   version++
   if (registrations.size > 0 && !listening && typeof document !== 'undefined') {
-    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('keydown', onKeyDownCapturing, true)
+    document.addEventListener('keydown', onKeyDownBubbling)
     listening = true
   } else if (registrations.size === 0 && listening) {
-    document.removeEventListener('keydown', onKeyDown)
+    document.removeEventListener('keydown', onKeyDownCapturing, true)
+    document.removeEventListener('keydown', onKeyDownBubbling)
     listening = false
     dropPending()
   }

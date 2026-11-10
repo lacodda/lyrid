@@ -23,6 +23,11 @@ import { cn } from 'dowel-ui'
 export const toastVariants = cva(
   [
     'relative w-[min(22rem,calc(100vw-2rem))] overflow-hidden',
+    // Never taller than the window. The sentence is the product's, and an
+    // error that quotes what failed can run long: the toast becomes a column
+    // and the description is what gives way, so the title and the action
+    // stay in reach while it scrolls.
+    'flex max-h-[calc(100dvh-2rem)] flex-col',
     'rounded-lg border border-line bg-raise p-3 pl-4 text-text shadow-raise',
     // The stripe. `before` rather than a border, so the corner radius stays
     // the panel's own.
@@ -59,12 +64,18 @@ export const createToastManager = Base.createToastManager
 
 /** The heading. Base UI points the toast's `aria-labelledby` at it. */
 export function ToastTitle({ className, ...props }: Base.Title.Props) {
-  return <Base.Title className={cn('text-sm font-semibold', className)} {...props} />
+  return <Base.Title className={cn('shrink-0 text-sm font-semibold', className)} {...props} />
 }
 
-/** The sentence under it, and the toast's `aria-describedby`. */
+/** The sentence under it, and the toast's `aria-describedby`. The part that
+ * scrolls when the sentence is longer than the window. */
 export function ToastDescription({ className, ...props }: Base.Description.Props) {
-  return <Base.Description className={cn('mt-0.5 text-xs text-dim', className)} {...props} />
+  return (
+    <Base.Description
+      className={cn('mt-0.5 min-h-0 overflow-y-auto overscroll-contain text-xs text-dim', className)}
+      {...props}
+    />
+  )
 }
 
 /** The one thing the reader can do about it: undo, or go and look. */
@@ -72,7 +83,8 @@ export function ToastAction({ className, ...props }: Base.Action.Props) {
   return (
     <Base.Action
       className={cn(
-        'mt-2 inline-flex h-7 cursor-pointer items-center rounded-md px-2 text-xs font-medium',
+        // Its own width at the start of the column, not the toast's.
+        'mt-2 inline-flex h-7 shrink-0 cursor-pointer items-center self-start rounded-md px-2 text-xs font-medium',
         'bg-accent-soft text-accent transition-colors hover:bg-accent-soft/60',
         'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent',
         className,
@@ -106,7 +118,7 @@ export interface ToastProps extends Base.Root.Props, VariantProps<typeof toastVa
 /** One toast. The tone comes from the caller or from `toast.type`, so a
  * product that raises them through the manager gets the stripe for free. */
 export function Toast({ tone, className, toast, ...props }: ToastProps) {
-  const fromType = TONE_FOR_TYPE[toast.type ?? ''] ?? undefined
+  const fromType = toast.type === undefined ? undefined : TONE_FOR_TYPE[toast.type]
   return (
     <Base.Root
       toast={toast}
@@ -140,8 +152,11 @@ export function ToastViewport({ container, className, ...props }: ToastViewportP
     <Base.Portal container={container}>
       <Base.Viewport
         className={cn(
-          'fixed bottom-4 right-4 flex w-[min(22rem,calc(100vw-2rem))] flex-col-reverse gap-2',
-          '[z-index:var(--z-toast)]',
+          // The stack is held to the window as well as each toast in it: a
+          // toast is a flex item that clips, so it can shrink, and its
+          // description scrolls.
+          'fixed bottom-4 right-4 flex max-h-[calc(100dvh-2rem)] w-[min(22rem,calc(100vw-2rem))] flex-col-reverse gap-2',
+          '[z-index:var(--z-toast)] print:hidden',
           className,
         )}
         {...props}

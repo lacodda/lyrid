@@ -69,6 +69,7 @@ export interface KeyValueRowProps {
   /** What it is. A node rather than a string: half the values in a real panel
    * are a Badge, a RelativeTime or a link. */
   children: ReactNode
+  /** Dresses the pair as a whole when the layout is `stacked`, and the term alone in `rows`. */
   className?: string
 }
 

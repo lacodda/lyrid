@@ -37,12 +37,18 @@ import { LayerProvider } from './layer'
  * in kilna, which opened underneath the drawer - rides a layer above it.
  */
 
-/** The Viewport: fixed to the whole window, pushing the popup to one edge.
+/** The Viewport: the whole window, pushing the popup to one edge.
  *
  * It is separate from the popup because a drawer that is its own positioner
  * cannot be scrolled independently of where it sits - and the panel needs to
- * scroll while the edge it is pinned to does not move. */
-const drawerViewportVariants = cva('fixed inset-0 flex', {
+ * scroll while the edge it is pinned to does not move.
+ *
+ * The edge is chosen on Base UI's Viewport itself, the popup's own parent.
+ * It used to be chosen on a frame around it, while the Viewport filled the
+ * frame's width and laid the popup out from its start - so a drawer asked for
+ * from the right opened on the left, and nothing but a reader's eye (and
+ * austeris's) noticed: the stand photographs its overlays closed. */
+const drawerViewportVariants = cva('flex w-full', {
   variants: {
     side: {
       right: 'justify-end',
@@ -177,8 +183,8 @@ export function DrawerPopup({
   return (
     <Base.Portal ref={portal} container={container}>
       {backdrop && <DrawerBackdrop />}
-      <div className={cn(drawerViewportVariants({ side }), '[z-index:var(--z-modal)]')}>
-        <Base.Viewport className="flex w-full">
+      <div className="fixed inset-0 flex [z-index:var(--z-modal)]">
+        <Base.Viewport className={drawerViewportVariants({ side })}>
           <Base.Popup
             className={cn(drawerPopupVariants({ side, size }), className)}
             {...props}

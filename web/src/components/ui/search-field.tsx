@@ -45,6 +45,7 @@ export interface SearchFieldProps
    * answers to now, not the ones it was written with.
    */
   shortcut?: SearchShortcut
+  /** A ref to the `<input>` itself, not the wrapper around it. */
   ref?: Ref<HTMLInputElement>
 }
 

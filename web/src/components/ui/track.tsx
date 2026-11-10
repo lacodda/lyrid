@@ -83,6 +83,7 @@ export interface TrackSegment extends SegmentInput {
 export interface TrackProps
   extends Omit<HTMLAttributes<HTMLDivElement>, 'children'>,
     VariantProps<typeof trackVariants> {
+  /** The stretches to draw: each has a `key`, a `start` and an `end`, and optionally a `tone` and a `label`. */
   segments: TrackSegment[]
   /** The value the left edge stands for. Defaults to the earliest segment. */
   from?: number

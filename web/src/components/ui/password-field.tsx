@@ -29,8 +29,11 @@ import { fieldClasses } from './input'
  */
 
 export interface PasswordFieldProps {
+  /** The controlled password. */
   value?: string
+  /** The starting password of an uncontrolled field. */
   defaultValue?: string
+  /** Called with the new text on every change. */
   onValueChange?: (value: string) => void
   /** What the reveal button is called while the password is hidden. */
   showLabel: string
@@ -38,14 +41,25 @@ export interface PasswordFieldProps {
   hideLabel: string
   /** `current-password` for a login, `new-password` for a sign-up. */
   autoComplete?: string
+  /** Shown in the box while it is empty. */
   placeholder?: string
+  /** Turns the field and its reveal button off. */
   disabled?: boolean
+  /** The password can be read and selected but not changed. */
   readOnly?: boolean
+  /** Marks the field as required, for a form to check. */
   required?: boolean
+  /** The name the password is submitted under in a form. */
   name?: string
+  /** The `id` of the input, which the reveal button controls. A generated one
+   * if omitted. */
   id?: string
+  /** A ref to the `<input>`, to focus it after a failed sign-in. */
   ref?: Ref<HTMLInputElement>
+  /** Names the field for a screen reader, when there is no visible label. */
   'aria-label'?: string
+  /** The `id` of the element that describes the field - the rules a new
+   * password must meet. */
   'aria-describedby'?: string
   className?: string
 }
