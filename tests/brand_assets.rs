@@ -36,7 +36,7 @@ const L: &str = "assets/logo.svg";
 ///
 /// The bands are the line's, not this project's: S up to 27 px, M to 63, L
 /// above. Kept beside the assertions rather than imported, because the
-/// generator that writes the files is JavaScript and this is the independent
+/// generator that writes the files is `lyrn assets` and this is the independent
 /// reading of the same rule.
 fn level_for(size: u32) -> &'static str {
     match size {
