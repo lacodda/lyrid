@@ -228,7 +228,10 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
 
     let harvest = read_dump(args, &canon)?;
 
-    let version = args.version.clone().unwrap_or_else(|| default_version(args, time::OffsetDateTime::now_utc().date()));
+    let version = args
+        .version
+        .clone()
+        .unwrap_or_else(|| default_version(args, time::OffsetDateTime::now_utc().date()));
     tracing::info!(
         entities = harvest.entities,
         with_mbid = harvest.with_mbid,
@@ -521,9 +524,9 @@ fn default_version(args: &Args, today: time::Date) -> String {
         .and_then(|path| path.file_name())
         .map(|name| name.to_string_lossy().into_owned())
         .or_else(|| args.url.as_ref().map(|url| url.rsplit('/').next().unwrap_or(url).to_string()));
-    name.as_deref().and_then(date_in).unwrap_or_else(|| {
-        format!("{:04}{:02}{:02}", today.year(), u8::from(today.month()), today.day())
-    })
+    name.as_deref()
+        .and_then(date_in)
+        .unwrap_or_else(|| format!("{:04}{:02}{:02}", today.year(), u8::from(today.month()), today.day()))
 }
 
 /// The first eight digits in a row that make a plausible dump date.
