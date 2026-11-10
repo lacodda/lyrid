@@ -90,8 +90,10 @@ pub struct Args {
     pub url: Option<String>,
 
     /// The dump version, recorded so the database can say which vintage of
-    /// facts it holds. The `latest-` dumps carry no version in their name, so
-    /// this defaults to `latest`.
+    /// facts it holds. By default the date in the dump's file name or address
+    /// (`wikidata-20260801-all.json.bz2`), and for a `latest-` dump, which
+    /// carries none, the day the read began: a fixed word like `latest` would
+    /// make every later import overwrite the record of the one before.
     #[arg(long = "dump-version", value_name = "VERSION")]
     pub version: Option<String>,
 
@@ -226,7 +228,7 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
 
     let harvest = read_dump(args, &canon)?;
 
-    let version = args.version.clone().unwrap_or_else(|| "latest".to_string());
+    let version = args.version.clone().unwrap_or_else(|| default_version(args, time::OffsetDateTime::now_utc().date()));
     tracing::info!(
         entities = harvest.entities,
         with_mbid = harvest.with_mbid,
@@ -510,6 +512,36 @@ fn all_entities(entity: &Entity, property: &str) -> Vec<i32> {
         .unwrap_or_default()
 }
 
+/// The version an import is recorded under when none is given: the first run
+/// of eight digits in the dump's name that reads as a date, or `today`.
+fn default_version(args: &Args, today: time::Date) -> String {
+    let name = args
+        .dump
+        .as_ref()
+        .and_then(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .or_else(|| args.url.as_ref().map(|url| url.rsplit('/').next().unwrap_or(url).to_string()));
+    name.as_deref().and_then(date_in).unwrap_or_else(|| {
+        format!("{:04}{:02}{:02}", today.year(), u8::from(today.month()), today.day())
+    })
+}
+
+/// The first eight digits in a row that make a plausible dump date.
+fn date_in(name: &str) -> Option<String> {
+    let bytes = name.as_bytes();
+    (0..bytes.len().saturating_sub(7)).find_map(|at| {
+        let run = &bytes[at..at + 8];
+        let bounded = (at == 0 || !bytes[at - 1].is_ascii_digit()) && bytes.get(at + 8).is_none_or(|next| !next.is_ascii_digit());
+        if !bounded || !run.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        let text = std::str::from_utf8(run).ok()?;
+        let (year, month, day) = (&text[..4], &text[4..6], &text[6..]);
+        let plausible = ("2000".."2100").contains(&year) && ("01"..="12").contains(&month) && ("01"..="31").contains(&day);
+        plausible.then(|| text.to_string())
+    })
+}
+
 /// Writes everything in one transaction.
 async fn write(pool: &PgPool, canon: &HashMap<String, i32>, harvest: &Harvest, version: &str) -> Result<()> {
     // artist id -> facts, resolved from the MBIDs the pass keyed on.
@@ -741,6 +773,17 @@ async fn write_item_labels(tx: &mut sqlx::PgTransaction<'_>, resolved: &[(i32, &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dump_is_recorded_under_the_date_in_its_name() {
+        assert_eq!(date_in("wikidata-20260801-all.json.bz2").as_deref(), Some("20260801"));
+        assert_eq!(date_in("20261104-all.json.bz2").as_deref(), Some("20261104"));
+        // No date, a number too long to be one, and eight digits that are not
+        // a day of any month.
+        assert_eq!(date_in("latest-all.json.bz2"), None);
+        assert_eq!(date_in("dump-2026080112.json.bz2"), None);
+        assert_eq!(date_in("part-20261399.bz2"), None);
+    }
 
     const MBID_A: &str = "5b11f4ce-a62d-471e-81fc-a69a8278c7da";
     const MBID_B: &str = "9282c8b4-ca0b-4c6b-b7e3-4f7762dfc4d6";
