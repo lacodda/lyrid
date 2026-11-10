@@ -24,7 +24,7 @@ interface Props {
  * be put off like the mode: an expedition nobody asked to start yet is not one
  * to force.
  */
-export function Expedition({ onBegun, onLater }: Props) {
+export function HomePortChoice({ onBegun, onLater }: Props) {
   const { t } = useTranslation()
   const [term, setTerm] = useState('')
   const [stars, setStars] = useState<Hit[]>([])

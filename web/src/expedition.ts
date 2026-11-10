@@ -88,8 +88,7 @@ export function newlyFulfilled(before: Expedition, after: Expedition): number[] 
 
 /**
  * The echoes of one star in this person's sky: the next steps a contract about
- * that star's neighbourhood is fulfilled by, closest first as the server sends
- * them.
+ * that star's neighbourhood is fulfilled by, in the order the server sends them.
  */
 export function echoesOf(sky: PersonalSky, starId: number | null): Echo[] {
   if (starId === null) return []

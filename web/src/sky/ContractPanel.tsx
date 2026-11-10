@@ -11,8 +11,8 @@ interface Props {
   contract: Contract
   /**
    * The echoes of the contract's star in this person's sky: the stars that
-   * fulfil it, closest first. Named nowhere here -- an echo keeps its name until
-   * it is reached, as everywhere else in the fog.
+   * fulfil it, in the order the server lists them. Named nowhere here -- an echo
+   * keeps its name until it is reached, as everywhere else in the fog.
    */
   echoes: Echo[]
   /** Flies to a star and opens its card. */

@@ -14,7 +14,7 @@ import { fetchLabels, type Label } from '@/sky/labels'
 import { EMPTY_SKY, buildFog, chartLabels, chartedAt, type PersonalSky } from '@/sky/fog'
 import { bringOpenings, fetchPersonalSky, forget, openStar, remember as rememberStar, remembered as rememberedStars, type How } from '@/sky/openings'
 import { ModeChoice } from '@/ModeChoice'
-import { Expedition } from '@/Expedition'
+import { HomePortChoice } from '@/HomePortChoice'
 import { ContractPanel } from '@/sky/ContractPanel'
 import {
   NO_EXPEDITION,
@@ -862,7 +862,7 @@ export function App() {
   return (
     <main ref={mainRef} className="relative h-full overflow-hidden">
       {me && me.mode === null && !modeLater && <ModeChoice overview={overview} onChosen={setMe} onLater={() => setModeLater(true)} />}
-      {asksForHome(me) && !expeditionLater && <Expedition onBegun={onBegun} onLater={() => setExpeditionLater(true)} />}
+      {asksForHome(me) && !expeditionLater && <HomePortChoice onBegun={onBegun} onLater={() => setExpeditionLater(true)} />}
 
       <Sky
         onState={onState}
