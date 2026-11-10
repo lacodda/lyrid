@@ -4,7 +4,7 @@ import type { Found } from '@/api'
 import { order } from './found'
 
 const found = (stars: string[], labels: string[], scenes: string[]): Found => ({
-  stars: stars.map((name, id) => ({ id, name, comment: null, x: 0, y: 0 })),
+  stars: stars.map((name, id) => ({ id, mbid: `00000000-0000-0000-0000-${String(id).padStart(12, '0')}`, name, comment: null, x: 0, y: 0 })),
   labels: labels.map((name, id) => ({ id, name, artists: 1 })),
   scenes: scenes.map((name, qid) => ({ qid, name, artists: 1 })),
 })

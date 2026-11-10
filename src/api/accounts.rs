@@ -964,22 +964,7 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
     .fetch_all(pool)
     .await?;
 
-    // The stars opened here rather than heard elsewhere; those are the listens.
-    let openings = sqlx::query_as::<_, (uuid::Uuid, OffsetDateTime, String)>(
-        "SELECT artist_mbid, opened_at, how FROM star_opening WHERE user_id = $1 ORDER BY opened_at, artist_mbid",
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-
-    // The contracts as issued, with the moment each was fulfilled. Progress is
-    // not here because it is not held: it is the openings above, counted.
-    let contracts = sqlx::query_as::<_, (String, uuid::Uuid, i16, OffsetDateTime, Option<OffsetDateTime>)>(
-        "SELECT kind, star_mbid, goal, issued_at, done_at FROM contract WHERE user_id = $1 ORDER BY issued_at, id",
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
+    let (openings, contracts) = export_progress(pool, user_id).await?;
 
     Ok(Some(serde_json::json!({
         "exported_at": stamp(OffsetDateTime::now_utc()),
@@ -1016,24 +1001,8 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             "language": language,
             "subscribed_at": stamp(subscribed_at),
         })),
-        "openings": openings
-            .into_iter()
-            .map(|(mbid, opened_at, how)| serde_json::json!({
-                "artist_mbid": mbid,
-                "opened_at": stamp(opened_at),
-                "how": how,
-            }))
-            .collect::<Vec<_>>(),
-        "contracts": contracts
-            .into_iter()
-            .map(|(kind, star_mbid, goal, issued_at, done_at)| serde_json::json!({
-                "kind": kind,
-                "star_mbid": star_mbid,
-                "goal": goal,
-                "issued_at": stamp(issued_at),
-                "done_at": done_at.map(stamp),
-            }))
-            .collect::<Vec<_>>(),
+        "openings": openings,
+        "contracts": contracts,
         "listens": listens
             .into_iter()
             .map(|(listened_at, recording, artists, seconds, light, source)| serde_json::json!({
@@ -1046,6 +1015,50 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             }))
             .collect::<Vec<_>>(),
     })))
+}
+
+/// The game's part of an export: the stars opened here, and the contracts.
+async fn export_progress(pool: &PgPool, user_id: i32) -> sqlx::Result<(serde_json::Value, serde_json::Value)> {
+    // The stars opened here rather than heard elsewhere; those are the listens.
+    let openings = sqlx::query_as::<_, (uuid::Uuid, OffsetDateTime, String)>(
+        "SELECT artist_mbid, opened_at, how FROM star_opening WHERE user_id = $1 ORDER BY opened_at, artist_mbid",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    // The contracts as issued, with the moment each was fulfilled. Progress is
+    // not here because it is not held: it is the openings above, counted.
+    let contracts = sqlx::query_as::<_, (String, uuid::Uuid, i16, OffsetDateTime, Option<OffsetDateTime>)>(
+        "SELECT kind, star_mbid, goal, issued_at, done_at FROM contract WHERE user_id = $1 ORDER BY issued_at, id",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let openings = openings
+        .into_iter()
+        .map(|(mbid, opened_at, how)| {
+            serde_json::json!({
+                "artist_mbid": mbid,
+                "opened_at": stamp(opened_at),
+                "how": how,
+            })
+        })
+        .collect::<Vec<_>>();
+    let contracts = contracts
+        .into_iter()
+        .map(|(kind, star_mbid, goal, issued_at, done_at)| {
+            serde_json::json!({
+                "kind": kind,
+                "star_mbid": star_mbid,
+                "goal": goal,
+                "issued_at": stamp(issued_at),
+                "done_at": done_at.map(stamp),
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok((serde_json::Value::from(openings), serde_json::Value::from(contracts)))
 }
 
 /// A timestamp as RFC 3339, which is what a person's other tools can read.
