@@ -24,8 +24,12 @@ tiles/
 A tile's path is `{level}/{column}/{row}.bin`. Level `n` divides the sky into
 `2^n × 2^n` squares, so level 0 is one tile and level 6 is 4096.
 
-A tile that would be empty is not written. The client must treat a `404` as
-"no stars here", not as an error.
+A tile that would be empty is not written. The server answers an address
+inside the pyramid that has no file with `204 No Content`: an empty tile, and
+nothing a browser reports as a failure. An address the pyramid does not have -
+past `max_level`, or outside a level's grid - is a `404`. A client reads both,
+and anything that does not start with the magic, as "no stars here", never as
+an error: a development server answers a missing file with a page of HTML.
 
 ## `sky.json`
 

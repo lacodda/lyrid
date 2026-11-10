@@ -79,7 +79,19 @@ pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
     // A day, and not `immutable`: both would be promises about the URL, and
     // these URLs are reused by the next pyramid. A day makes the second visit
     // instant and still lets a rebuilt sky reach everyone by the following one.
-    let tiles = ServeDir::new(root.join("tiles"));
+    //
+    // A tile that would hold no stars is never written, and the pyramid has
+    // such holes on a small sky (three of level 2 on the stand's slice). The
+    // client reads a miss as "no stars here", but a browser prints every 404
+    // as a red failure in the console of every visitor -- noise that looks
+    // like a broken sky and buries the errors that matter. So a miss inside
+    // the pyramid answers 204, no content, and only an address the pyramid
+    // does not have is a 404. The fallback gives its own status, which is
+    // why it is `fallback` and not `not_found_service`.
+    let tiles = ServeDir::new(root.join("tiles")).fallback(get({
+        let manifest = root.join("tiles/sky.json");
+        move |uri: axum::http::Uri| empty_tile(manifest.clone(), uri)
+    }));
     let tiles = tower::ServiceBuilder::new()
         .layer(SetResponseHeaderLayer::overriding(
             header::CACHE_CONTROL,
@@ -126,6 +138,43 @@ pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
         .nest_service("/tiles", tiles)
         .fallback_service(files.fallback(spa))
         .layer(TraceLayer::new_for_http())
+}
+
+/// A tile the pyramid has a place for and no file: 204, the empty tile. Any
+/// other miss is a 404.
+///
+/// The depth is read from the cut's own `sky.json` on every miss rather than
+/// once at start: filling a stand replaces the tiles under a running server,
+/// and a held depth would answer for the previous cut. Misses are a few per
+/// visit.
+async fn empty_tile(manifest: PathBuf, uri: axum::http::Uri) -> StatusCode {
+    let depth = tokio::fs::read(&manifest)
+        .await
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|sky| sky.get("max_level").and_then(serde_json::Value::as_u64));
+    match (depth, tile_address(uri.path())) {
+        (Some(depth), Some((level, col, row))) if within_pyramid(depth, level, col, row) => StatusCode::NO_CONTENT,
+        _ => StatusCode::NOT_FOUND,
+    }
+}
+
+/// `/level/col/row.bin`, as numbers.
+fn tile_address(path: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = path.trim_start_matches('/').split('/');
+    let level = parts.next()?.parse().ok()?;
+    let col = parts.next()?.parse().ok()?;
+    let row = parts.next()?.strip_suffix(".bin")?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((level, col, row))
+}
+
+/// Whether a pyramid `depth` levels deep has a tile at this address: level `n`
+/// is a grid of 2^n by 2^n.
+fn within_pyramid(depth: u64, level: u64, col: u64, row: u64) -> bool {
+    level <= depth && level < 32 && col < (1 << level) && row < (1 << level)
 }
 
 /// The SPA's entry point, answered with 200 for any client-side route.
@@ -258,6 +307,37 @@ mod tests {
             "a missing tile answered with the SPA: {:?}",
             String::from_utf8_lossy(&body)
         );
+    }
+
+    #[tokio::test]
+    async fn a_hole_in_the_pyramid_is_an_empty_tile_and_not_a_failure() {
+        // Level 1 of a pyramid two levels deep has four tiles; none is on disk
+        // here, as a tile with no stars never is. A 404 for it would print in
+        // red in every visitor's console.
+        let dir = static_root();
+        std::fs::write(
+            dir.path().join("tiles/sky.json"),
+            r#"{"min_x":-1,"min_y":-1,"max_x":1,"max_y":1,"max_level":2}"#,
+        )
+        .unwrap();
+        for (uri, expected) in [
+            ("/tiles/1/1/0.bin", StatusCode::NO_CONTENT),
+            ("/tiles/2/3/3.bin", StatusCode::NO_CONTENT),
+            // Past the deepest level, outside the grid, or not a tile at all.
+            ("/tiles/3/0/0.bin", StatusCode::NOT_FOUND),
+            ("/tiles/1/2/0.bin", StatusCode::NOT_FOUND),
+            ("/tiles/1/0/0.png", StatusCode::NOT_FOUND),
+            ("/tiles/1/0/0/0.bin", StatusCode::NOT_FOUND),
+            ("/tiles/nothing", StatusCode::NOT_FOUND),
+        ] {
+            let app = router(state(), Some(dir.path()));
+            let response = app.oneshot(Request::get(uri).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(response.status(), expected, "{uri}");
+        }
+        // And the tile that is there is still the tile.
+        let app = router(state(), Some(dir.path()));
+        let response = app.oneshot(Request::get("/tiles/0/0/0.bin").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]

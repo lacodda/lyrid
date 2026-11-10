@@ -66,7 +66,9 @@ export async function fetchSky(root = '/tiles', signal?: AbortSignal): Promise<S
  * **A tile is identified by its magic, never by the status code.** A dev
  * server answers a missing file with 200 and an HTML fallback page, and a
  * CDN or a single-page host may do the same; trusting the status turns that
- * page into a tile and throws on the first zoom.
+ * page into a tile and throws on the first zoom. A hole in the pyramid -- a
+ * tile with no stars, which is never written -- answers 204 on a stand, and its
+ * empty body falls out on the length check below.
  */
 export async function fetchTile(
   sky: Sky,
