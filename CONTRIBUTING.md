@@ -33,3 +33,18 @@ cargo run --release -- layout --tiles ./tiles
 cd web && pnpm install && pnpm dev        # the SPA
 cd docs/site && pnpm install && pnpm dev  # the documentation site
 ```
+
+## Releasing
+
+A release is a tag, its page on GitHub and the stand; nothing goes to a
+registry. [furca](https://lacodda.github.io/furca/)'s release engine carries
+it out from `release.toml`:
+
+```sh
+furca release plan   # the next version, and what stands in its way
+furca release run    # bump, changelog, format check, push, green CI, tag, deploy
+```
+
+The full gate is CI's: the run pushes the release commit and waits for
+`ci.yml` to be green on it before it tags. The release page ends with the
+checklist in `.github/release-notes.md`.

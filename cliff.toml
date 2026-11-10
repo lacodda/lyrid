@@ -34,6 +34,10 @@ commit_parsers = [
   { message = "^fix", group = "Bug Fixes" },
   { message = "^perf", group = "Performance" },
   { message = "^refactor", group = "Refactoring" },
+  # The changelog's own commits describe the changelog, not the product:
+  # without this the release page lists "Generate for v0.22.0" among the
+  # changes, while CHANGELOG.md trims it by hand.
+  { message = "^docs\\(changelog\\)", skip = true },
   { message = "^docs", group = "Documentation" },
   { message = "^test", group = "Testing" },
   { message = "^build", group = "Build" },
