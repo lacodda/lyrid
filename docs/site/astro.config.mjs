@@ -10,6 +10,9 @@ export default defineConfig({
 		starlight({
 			title: 'lyrid',
 			description: 'A music universe: a canonical sky of artists and genres you explore through real listening.',
+			// The 404 page is a content page (src/content/docs/404.md): Starlight's
+			// own route conflicts with it and warns on every build.
+			disable404Route: true,
 			logo: {
 				src: './src/assets/logo.svg',
 				alt: 'lyrid',
