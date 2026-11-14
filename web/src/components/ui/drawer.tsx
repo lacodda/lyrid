@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import { Drawer as Base } from '@base-ui/react/drawer'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from 'dowel-ui'
-import { DialogActions, DialogBody, DialogHeader } from './dialog'
+import { DialogActions, DialogBody, DialogHeader, openingFocus } from './dialog'
 import { LayerProvider } from './layer'
 
 /*
@@ -187,6 +187,8 @@ export function DrawerPopup({
         <Base.Viewport className={drawerViewportVariants({ side })}>
           <Base.Popup
             className={cn(drawerPopupVariants({ side, size }), className)}
+            // The dialog's rule: the body's first control, or the panel.
+            initialFocus={() => openingFocus(portal.current)}
             {...props}
           >
             <LayerProvider above="modal" mount={portal}>{children}</LayerProvider>

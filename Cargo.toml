@@ -20,8 +20,8 @@ axum = "0.8.9"
 bzip2 = "0.6.1"
 # The byte buffers Parquet's reader is handed: already in the tree through
 # axum, named here because the feed implements Parquet's reader over them.
-bytes = "1.11"
-clap = { version = "4.6.6", features = ["derive"] }
+bytes = "1.12"
+clap = { version = "4.6.7", features = ["derive"] }
 # Last.fm exports arrive as CSV with quoted fields that may hold commas and
 # line breaks: a reader that gets that right is a library, not twenty lines.
 csv = "1.4"
@@ -37,28 +37,28 @@ memchr = "2.8"
 # ListenBrainz publishes its daily listening as Parquet, already matched to
 # artists. Without arrow: rows are read through the record API, and only the
 # columns lyrid counts are fetched.
-parquet = { version = "60.0.0", default-features = false, features = ["zstd"] }
+parquet = { version = "60.1.0", default-features = false, features = ["zstd"] }
 quick-xml = "0.42"
-rand = "0.10.2"
+rand = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = "1.0.154"
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "migrate", "uuid", "time"] }
 tar = "0.4.46"
 # Direct, rather than through sqlx's re-export: the export formats timestamps
 # as RFC 3339, and sqlx enables `time` without its formatting feature.
 time = { version = "0.3.55", default-features = false, features = ["formatting"] }
-tokio = { version = "1.53.1", features = ["full"] }
+tokio = { version = "1.54.1", features = ["full"] }
 # Used directly for the ServiceBuilder that puts cache headers on the tiles;
 # the tests use its ServiceExt too.
 tower = { version = "0.5.3", features = ["util"] }
-tower-http = { version = "0.7.0", features = ["fs", "trace", "set-header"] }
+tower-http = { version = "0.7.1", features = ["fs", "trace", "set-header"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-ureq = "3.4"
+ureq = "3.5"
 # v5: a listen from a Last.fm file is identified by a UUID derived from its
 # names, so the same file uploaded twice is the same rows.
-uuid = { version = "1.26.0", features = ["serde", "v5"] }
-zstd = "0.14.0"
+uuid = { version = "1.29.2", features = ["serde", "v5"] }
+zstd = "0.14.4"
 
 [dev-dependencies]
 # The integration suites read `.env` for their own database variable, so the

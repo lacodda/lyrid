@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import { AlertDialog as Base } from '@base-ui/react/alert-dialog'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from 'dowel-ui'
-import { DialogActions, DialogBody, DialogHeader } from './dialog'
+import { DialogActions, DialogBody, DialogHeader, openingFocus } from './dialog'
 import { LayerProvider } from './layer'
 
 /*
@@ -69,8 +69,12 @@ export const ConfirmDialog = Base.Root
 export const ConfirmDialogTrigger = Base.Trigger
 
 /** What closes it - and the only thing that does, which is why a confirm
- * dialog with no `ConfirmDialogClose` inside it is a trap. */
-export const ConfirmDialogClose = Base.Close
+ * dialog with no `ConfirmDialogClose` inside it is a trap. It is also where
+ * the focus lands when the dialog opens: the answer that does no harm, so a
+ * reflexive Enter keeps rather than deletes. */
+export function ConfirmDialogClose(props: Base.Close.Props) {
+  return <Base.Close data-confirm-close="" {...props} />
+}
 
 /** The scrim. Darker than the Dialog's, because what is behind it is not just
  * out of reach for a moment - it is waiting on an answer. */
@@ -126,6 +130,11 @@ export function ConfirmDialogPopup({
           '[z-index:var(--z-modal)]',
           className,
         )}
+        // The keeping answer in the actions, then any close; else the
+        // dialog's rule.
+        initialFocus={() =>
+          openingFocus(portal.current, '[data-dialog-actions] [data-confirm-close]', '[data-confirm-close]')
+        }
         {...props}
       >
         <LayerProvider above="modal" mount={portal}>{children}</LayerProvider>

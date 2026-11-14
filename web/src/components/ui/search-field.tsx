@@ -1,4 +1,4 @@
-import { useCallback, useRef, type InputHTMLAttributes, type Ref } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type InputHTMLAttributes, type Ref } from 'react'
 import { cn } from 'dowel-ui'
 import { useCommandKeys, useCommands, type Command } from './commands'
 import { fieldClasses } from './input'
@@ -85,6 +85,25 @@ export function SearchField({
   const hint = useCommandKeys(shortcut?.id ?? '')[0]
 
   const showClear = clearLabel !== undefined && value !== ''
+  const showHint = !showClear && hint !== undefined
+
+  /* How wide the hint is, measured rather than guessed. The field kept a
+   * fixed room on the right that fitted `Ctrl K` and nothing longer, and since
+   * the hint is the key a person bound, `Ctrl Shift F` or `G › S` ran under
+   * the typed text. Measured before the first paint and again when the hint
+   * changes size - a font arriving late, a rebinding. */
+  const hintBox = useRef<HTMLSpanElement>(null)
+  const [hintWidth, setHintWidth] = useState(0)
+  useLayoutEffect(() => {
+    const element = hintBox.current
+    if (element === null) return
+    const measure = () => setHintWidth(element.offsetWidth)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [showHint, hint])
 
   return (
     <div className={cn('relative', className)}>
@@ -101,12 +120,14 @@ export function SearchField({
           // Room on the right for whatever sits there, and none when nothing
           // does - a field with a permanent gap looks broken.
           showClear && 'pr-8',
-          !showClear && hint !== undefined && 'pr-14',
+          // The hint's own width, and the gap either side of it.
+          showHint && 'pr-[calc(var(--hint-width)+var(--spacing)*4)]',
           // The browser's own clear affordance, in the operating system's
           // chrome. Ours is below.
           '[&::-webkit-search-cancel-button]:appearance-none',
         )}
         {...props}
+        style={showHint ? ({ '--hint-width': `${hintWidth}px`, ...props.style } as CSSProperties) : props.style}
       />
 
       {showClear && (
@@ -127,14 +148,16 @@ export function SearchField({
         </button>
       )}
 
-      {!showClear && hint !== undefined && (
+      {showHint && (
         // Decorative: the shortcut works whether or not it is read out, and a
         // screen reader announcing "Control K" inside a search box is noise.
-        <Kbd
-          keys={hint}
+        <span
+          ref={hintBox}
           aria-hidden
-          className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2"
-        />
+          className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2"
+        >
+          <Kbd keys={hint} />
+        </span>
       )}
     </div>
   )

@@ -59,6 +59,11 @@ export interface SliderProps {
    * which is right for one and merely adequate for two: a range wants
    * "Lowest price" and "Highest price", not the same word twice. */
   getThumbLabel?: (index: number) => string
+  /** What a thumb's value is read out as, in the product's words: a
+   * position in a recording is "1:23 of 3:45", not "83". Given the value as
+   * `format` writes it, the number, and the thumb's index. Without it a
+   * reader hears the formatted number. */
+  getValueText?: (formatted: string, value: number, index: number) => string
   /** Stops the slider taking input. */
   disabled?: boolean
   /** The field name, for a form that posts the value. */
@@ -68,7 +73,7 @@ export interface SliderProps {
   className?: string
 }
 
-export function Slider({ showValue = false, getThumbLabel, className, ...props }: SliderProps) {
+export function Slider({ showValue = false, getThumbLabel, getValueText, className, ...props }: SliderProps) {
   const vertical = props.orientation === 'vertical'
 
   /* Every thumb needs a name of its own, so the group's label is the fallback
@@ -89,7 +94,9 @@ export function Slider({ showValue = false, getThumbLabel, className, ...props }
     <Base.Root
       {...props}
       className={cn(
-        'flex items-center gap-3',
+        // Disabled is a look as well as a state: the track and the thumb fade
+        // together, and the pointer says why nothing moves.
+        'flex items-center gap-3 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50',
         vertical && 'h-40 flex-col',
         !vertical && 'w-full',
         className,
@@ -98,15 +105,19 @@ export function Slider({ showValue = false, getThumbLabel, className, ...props }
       <Base.Control
         className={cn(
           // The hit area, deliberately larger than what is drawn: a four-pixel
-          // target is a four-pixel target however pretty the track is.
+          // target is a four-pixel target however pretty the track is. It is
+          // the pointer floor across the track (`--target-min`, WCAG 2.5.8),
+          // which a 20px control was not.
           'flex touch-none items-center',
-          vertical ? 'h-full w-5 justify-center' : 'h-5 w-full flex-1',
+          vertical ? 'h-full w-(--target-min) justify-center' : 'h-(--target-min) w-full flex-1',
         )}
       >
         <Base.Track
           className={cn(
             'relative rounded-full bg-soft',
-            vertical ? 'h-full w-1.5' : 'h-1.5 w-full',
+            // Four pixels drawn: the line's weight for a track, as kilna's
+            // player drew it; the thumb is what is grabbed.
+            vertical ? 'h-full w-1' : 'h-1 w-full',
           )}
         >
           <Base.Indicator className={cn('rounded-full bg-accent', vertical ? 'w-full' : 'h-full')} />
@@ -115,6 +126,7 @@ export function Slider({ showValue = false, getThumbLabel, className, ...props }
               key={index}
               index={index}
               getAriaLabel={nameThumb}
+              getAriaValueText={getValueText}
               className={cn(
                 'size-4 rounded-full bg-accent shadow-lift',
                 'transition-[box-shadow,transform] duration-quick ease-out',

@@ -119,6 +119,40 @@ export interface DialogPopupProps
   backdrop?: boolean
 }
 
+/* Where the focus lands as a dialog opens, decided once for the dialog, the
+ * drawer and the confirm dialog.
+ *
+ * Base UI's default is the first thing that takes a Tab, and in a dialog with
+ * a close button in its header that is the cross: Enter or Space straight
+ * after opening dismissed the dialog, and the ring sat on the least important
+ * control on it (kilna's audit). So: the first control of the body - the
+ * field a form is opened to fill in - and where the body has none, the popup
+ * itself, which a screen reader announces by its title and description before
+ * anything is pressed. A confirm dialog asks `prefer` first: the answer that
+ * does no harm. A product that knows better passes `initialFocus`, which wins.
+ *
+ * Read off the portal rather than a ref on the popup, so a ref the product
+ * puts on the popup stays the product's. */
+const TABBABLE = 'a[href], button, input, select, textarea, [tabindex], [contenteditable="true"]'
+
+/** What `initialFocus` resolves to: an element, or `true` for Base UI's own
+ * choice when there is no popup to look in. `prefer` is asked in its order -
+ * a selector list would answer in the document's. */
+export function openingFocus(portal: HTMLElement | null, ...prefer: string[]): HTMLElement | true {
+  const popup = portal?.querySelector<HTMLElement>('[role="dialog"], [role="alertdialog"]')
+  if (popup == null) return true
+  for (const selector of prefer) {
+    const preferred = popup.querySelector<HTMLElement>(selector)
+    if (preferred !== null) return preferred
+  }
+  const body = popup.querySelector<HTMLElement>('[data-dialog-body]')
+  if (body === null) return popup
+  const first = [...body.querySelectorAll<HTMLElement>(TABBABLE)].find(
+    (element) => element.tabIndex >= 0 && !element.matches(':disabled') && element.closest('[hidden], [inert]') === null,
+  )
+  return first ?? popup
+}
+
 /** The dialog itself. Portalled, so it is not clipped by whatever it was
  * opened from. Put a `DialogHeader`, a `DialogBody` and `DialogActions`
  * inside it. */
@@ -137,6 +171,7 @@ export function DialogPopup({
       {backdrop && <DialogBackdrop />}
       <Base.Popup
         className={cn(dialogPopupVariants({ size }), '[z-index:var(--z-modal)]', className)}
+        initialFocus={() => openingFocus(portal.current)}
         {...props}
       >
         <LayerProvider above="modal" mount={portal}>{children}</LayerProvider>
@@ -176,6 +211,8 @@ export function DialogHeader({ action, className, children, ...props }: DialogHe
 export function DialogBody({ className, ...props }: ComponentProps<'div'>) {
   return (
     <div
+      // Where the dialog looks for the control to open on.
+      data-dialog-body
       className={cn(
         'min-h-0 flex-1 overflow-y-auto overscroll-contain px-5',
         // First or last in the popup, it takes the padding the missing part
@@ -199,14 +236,19 @@ export interface DialogActionsProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 /** Where the actions go, pinned to the bottom. Right-aligned, because the
- * primary action of a dialog belongs where the eye leaves the sentence. */
+ * primary action of a dialog belongs where the eye leaves the sentence.
+ *
+ * The row wraps: four buttons in a drawer's foot at 390px ran past its left
+ * edge (austeris, on a phone). Wrapped, the answer stays on the right of the
+ * last line, where the eye leaves the sentence. */
 export function DialogActions({ start, className, children, ...props }: DialogActionsProps) {
   return (
     <div
-      className={cn('mt-auto flex shrink-0 items-center justify-end gap-2 px-5 pt-4 pb-5', className)}
+      data-dialog-actions
+      className={cn('mt-auto flex shrink-0 flex-wrap items-center justify-end gap-2 px-5 pt-4 pb-5', className)}
       {...props}
     >
-      {start !== undefined && <div className="mr-auto flex items-center gap-2">{start}</div>}
+      {start !== undefined && <div className="mr-auto flex flex-wrap items-center gap-2">{start}</div>}
       {children}
     </div>
   )
