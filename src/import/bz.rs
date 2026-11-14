@@ -923,7 +923,7 @@ mod tests {
     #[test]
     fn a_decoder_not_asked_keeps_no_extents() {
         let (_, extents) = blocks_of(ParallelDecoder::new(io::Cursor::new(compress(&text(500_000, 4), 1))));
-        assert!(extents.is_empty());
+        assert_eq!(extents, Vec::<Extent>::new());
     }
 
     #[test]

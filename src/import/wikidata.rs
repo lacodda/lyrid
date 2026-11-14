@@ -1188,14 +1188,17 @@ mod tests {
     /// lexeme, with lines from a few bytes to 150 kB, so lines start at every
     /// place a block allows and some run across several blocks.
     fn small_dump() -> tempfile::NamedTempFile {
+        use std::fmt::Write as _;
+
         let mut text = String::from("[\n");
         for q in 1..=2000u64 {
             let len = usize::try_from(q * 7919 % 900).unwrap() + if q % 211 == 0 { 150_000 } else { 0 };
-            text.push_str(&format!(
+            writeln!(
+                text,
                 r#"{{"type":"item","id":"Q{q}","labels":{{"en":{{"language":"en","value":"Item {q}"}}}},"claims":{{"P1":"{}"}}}},"#,
                 filler(len, q)
-            ));
-            text.push('\n');
+            )
+            .unwrap();
             if q == 1000 {
                 text.push_str(r#"{"type":"property","id":"P31","labels":{"en":{"language":"en","value":"instance of"}}},"#);
                 text.push('\n');
