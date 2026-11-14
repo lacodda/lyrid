@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.24.0] - 2026-11-14
+
+### Bug Fixes
+- Type the history line's translator as i18next 27 does
+- Satisfy clippy, and expect a later edition rather than the next number
+
+### Documentation
+- Measure the label pass at the density of a real import, and say what the sky keeps
+
+### Features
+- Lay a new edition out from the last one's places
+
+### Performance
+- Read only the Wikidata blocks the label pass needs
+
+### Testing
+- Write the sample dump and check the extents the way clippy asks
+
 ## [0.23.0] - 2026-11-10
 
 ### Bug Fixes
