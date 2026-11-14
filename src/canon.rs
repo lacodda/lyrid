@@ -451,7 +451,9 @@ mod tests {
         .await;
 
         let second = seal(&mut tx).await.expect("the rebuilt sky seals");
-        assert_eq!(second.number, first.number + 1);
+        // Later, not one more: the tests' editions share the public table's
+        // sequence, and another test may seal in between.
+        assert!(second.number > first.number);
         assert_eq!(second.changes, Some(Changes { new: 1, merged: 1, gone: 1 }));
         assert_eq!(second.drift, None, "a distance between two frames was measured as if it meant something");
 
@@ -481,6 +483,12 @@ mod tests {
         tx.rollback().await.unwrap();
     }
 
+    /// A star as an edition recorded it: its MBID, its place and its rank.
+    type Recorded = (Uuid, Option<f32>, Option<f32>, Option<i32>);
+
+    /// What an edition recorded about how far its stars moved, and its frame.
+    type StoredDrift = (Option<i32>, Option<f32>, Option<f32>, Option<f32>, String);
+
     #[tokio::test]
     async fn an_edition_keeps_its_stars_places_and_ranks_and_measures_how_far_they_moved() {
         let Some(pool) = database().await else { return };
@@ -502,12 +510,11 @@ mod tests {
         run(&mut tx, "DELETE FROM artist_listeners WHERE artist_id = 4").await;
         let first = seal(&mut tx).await.expect("the first sky seals");
 
-        let recorded: Vec<(Uuid, Option<f32>, Option<f32>, Option<i32>)> =
-            sqlx::query_as("SELECT mbid, x, y, rank FROM canon_edition_star WHERE edition_id = $1 ORDER BY rank")
-                .bind(first.number)
-                .fetch_all(&mut *tx)
-                .await
-                .unwrap();
+        let recorded: Vec<Recorded> = sqlx::query_as("SELECT mbid, x, y, rank FROM canon_edition_star WHERE edition_id = $1 ORDER BY rank")
+            .bind(first.number)
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap();
         assert_eq!(
             recorded,
             vec![
@@ -541,12 +548,11 @@ mod tests {
         assert!((drift.median - 0.5).abs() < 1e-4, "{drift:?}");
         assert!((drift.p90 - 3.8).abs() < 1e-4, "{drift:?}");
 
-        let stored: (Option<i32>, Option<f32>, Option<f32>, Option<f32>, String) =
-            sqlx::query_as("SELECT drift_stars, drift_median, drift_p90, drift_max, frame FROM canon_edition WHERE id = $1")
-                .bind(second.number)
-                .fetch_one(&mut *tx)
-                .await
-                .unwrap();
+        let stored: StoredDrift = sqlx::query_as("SELECT drift_stars, drift_median, drift_p90, drift_max, frame FROM canon_edition WHERE id = $1")
+            .bind(second.number)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
         assert_eq!(stored, (Some(4), Some(drift.median), Some(drift.p90), Some(drift.max), "drawn".to_string()));
 
         tx.rollback().await.unwrap();

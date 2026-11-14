@@ -107,60 +107,57 @@ pub async fn run(pool: &PgPool, args: &Args) -> Result<()> {
     drop(edges);
 
     let origin = if args.fresh { None } else { origin(pool).await? };
-    let (params, start, key, description, frame) = match &origin {
-        Some(origin) => {
-            let start = Start::from_previous(&graph, &origin.places);
-            if start.held() == 0 {
-                bail!(
-                    "none of edition {}'s stars is in this graph, so there is nothing to continue: \
+    let (params, start, key, description, frame) = if let Some(origin) = &origin {
+        let start = Start::from_previous(&graph, &origin.places);
+        if start.held() == 0 {
+            bail!(
+                "none of edition {}'s stars is in this graph, so there is nothing to continue: \
                      lay the sky out with --fresh, which starts a frame of its own",
-                    origin.edition
-                );
-            }
-            tracing::info!(
-                edition = origin.edition,
-                held = start.held(),
-                among_neighbours = start.by_neighbours,
-                on_the_ring = start.by_ring,
-                "continuing the newest edition: its stars start where they were"
+                origin.edition
             );
-            let iterations = args.iterations.unwrap_or(CONTINUED_ITERATIONS);
-            let params = Params {
-                theta: args.theta,
-                ..Params::continued(iterations, args.seed)
-            };
-            let key = args.key.clone().unwrap_or_else(|| format!("{metric_key}-e{}-c{iterations}", origin.edition));
-            let description = format!(
-                "Continued from edition {} in its frame: {} stars held where they were (anchor {}), {} new among their \
+        }
+        tracing::info!(
+            edition = origin.edition,
+            held = start.held(),
+            among_neighbours = start.by_neighbours,
+            on_the_ring = start.by_ring,
+            "continuing the newest edition: its stars start where they were"
+        );
+        let iterations = args.iterations.unwrap_or(CONTINUED_ITERATIONS);
+        let params = Params {
+            theta: args.theta,
+            ..Params::continued(iterations, args.seed)
+        };
+        let key = args.key.clone().unwrap_or_else(|| format!("{metric_key}-e{}-c{iterations}", origin.edition));
+        let description = format!(
+            "Continued from edition {} in its frame: {} stars held where they were (anchor {}), {} new among their \
                  neighbours, {} on the ring; then force-directed with Barnes-Hut (theta {}), {iterations} iterations \
                  from heat {}, edges above {}.",
-                origin.edition,
-                start.held(),
-                params.anchor,
-                start.by_neighbours,
-                start.by_ring,
-                args.theta,
-                params.heat,
-                args.min_score
-            );
-            (params, Some(start), key, description, Some(origin.frame.clone()))
-        }
-        None => {
-            let iterations = args.iterations.unwrap_or(FRESH_ITERATIONS);
-            let params = Params {
-                iterations,
-                theta: args.theta,
-                seed: args.seed,
-                ..Params::default()
-            };
-            tracing::info!("drawing the sky fresh, from the spiral: a frame of its own");
-            let key = args.key.clone().unwrap_or_else(|| format!("{metric_key}-fd{iterations}-s{}", args.seed));
-            let description = format!(
-                "Force-directed with Barnes-Hut (theta {}), {iterations} iterations, seed {}, edges above {}.",
-                args.theta, args.seed, args.min_score
-            );
-            (params, None, key, description, None)
-        }
+            origin.edition,
+            start.held(),
+            params.anchor,
+            start.by_neighbours,
+            start.by_ring,
+            args.theta,
+            params.heat,
+            args.min_score
+        );
+        (params, Some(start), key, description, Some(origin.frame.clone()))
+    } else {
+        let iterations = args.iterations.unwrap_or(FRESH_ITERATIONS);
+        let params = Params {
+            iterations,
+            theta: args.theta,
+            seed: args.seed,
+            ..Params::default()
+        };
+        tracing::info!("drawing the sky fresh, from the spiral: a frame of its own");
+        let key = args.key.clone().unwrap_or_else(|| format!("{metric_key}-fd{iterations}-s{}", args.seed));
+        let description = format!(
+            "Force-directed with Barnes-Hut (theta {}), {iterations} iterations, seed {}, edges above {}.",
+            args.theta, args.seed, args.min_score
+        );
+        (params, None, key, description, None)
     };
 
     let report = |iteration, movement| {
