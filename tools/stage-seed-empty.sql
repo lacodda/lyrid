@@ -2,10 +2,10 @@
 -- stand, in one transaction. Run by psql with `-v tables=a,b,c`.
 --
 -- Not one TRUNCATE: Postgres refuses to truncate a table that a table outside
--- the statement references, whatever either holds -- and the canon is
--- referenced from outside. A profile remembers the layout its camera was on
--- (`user_profile.layout_id`, ON DELETE SET NULL), so `sky_layout` cannot be
--- truncated under a stand with accounts, nor anything `sky_layout` points at.
+-- the statement references, whatever either holds. Nothing outside the canon
+-- references it today -- a profile's camera named its layout by a foreign key
+-- until v0.24, and names a frame now -- but the script does not count on that:
+-- a table that comes to point in again is handled the same way.
 --
 -- Not one DELETE per table either: measured on a slice of 100,000 artists,
 -- deleting `artist` after its children took 7 minutes 20 seconds, because the

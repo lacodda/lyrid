@@ -326,14 +326,18 @@ One row per layout run: where the stars were put, and by what.
 | Column | Meaning |
 | --- | --- |
 | `key` | Stable name, e.g. `listenbrainz-2020-fd300-s24301` |
+| `frame` | The coordinates it is drawn in: the frame of the edition it was continued from, or its own key when it was drawn fresh (the database fills that in when no frame is given) |
 | `metric_id` | Which similarity graph was projected — a layout of another metric is another sky |
 | `description` | Algorithm and parameters, in enough detail to run it again |
 | `seed` | The random seed the run used |
 | `stars` | How many were placed, so a truncated run shows as a number rather than a suspicion |
 
 Versioned for the same reason similarity is: a layout is not a fact but a
-rendering of one, and recomputing it moves every star. Coordinates are
-comparable **within** a layout and never across two.
+rendering of one. Coordinates are comparable **within one frame**: a layout
+continued from the newest edition starts every star where it was and keeps
+that edition's frame, so a camera saved in it stays good; one drawn fresh moves
+every star and starts a frame of its own. See [A sky that remembers
+itself](/lyrid/guides/building-the-sky/#a-sky-that-remembers-itself).
 
 ## `artist_position`
 
@@ -363,9 +367,9 @@ The editions of the canon: a sky sealed by `lyrid canon seal` once it is built
 
 | Table | Holds |
 | --- | --- |
-| `canon_edition` | One row per edition: when it was sealed, the layout by its key, how many artists and stars |
+| `canon_edition` | One row per edition: when it was sealed, the layout by its key and the frame it is drawn in, how many artists and stars, and how far the stars it shares with the edition before moved (`drift_stars`, `drift_median`, `drift_p90`, `drift_max`, in layout units; empty for the first edition and for a frame of its own) |
 | `canon_edition_source` | The newest finished import of each source when it was sealed, copied from `dump_import` |
-| `canon_edition_star` | Its stars, by MBID, with the names they had |
+| `canon_edition_star` | Its stars, by MBID, with the names they had, where each stood (`x`, `y`) and its place by brightness (`rank`, 1 the most listened); the next layout starts from the places |
 | `canon_change` | What changed from the edition before: `new`, `merged` (with `into_mbid`) or `gone`, by MBID and name |
 
 None of them references the canon's tables, so they outlive the canon they

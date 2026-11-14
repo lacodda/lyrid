@@ -466,7 +466,7 @@ mod tests {
         run(tx, "INSERT INTO similarity_metric (id, key, description) VALUES (1, 'm', 'd')").await;
         run(
             tx,
-            "INSERT INTO sky_layout (id, key, metric_id, description, seed) VALUES (1, 'first', 1, 'test', 1)",
+            "INSERT INTO sky_layout (id, key, frame, metric_id, description, seed) VALUES (1, 'first', 'first', 1, 'test', 1)",
         )
         .await;
     }
@@ -893,7 +893,7 @@ mod tests {
 
         run(
             &mut tx,
-            "INSERT INTO canon_edition (id, layout_key, artists, stars) VALUES (1, 'one', 1, 1), (2, 'two', 1, 1)",
+            "INSERT INTO canon_edition (id, layout_key, frame, artists, stars) VALUES (1, 'one', 'one', 1, 1), (2, 'two', 'two', 1, 1)",
         )
         .await;
         run(

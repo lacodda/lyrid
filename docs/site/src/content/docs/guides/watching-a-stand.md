@@ -40,7 +40,7 @@ Both take the same lock the server does, so running one while the server is read
 
 `/admin` shows the stand's own state to an admin, and only to one:
 
-- **the canon** — artists and stars, the layout, the edition and whether this database holds a slice of it, every edition, and every import the database has recorded;
+- **the canon** — artists and stars, the layout, the edition and whether this database holds a slice of it, every edition with how far its stars moved from the edition before (or that it was drawn afresh), and every import the database has recorded;
 - **listening** — whether the feed is working, a strip of the last five weeks with a bar a day as tall as the share of it the dumps covered, the risers, and the latest runs with their errors;
 - **releases** — the same health, and how many releases are known;
 - **accounts** — counts only: how many, how many confirmed, joined this week and month, linked to ListenBrainz and how those links are reading, letters asked for;

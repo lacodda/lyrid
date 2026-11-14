@@ -37,7 +37,12 @@ export interface Edition {
   /** False when the sky on screen was laid out again after this edition was sealed. */
   current: boolean
   sources: EditionSource[]
-  previous: { number: number; sealed_at: string } | null
+  /**
+   * The edition before. `same_frame` says whether this one was laid out from
+   * it: then the stars kept their places, and a view saved before still shows
+   * the same sky.
+   */
+  previous: { number: number; sealed_at: string; same_frame: boolean } | null
   /** `null` for the first edition: nothing came before it to change. */
   changed: Changed | null
 }

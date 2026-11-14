@@ -135,6 +135,16 @@ pub struct Params {
     pub damping: f32,
     /// Random seed, part of what makes a layout reproducible.
     pub seed: u64,
+    /// How far the first round may move a star, as a share of what a fresh
+    /// layout allows: 1 for a sky drawn from the spiral, which has its whole
+    /// shape to find, and a tenth -- where a fresh run ends -- for one that
+    /// starts from a settled sky and only has to make room for what is new.
+    pub heat: f32,
+    /// How hard a star with a place in the edition before is held to it, per
+    /// unit of distance. Zero for a fresh layout. Without it a settled sky
+    /// still drifts: a fresh run stops when its rounds run out, not when the
+    /// forces balance, so every star still has somewhere it would rather be.
+    pub anchor: f32,
 }
 
 impl Default for Params {
@@ -146,9 +156,185 @@ impl Default for Params {
             attraction: 1.0,
             damping: 0.9,
             seed: 0x5EED,
+            heat: 1.0,
+            anchor: 0.0,
         }
     }
 }
+
+impl Params {
+    /// The forces of a layout that continues the edition before: few rounds,
+    /// started cool, every star with a place held near it. Measured on edition
+    /// 3 of the canon (ADR 0029).
+    #[must_use]
+    pub fn continued(iterations: u32, seed: u64) -> Self {
+        Self {
+            iterations,
+            seed,
+            heat: CONTINUED_HEAT,
+            anchor: CONTINUED_ANCHOR,
+            ..Self::default()
+        }
+    }
+}
+
+/// How many rounds a continued layout runs by default: by the fortieth, the
+/// movement of a round on edition 3 had fallen to a fifth of the tenth's.
+pub const CONTINUED_ITERATIONS: u32 = 40;
+
+/// The heat a continued layout starts at: where a fresh run of 300 ends.
+const CONTINUED_HEAT: f32 = 0.1;
+
+/// The anchor of a continued layout, per unit of distance.
+///
+/// Measured on edition 3, with one star in a hundred hidden so it had to be
+/// placed as new: at 1 the held stars drifted 7.5 units on the median and
+/// 14.8 at the ninetieth percentile -- the whole reach of the fog's light --
+/// and at 10 they moved 0.8 and 1.7, while the newcomers sat as close to the
+/// stars they are similar to as the whole layout had put them (a weighted
+/// distance of 297 on the median against 332).
+const CONTINUED_ANCHOR: f32 = 10.0;
+
+/// Where a run starts: a place for every star, and which of them are held.
+pub struct Start {
+    pub xs: Vec<f32>,
+    pub ys: Vec<f32>,
+    /// Whether each star had a place before. Those are held near it by the
+    /// anchor; the rest are new and go where their neighbours pull them.
+    pub known: Vec<bool>,
+    /// New stars placed among their neighbours, and new stars with no
+    /// neighbour that had a place, placed on a ring around the sky.
+    pub by_neighbours: usize,
+    pub by_ring: usize,
+}
+
+impl Start {
+    /// The deterministic spiral a fresh layout starts from: nothing is known,
+    /// nothing is held.
+    #[must_use]
+    pub fn spiral(n: usize, seed: u64) -> Self {
+        let (xs, ys) = initial_positions(n, seed);
+        Self {
+            xs,
+            ys,
+            known: vec![false; n],
+            by_neighbours: 0,
+            by_ring: 0,
+        }
+    }
+
+    /// Starts from the places stars had before, keyed by artist id.
+    ///
+    /// A star that had a place keeps it. A new one goes to the middle of its
+    /// neighbours that have a place, weighted by similarity -- in rounds, so a
+    /// new star whose neighbours are all new waits for them and lands beside
+    /// them -- which is close to where a whole layout would put it, and lets a
+    /// handful of rounds finish the job instead of three hundred. A star with
+    /// no path to any placed one -- a new island of the graph -- goes on a
+    /// ring just outside the sky, where it can come in without landing on
+    /// anybody.
+    #[must_use]
+    pub fn from_previous(graph: &Graph, previous: &HashMap<i32, (f32, f32)>) -> Self {
+        let n = graph.len();
+        let mut xs = vec![0f32; n];
+        let mut ys = vec![0f32; n];
+        let mut placed = vec![false; n];
+        for (i, artist) in graph.artist_ids.iter().enumerate() {
+            if let Some(&(x, y)) = previous.get(artist) {
+                xs[i] = x;
+                ys[i] = y;
+                placed[i] = true;
+            }
+        }
+        let known = placed.clone();
+
+        let golden = std::f32::consts::PI * (3.0 - 5f32.sqrt());
+        let mut by_neighbours = 0;
+        loop {
+            // A round reads only what earlier rounds placed, so its answer
+            // does not depend on the order stars are visited in.
+            let mut round = Vec::new();
+            for i in (0..n).filter(|&i| !placed[i]) {
+                let (mut sx, mut sy, mut weight) = (0f64, 0f64, 0f64);
+                for edge in graph.offsets[i] as usize..graph.offsets[i + 1] as usize {
+                    let j = graph.targets[edge] as usize;
+                    if placed[j] {
+                        let w = f64::from(graph.weights[edge]);
+                        sx += w * f64::from(xs[j]);
+                        sy += w * f64::from(ys[j]);
+                        weight += w;
+                    }
+                }
+                if weight > 0.0 {
+                    round.push((i, sx / weight, sy / weight));
+                }
+            }
+            if round.is_empty() {
+                break;
+            }
+            for (i, x, y) in round {
+                // A step off the middle, so two newcomers drawn to the same
+                // neighbour do not start on top of each other: the golden
+                // angle by index spreads them as evenly as the spiral does.
+                #[expect(clippy::cast_precision_loss, reason = "an index becomes an angle; f32 is the map's precision")]
+                let angle = i as f32 * golden;
+                #[expect(clippy::cast_possible_truncation, reason = "a weighted mean of f32 coordinates")]
+                let (x, y) = (x as f32, y as f32);
+                xs[i] = x + NEWCOMER_STEP * angle.cos();
+                ys[i] = y + NEWCOMER_STEP * angle.sin();
+                placed[i] = true;
+                by_neighbours += 1;
+            }
+        }
+
+        // The ring: around the middle of the stars that were placed, just
+        // past the furthest of them.
+        let held: Vec<usize> = (0..n).filter(|&i| known[i]).collect();
+        let (cx, cy, reach) = if held.is_empty() {
+            (0.0, 0.0, 0.0)
+        } else {
+            #[expect(clippy::cast_precision_loss, reason = "a count of stars, far below f32's exact range")]
+            let count = held.len() as f32;
+            let cx = held.iter().map(|&i| xs[i]).sum::<f32>() / count;
+            let cy = held.iter().map(|&i| ys[i]).sum::<f32>() / count;
+            let reach = held.iter().map(|&i| (xs[i] - cx).hypot(ys[i] - cy)).fold(0f32, f32::max);
+            (cx, cy, reach)
+        };
+        let mut by_ring = 0;
+        for i in (0..n).filter(|&i| !placed[i]) {
+            #[expect(clippy::cast_precision_loss, reason = "a count of stars becomes a radius and an angle")]
+            let k = by_ring as f32;
+            let radius = reach + RING_STEP * (k + 1.0).sqrt();
+            let angle = k * golden;
+            xs[i] = cx + radius * angle.cos();
+            ys[i] = cy + radius * angle.sin();
+            by_ring += 1;
+        }
+
+        Self {
+            xs,
+            ys,
+            known,
+            by_neighbours,
+            by_ring,
+        }
+    }
+
+    /// How many stars kept the place they had.
+    #[must_use]
+    pub fn held(&self) -> usize {
+        self.known.iter().filter(|&&known| known).count()
+    }
+}
+
+/// How far off the middle of its neighbours a new star starts, in layout
+/// units: enough for the repulsion to tell two newcomers apart, and a small
+/// part of the 14 units the fog lights around an open star.
+const NEWCOMER_STEP: f32 = 1.0;
+
+/// How far apart the ring places stars with no placed neighbour: about the
+/// spacing of the spiral a fresh layout starts from.
+const RING_STEP: f32 = 1.0;
 
 /// Positions produced by a run.
 pub struct Positions {
@@ -156,14 +342,20 @@ pub struct Positions {
     pub ys: Vec<f32>,
 }
 
-/// Runs the layout.
+/// Runs the layout from the spiral: a sky drawn fresh.
 ///
 /// `progress` is called once per iteration with the iteration number and the
 /// total movement of that round, so a caller can report and so a run that is
 /// going nowhere is visible rather than silent.
-pub fn run(graph: &Graph, params: &Params, mut progress: impl FnMut(u32, f32)) -> Positions {
+pub fn run(graph: &Graph, params: &Params, progress: impl FnMut(u32, f32)) -> Positions {
+    run_from(graph, params, &Start::spiral(graph.len(), params.seed), progress)
+}
+
+/// Runs the layout from `start`, holding its known stars by the anchor.
+pub fn run_from(graph: &Graph, params: &Params, start: &Start, mut progress: impl FnMut(u32, f32)) -> Positions {
     let n = graph.len();
-    let (mut xs, mut ys) = initial_positions(n, params.seed);
+    debug_assert_eq!(start.xs.len(), n, "a start is a place for every star of the graph");
+    let (mut xs, mut ys) = (start.xs.clone(), start.ys.clone());
     let mut vxs = vec![0f32; n];
     let mut vys = vec![0f32; n];
 
@@ -178,7 +370,7 @@ pub fn run(graph: &Graph, params: &Params, mut progress: impl FnMut(u32, f32)) -
         // outside.
         #[expect(clippy::cast_precision_loss, reason = "iteration counts are small")]
         let elapsed = iteration as f32 / params.iterations.max(1) as f32;
-        let cooling = 1.0 - elapsed * 0.9;
+        let cooling = params.heat * (1.0 - elapsed * 0.9);
 
         // Accumulated in index order: parallel accumulation would make the
         // result depend on thread scheduling, and a versioned layout cannot
@@ -222,6 +414,13 @@ pub fn run(graph: &Graph, params: &Params, mut progress: impl FnMut(u32, f32)) -
             let degree = (to - from).max(1) as f32;
             fx /= degree;
             fy /= degree;
+
+            // The anchor, after the division: it holds a hub and a leaf to
+            // their old places alike, whatever their degree.
+            if start.known[i] {
+                fx += params.anchor * (start.xs[i] - xs[i]);
+                fy += params.anchor * (start.ys[i] - ys[i]);
+            }
 
             vxs[i] = (vxs[i] + fx) * params.damping * cooling;
             vys[i] = (vys[i] + fy) * params.damping * cooling;
@@ -453,5 +652,127 @@ mod tests {
         assert!(graph.is_empty());
         let positions = run(&graph, &params(10), |_, _| {});
         assert_eq!(positions.xs, Vec::<f32>::new());
+    }
+
+    /// Two dense clusters of six joined by one weak edge: ids 0..6 and
+    /// 100..106.
+    fn two_clusters() -> Vec<(i32, i32, f32)> {
+        let mut edges = Vec::new();
+        for i in 0..6 {
+            for j in (i + 1)..6 {
+                edges.push((i, j, 1.0));
+                edges.push((100 + i, 100 + j, 1.0));
+            }
+        }
+        edges.push((0, 100, 0.05));
+        edges
+    }
+
+    /// Every star's place in a finished layout, by artist id.
+    fn places(graph: &Graph, positions: &Positions) -> HashMap<i32, (f32, f32)> {
+        graph
+            .artist_ids
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| (id, (positions.xs[i], positions.ys[i])))
+            .collect()
+    }
+
+    fn at(graph: &Graph, start: &Start, id: i32) -> (f32, f32) {
+        let i = graph.artist_ids.iter().position(|&a| a == id).unwrap();
+        (start.xs[i], start.ys[i])
+    }
+
+    fn apart(a: (f32, f32), b: (f32, f32)) -> f32 {
+        (a.0 - b.0).hypot(a.1 - b.1)
+    }
+
+    #[test]
+    fn a_star_with_a_place_keeps_it_and_a_new_one_starts_among_its_neighbours() {
+        let graph = Graph::from_edges(&two_clusters());
+        let mut previous = places(&graph, &run(&graph, &params(300), |_, _| {}));
+        let had = previous.remove(&3).unwrap();
+
+        let start = Start::from_previous(&graph, &previous);
+        assert_eq!(start.held(), 11);
+        assert_eq!((start.by_neighbours, start.by_ring), (1, 0));
+        assert_eq!(at(&graph, &start, 100), previous[&100], "a star with a place moved before the run began");
+
+        // The newcomer starts in the middle of its own cluster, not the other.
+        let landed = at(&graph, &start, 3);
+        let own: f32 = (0..6).filter(|&i| i != 3).map(|i| apart(landed, previous[&i])).sum::<f32>() / 5.0;
+        let other: f32 = (100..106).map(|i| apart(landed, previous[&i])).sum::<f32>() / 6.0;
+        assert!(own * 3.0 < other, "the newcomer started {own} from its cluster and {other} from the other");
+        assert!(
+            apart(landed, had) < other,
+            "it started further from where a whole layout put it than from the other cluster"
+        );
+    }
+
+    #[test]
+    fn a_newcomer_whose_neighbours_are_all_new_waits_for_them() {
+        // 1 had a place; 2 is new beside it; 3 is new beside 2 only. 3 can only
+        // be placed once 2 is, and must land beside 2 rather than at 0,0.
+        let graph = Graph::from_edges(&[(1, 2, 1.0), (2, 3, 1.0)]);
+        let previous = HashMap::from([(1, (500.0, -500.0))]);
+        let start = Start::from_previous(&graph, &previous);
+        assert_eq!((start.held(), start.by_neighbours, start.by_ring), (1, 2, 0));
+        assert!(apart(at(&graph, &start, 3), (500.0, -500.0)) < 3.0, "{:?}", at(&graph, &start, 3));
+    }
+
+    #[test]
+    fn an_island_with_no_placed_star_starts_on_a_ring_outside_the_sky() {
+        // 1-2 had places ten apart; 7-8 is a new island of the graph.
+        let graph = Graph::from_edges(&[(1, 2, 1.0), (7, 8, 1.0)]);
+        let previous = HashMap::from([(1, (-5.0, 0.0)), (2, (5.0, 0.0))]);
+        let start = Start::from_previous(&graph, &previous);
+        assert_eq!((start.held(), start.by_neighbours, start.by_ring), (2, 0, 2));
+        for id in [7, 8] {
+            let distance = apart(at(&graph, &start, id), (0.0, 0.0));
+            assert!(distance > 5.0, "the island star {id} started inside the sky, {distance} from its middle");
+        }
+        assert_ne!(at(&graph, &start, 7), at(&graph, &start, 8), "two island stars started on one spot");
+    }
+
+    #[test]
+    fn a_continued_layout_holds_the_old_sky_and_a_fresh_one_does_not() {
+        // The claim of v0.24, small: lay a sky out, add a star, continue it
+        // from the old places, and the old stars barely move -- while running
+        // the same rounds without the anchor and the cooling moves them far.
+        let mut edges = two_clusters();
+        let graph = Graph::from_edges(&edges);
+        let previous = places(&graph, &run(&graph, &params(300), |_, _| {}));
+        edges.push((2, 50, 1.0));
+        edges.push((4, 50, 1.0));
+        let grown = Graph::from_edges(&edges);
+
+        let start = Start::from_previous(&grown, &previous);
+        let continued = run_from(&grown, &Params::continued(CONTINUED_ITERATIONS, 0), &start, |_, _| {});
+        let loose = run_from(
+            &grown,
+            &Params {
+                iterations: CONTINUED_ITERATIONS,
+                ..Params::default()
+            },
+            &start,
+            |_, _| {},
+        );
+
+        let moved = |positions: &Positions| {
+            places(&grown, positions)
+                .iter()
+                .filter_map(|(id, &place)| previous.get(id).map(|&old| apart(place, old)))
+                .fold(0f32, f32::max)
+        };
+        let (held, free) = (moved(&continued), moved(&loose));
+        assert!(held < 2.0, "an old star moved {held} in a continued layout");
+        assert!(free > held * 3.0, "the anchor and the cooling did nothing: held {held}, free {free}");
+
+        // The newcomer sits with the stars it is similar to.
+        let newcomer = places(&grown, &continued)[&50];
+        assert!(
+            apart(newcomer, previous[&2]) < apart(newcomer, previous[&102]),
+            "the newcomer drifted to the other cluster"
+        );
     }
 }

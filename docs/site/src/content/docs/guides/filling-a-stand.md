@@ -119,14 +119,15 @@ The accounts, their listening, their letters and the stand's own weather —
 fog's openings are keyed by MusicBrainz id, not by the canon's own numbers, so
 they find their stars again in the new canon.
 
-One thing outside the canon does point into it: a profile remembers the layout
-its camera was on. So the named tables are not simply truncated — Postgres
-would refuse, since `user_profile` is not among them. The script truncates what
-it can and deletes the rest children first, which lets the schema do what it
-says: the camera forgets a layout that is gone, and the next visit opens on the
-whole sky. A table outside the list that would lose rows with the canon, or
-block it, stops the script before anything is emptied. Measured on a slice of
-100,000 artists: one second.
+Nothing outside the canon points into it. A profile's camera remembers the
+*frame* it was taken in, by name, not the layout row (v0.24), so a fill that
+replaces `sky_layout` keeps every camera whose frame the new sky continues — a
+new edition laid out from the last one does — and drops only those of a sky
+drawn afresh. The script still reads the schema before emptying anything: a
+table outside the list that points in with `ON DELETE SET NULL` has its
+references deleted children first, so the schema does what it says, and one
+that would lose rows with the canon, or block it, stops the script before
+anything is emptied. Measured on a slice of 100,000 artists: one second.
 
 Replacing all thirty tables of the canon under accounts, on a small single-board
 stand over a home network, took eleven and a half minutes. For as long as the rows

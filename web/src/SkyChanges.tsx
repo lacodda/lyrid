@@ -147,6 +147,11 @@ function EditionSection({ edition, onOpen }: { edition: Edition | null; onOpen: 
               gone: changed.gone.toLocaleString(resolved),
             })}
           </p>
+          <p className="m-0 text-xs text-dim">
+            {t(edition.previous.same_frame ? 'changes.edition.mapKept' : 'changes.edition.mapRedrawn', {
+              number: edition.previous.number,
+            })}
+          </p>
           {changed.new_stars.length > 0 && (
             <div className="flex flex-col gap-0.5">
               <p className="m-0 text-xs text-dim">{t('changes.edition.newStars')}</p>

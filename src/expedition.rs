@@ -370,7 +370,7 @@ mod tests {
         run(tx, "INSERT INTO similarity_metric (id, key, description) VALUES (1, 'm', 'd')").await;
         run(
             tx,
-            "INSERT INTO sky_layout (id, key, metric_id, description, seed) VALUES (1, 'first', 1, 'test', 1)",
+            "INSERT INTO sky_layout (id, key, frame, metric_id, description, seed) VALUES (1, 'first', 'first', 1, 'test', 1)",
         )
         .await;
         // The home port and five neighbours, one of them off the sky and one a

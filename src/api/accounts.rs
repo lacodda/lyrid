@@ -97,11 +97,12 @@ fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(deserializer: 
 /// The earliest year of birth the profile takes; the column's own floor.
 const BORN_FROM: i16 = 1900;
 
-/// Where the sky was left, and in which layout it means anything.
+/// Where the sky was left, and in which frame it means anything.
 ///
-/// The layout travels with the coordinates because a rebuilt sky moves every
-/// star (see migration 0007): restoring a camera into a newer layout would
-/// open the map on empty space that used to be somewhere.
+/// The frame travels with the coordinates because a sky drawn fresh moves
+/// every star (see migration 0020): restoring a camera into another frame
+/// would open the map on empty space that used to be somewhere. A sky laid
+/// out from the edition before keeps the frame, and with it the camera.
 #[derive(Serialize, Deserialize, Clone, Copy)]
 struct Camera {
     x: f32,
@@ -124,7 +125,7 @@ struct Me {
     halo_shape: Option<String>,
     halo_colour: Option<String>,
     /// Absent when there is nothing saved, or when what is saved belongs to a
-    /// layout the sky no longer shows.
+    /// frame the sky is no longer drawn in.
     camera: Option<Camera>,
     /// Whether the address has been confirmed.
     ///
@@ -456,9 +457,9 @@ async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
 }
 
 async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
-    // The camera is dropped unless it was saved in the layout the sky
-    // currently shows. Coordinates from an older layout are not stale, they
-    // are meaningless: the same numbers point at a different star.
+    // The camera is dropped unless it was saved in the frame the sky is drawn
+    // in now. Coordinates from another frame are not stale, they are
+    // meaningless: the same numbers point at a different star.
     //
     // Dropped by the query rather than by a second one: the profile itself
     // must come back either way, and a WHERE clause on the layout would hide
@@ -475,13 +476,13 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
              JOIN user_profile p ON p.user_id = u.id
              LEFT JOIN weekly_letter w ON w.user_id = u.id
              CROSS JOIN LATERAL (
-                 -- Both sides must be a real layout. `IS NOT DISTINCT FROM`
-                 -- would call NULL = NULL a match, so a camera orphaned by a
-                 -- deleted layout would come back as valid in a database
-                 -- that has no layout at all -- which is exactly the state
-                 -- a fresh stand is in before the sky is built.
-                 SELECT p.layout_id IS NOT NULL
-                    AND p.layout_id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1) AS keep
+                 -- Both sides must be a real frame. `IS NOT DISTINCT FROM`
+                 -- would call NULL = NULL a match, so a camera with no frame
+                 -- would come back as valid in a database that has no layout
+                 -- at all -- which is exactly the state a fresh stand is in
+                 -- before the sky is built.
+                 SELECT p.camera_frame IS NOT NULL
+                    AND p.camera_frame = (SELECT frame FROM sky_layout ORDER BY created_at DESC LIMIT 1) AS keep
              ) AS current
              WHERE u.id = $1",
     )
@@ -926,8 +927,8 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
     };
 
     let profile = sqlx::query_as::<_, ProfileRow>(
-        "SELECT p.mode, p.canon_edition, p.home_port, p.halo_shape, p.halo_colour, p.camera_x, p.camera_y, p.camera_scale, l.key, p.born
-         FROM user_profile p LEFT JOIN sky_layout l ON l.id = p.layout_id
+        "SELECT p.mode, p.canon_edition, p.home_port, p.halo_shape, p.halo_colour, p.camera_x, p.camera_y, p.camera_scale, p.camera_frame, p.born
+         FROM user_profile p
          WHERE p.user_id = $1",
     )
     .bind(user_id)
@@ -975,7 +976,7 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             "email_confirmed_at": confirmed_at.map(stamp),
             "created_at": stamp(created_at),
         },
-        "profile": profile.map(|(mode, canon_edition, home_port, halo_shape, halo_colour, x, y, scale, layout, born)| serde_json::json!({
+        "profile": profile.map(|(mode, canon_edition, home_port, halo_shape, halo_colour, x, y, scale, frame, born)| serde_json::json!({
             "mode": mode,
             "canon_edition": canon_edition,
             "home_port": home_port,
@@ -983,7 +984,7 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             "halo_colour": halo_colour,
             "born": born,
             "camera": match (x, y, scale) {
-                (Some(x), Some(y), Some(scale)) => serde_json::json!({ "x": x, "y": y, "scale": scale, "layout": layout }),
+                (Some(x), Some(y), Some(scale)) => serde_json::json!({ "x": x, "y": y, "scale": scale, "frame": frame }),
                 _ => serde_json::Value::Null,
             },
         })),
@@ -1133,13 +1134,13 @@ async fn save_profile(pool: &PgPool, user_id: i32, update: &ProfileUpdate) -> sq
     }
 
     if let Some(camera) = update.camera {
-        // The layout is stamped from the sky as it is now, not taken from the
-        // client: a client cannot know which layout it is looking at, and one
+        // The frame is stamped from the sky as it is now, not taken from the
+        // client: a client cannot know which frame it is looking at, and one
         // that claimed to would be claiming something worth lying about.
         sqlx::query(
             "UPDATE user_profile
              SET camera_x = $2, camera_y = $3, camera_scale = $4,
-                 layout_id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
+                 camera_frame = (SELECT frame FROM sky_layout ORDER BY created_at DESC LIMIT 1)
              WHERE user_id = $1",
         )
         .bind(user_id)

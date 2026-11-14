@@ -577,8 +577,8 @@ mod tests {
         // The old sky places 1, 2 and 3; the new one 2, 3 and 4. Star 1 is the
         // most listened of all, but the sky being shown has no place for it.
         sqlx::raw_sql(AssertSqlSafe(
-            "INSERT INTO sky_layout (id, key, metric_id, description, seed, created_at)
-             VALUES (1, 'old', 1, 'old', 1, now() - interval '1 day'), (2, 'new', 2, 'new', 1, now());
+            "INSERT INTO sky_layout (id, key, frame, metric_id, description, seed, created_at)
+             VALUES (1, 'old', 'old', 1, 'old', 1, now() - interval '1 day'), (2, 'new', 'new', 2, 'new', 1, now());
              INSERT INTO artist_position (layout_id, artist_id, x, y)
              VALUES (1, 1, 0, 0), (1, 2, 0, 0), (1, 3, 0, 0), (2, 2, 1, 1), (2, 3, 1, 1), (2, 4, 1, 1);
              INSERT INTO artist_listeners (artist_id, listeners, listens)

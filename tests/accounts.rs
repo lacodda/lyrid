@@ -4,8 +4,8 @@
 //! cascade, a `CASE` deciding whether a saved camera still means anything.
 //! None of it can be checked against the lazy pool the unit tests use, and
 //! the first defect this suite was written for was found by hand rather than
-//! by a test: a camera orphaned by a deleted layout came back as valid in a
-//! database that had no layout at all.
+//! by a test: a camera with nothing to say where it was taken came back as
+//! valid in a database that had no layout at all.
 //!
 //! These need a database. Without `LYRID_TEST_DATABASE_URL` they cannot run,
 //! and rather than passing quietly they **fail** — a suite that skips itself
@@ -56,28 +56,48 @@ async fn pool() -> PgPool {
     pool
 }
 
-/// A layout for a camera to be saved in, with a metric of its own.
+/// A layout drawn in `frame`, newer than every layout before it, with a
+/// metric of its own.
 ///
 /// Everything it needs is created here rather than looked up. An earlier
 /// version read `SELECT id FROM similarity_metric LIMIT 1`, which passed on a
 /// development database holding an imported canon and failed on CI's empty
-/// one — a test that depended on data nobody had promised it.
-async fn make_layout(tx: &mut Transaction<'_, Postgres>, key: &str) -> i16 {
+/// one — a test that depended on data nobody had promised it. Newer than the
+/// rest by its timestamp rather than by `now()`: the camera rule reads the
+/// newest layout, and inside one transaction `now()` does not move.
+async fn make_layout(tx: &mut Transaction<'_, Postgres>, key: &str, frame: &str) -> i16 {
     let (metric,): (i16,) = sqlx::query_as("INSERT INTO similarity_metric (key, description) VALUES ($1, 'test') RETURNING id")
         .bind(format!("metric-for-{key}"))
         .fetch_one(&mut **tx)
         .await
         .expect("a similarity metric should be creatable");
     let (layout,): (i16,) = sqlx::query_as(
-        "INSERT INTO sky_layout (key, metric_id, description, seed, stars)
-         VALUES ($1, $2, 'test', 1, 0) RETURNING id",
+        "INSERT INTO sky_layout (key, frame, metric_id, description, seed, stars, created_at)
+         VALUES ($1, $2, $3, 'test', 1, 0, (SELECT coalesce(max(created_at), now()) + interval '1 second' FROM sky_layout))
+         RETURNING id",
     )
     .bind(key)
+    .bind(frame)
     .bind(metric)
     .fetch_one(&mut **tx)
     .await
     .expect("a layout should be creatable");
     layout
+}
+
+/// Saves a camera on `user` as `PATCH /api/me` does: stamped with the frame
+/// the newest layout is drawn in.
+async fn save_camera(tx: &mut Transaction<'_, Postgres>, user: i32) {
+    sqlx::query(
+        "UPDATE user_profile
+         SET camera_x = 1, camera_y = 2, camera_scale = 3,
+             camera_frame = (SELECT frame FROM sky_layout ORDER BY created_at DESC LIMIT 1)
+         WHERE user_id = $1",
+    )
+    .bind(user)
+    .execute(&mut **tx)
+    .await
+    .expect("a camera should be savable");
 }
 
 /// One account with a profile, inside the caller's transaction.
@@ -193,8 +213,8 @@ async fn rebuilding_the_canon_does_not_touch_accounts() {
 ///
 /// Kept in step with `load_me` by being the same expression; what is being
 /// checked is the expression itself, which is where the defect lived.
-const CAMERA_IS_CURRENT: &str = "SELECT p.layout_id IS NOT NULL
-        AND p.layout_id = (SELECT id FROM sky_layout ORDER BY created_at DESC LIMIT 1)
+const CAMERA_IS_CURRENT: &str = "SELECT p.camera_frame IS NOT NULL
+        AND p.camera_frame = (SELECT frame FROM sky_layout ORDER BY created_at DESC LIMIT 1)
     FROM user_profile p WHERE p.user_id = $1";
 
 /// The same expression against a sky with no layouts in it.
@@ -205,94 +225,127 @@ const CAMERA_IS_CURRENT: &str = "SELECT p.layout_id IS NOT NULL
 /// the whole canon -- which deadlocked against the other tests in this file
 /// the moment they ran in parallel. A test that has to lock the canon to
 /// check one expression is testing the wrong thing.
-const CAMERA_IS_CURRENT_WITH_NO_SKY: &str = "SELECT p.layout_id IS NOT NULL
-        AND p.layout_id = (SELECT id FROM sky_layout WHERE false ORDER BY created_at DESC LIMIT 1)
+const CAMERA_IS_CURRENT_WITH_NO_SKY: &str = "SELECT p.camera_frame IS NOT NULL
+        AND p.camera_frame = (SELECT frame FROM sky_layout WHERE false ORDER BY created_at DESC LIMIT 1)
     FROM user_profile p WHERE p.user_id = $1";
 
+async fn camera_is_current(tx: &mut Transaction<'_, Postgres>, user: i32) -> Option<bool> {
+    let (keep,): (Option<bool>,) = sqlx::query_as(CAMERA_IS_CURRENT).bind(user).fetch_one(&mut **tx).await.unwrap();
+    keep
+}
+
 #[tokio::test]
-async fn an_orphaned_camera_is_refused_even_when_there_is_no_sky() {
+async fn a_camera_with_no_frame_is_refused_even_when_there_is_no_sky() {
     // Found by hand, not by a test: with `IS NOT DISTINCT FROM`, a camera
-    // whose layout had been deleted (layout_id NULL) matched "the current
-    // layout" in a database with no layouts, because NULL = NULL was called
-    // a match. A fresh stand before the sky is built is exactly that state,
-    // so the camera came back as valid pointing at coordinates from a sky
-    // that no longer existed.
+    // that said nothing about where it was taken matched "the current sky"
+    // in a database with no layouts, because NULL = NULL was called a match.
+    // A fresh stand before the sky is built is exactly that state, so the
+    // camera came back as valid pointing at coordinates from a sky that no
+    // longer existed.
     let pool = pool().await;
     let mut tx = pool.begin().await.unwrap();
 
     let id = make_user(&mut tx, "orphan@example.com", "create").await;
-    sqlx::query("UPDATE user_profile SET camera_x = 1, camera_y = 2, camera_scale = 3, layout_id = NULL WHERE user_id = $1")
+    sqlx::query("UPDATE user_profile SET camera_x = 1, camera_y = 2, camera_scale = 3, camera_frame = NULL WHERE user_id = $1")
         .bind(id)
         .execute(&mut *tx)
         .await
         .unwrap();
 
-    // With layouts present, an orphaned camera is plainly not current.
-    let (keep,): (Option<bool>,) = sqlx::query_as(CAMERA_IS_CURRENT).bind(id).fetch_one(&mut *tx).await.unwrap();
-    assert_eq!(keep, Some(false), "an orphaned camera passed while layouts existed");
+    // With layouts present, a camera with no frame is plainly not current.
+    make_layout(&mut tx, "some-sky", "some-frame").await;
+    assert_eq!(
+        camera_is_current(&mut tx, id).await,
+        Some(false),
+        "a camera with no frame passed while layouts existed"
+    );
 
     // And with no layouts at all -- the state that exposed the defect, and
     // the state a fresh stand is in before the sky is built.
     let (keep,): (Option<bool>,) = sqlx::query_as(CAMERA_IS_CURRENT_WITH_NO_SKY).bind(id).fetch_one(&mut *tx).await.unwrap();
-    assert_ne!(keep, Some(true), "an orphaned camera was called current in a database with no sky at all");
+    assert_ne!(keep, Some(true), "a camera with no frame was called current in a database with no sky at all");
 
     tx.rollback().await.unwrap();
 }
 
 #[tokio::test]
-async fn a_camera_saved_in_the_current_layout_is_kept() {
+async fn a_camera_saved_in_the_current_frame_is_kept() {
     // The other half of the rule: a check that only ever says "no" would
     // pass the test above and lose everybody's view.
     let pool = pool().await;
     let mut tx = pool.begin().await.unwrap();
 
     let id = make_user(&mut tx, "settled@example.com", "create").await;
-    let layout = make_layout(&mut tx, "newest-layout").await;
+    make_layout(&mut tx, "newest-layout", "newest-layout").await;
+    save_camera(&mut tx, id).await;
 
-    sqlx::query("UPDATE user_profile SET camera_x = 1, camera_y = 2, camera_scale = 3, layout_id = $2 WHERE user_id = $1")
-        .bind(id)
-        .bind(layout)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
-
-    let (keep,): (Option<bool>,) = sqlx::query_as(CAMERA_IS_CURRENT).bind(id).fetch_one(&mut *tx).await.unwrap();
-    assert_eq!(keep, Some(true), "a camera saved in the newest layout was thrown away");
+    assert_eq!(
+        camera_is_current(&mut tx, id).await,
+        Some(true),
+        "a camera saved in the newest layout was thrown away"
+    );
 
     tx.rollback().await.unwrap();
 }
 
 #[tokio::test]
-async fn losing_a_layout_costs_the_camera_and_nothing_else() {
-    // The layout a camera was taken in can be deleted. That must cost the
-    // camera its meaning, not cost the person their account.
+async fn a_camera_outlives_a_new_edition_laid_out_in_its_frame_and_not_a_fresh_one() {
+    // What v0.24 is for: the next edition is laid out from the one before and
+    // keeps its frame, so a view saved in edition three still opens on the
+    // same stars in edition four. A sky drawn fresh moves everything, and
+    // keeping the camera there would open it on empty space.
+    let pool = pool().await;
+    let mut tx = pool.begin().await.unwrap();
+
+    let id = make_user(&mut tx, "navigator@example.com", "create").await;
+    make_layout(&mut tx, "edition-three", "frame-of-three").await;
+    save_camera(&mut tx, id).await;
+
+    make_layout(&mut tx, "edition-four", "frame-of-three").await;
+    assert_eq!(
+        camera_is_current(&mut tx, id).await,
+        Some(true),
+        "a camera was lost to a layout continued in its frame"
+    );
+
+    make_layout(&mut tx, "drawn-fresh", "drawn-fresh").await;
+    assert_eq!(camera_is_current(&mut tx, id).await, Some(false), "a camera survived a sky drawn fresh");
+
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn filling_a_stand_again_keeps_the_cameras_taken_in_its_frame() {
+    // A stand is filled by deleting its layout and restoring the slice's. With
+    // the camera tied to the layout row, that set every camera to nothing even
+    // when the sky had not moved. Tied to the frame, it costs nothing -- and
+    // the profile is never touched by the layout going.
     let pool = pool().await;
     let mut tx = pool.begin().await.unwrap();
 
     let id = make_user(&mut tx, "traveller@example.com", "create").await;
-    let layout = make_layout(&mut tx, "test-layout").await;
-
-    sqlx::query("UPDATE user_profile SET camera_x = 1, camera_y = 2, camera_scale = 3, layout_id = $2 WHERE user_id = $1")
-        .bind(id)
-        .bind(layout)
-        .execute(&mut *tx)
-        .await
-        .unwrap();
+    let layout = make_layout(&mut tx, "the-stand-sky", "the-stand-frame").await;
+    save_camera(&mut tx, id).await;
 
     sqlx::query("DELETE FROM sky_layout WHERE id = $1")
         .bind(layout)
         .execute(&mut *tx)
         .await
         .unwrap();
-
-    let (still_there, orphaned): (i64, Option<i16>) = sqlx::query_as("SELECT count(*) OVER (), layout_id FROM user_profile WHERE user_id = $1")
+    let (profiles,): (i64,) = sqlx::query_as("SELECT count(*) FROM user_profile WHERE user_id = $1")
         .bind(id)
         .fetch_one(&mut *tx)
         .await
         .unwrap();
+    assert_eq!(profiles, 1, "deleting a layout deleted a profile");
 
-    assert_eq!(still_there, 1, "deleting a layout deleted a profile");
-    assert!(orphaned.is_none(), "the profile still points at a layout that is gone");
+    make_layout(&mut tx, "the-stand-sky-again", "the-stand-frame").await;
+    assert_eq!(
+        camera_is_current(&mut tx, id).await,
+        Some(true),
+        "filling the stand again lost a camera of the same frame"
+    );
+
     tx.rollback().await.unwrap();
 }
 

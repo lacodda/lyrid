@@ -10,11 +10,23 @@ export interface AdminEdition {
   number: number
   sealed_at: string
   layout: string
+  /** The coordinates it is drawn in; the edition before's when laid out from it. */
+  frame: string
   artists: number
   stars: number
   new: number
   merged: number
   gone: number
+  /** How far the stars it shares with the edition before moved, in layout units. */
+  drift: Drift | null
+}
+
+/** Layout units: the fog lights 14 around an open star. */
+export interface Drift {
+  stars: number
+  median: number
+  p90: number
+  max: number
 }
 
 export interface Import {

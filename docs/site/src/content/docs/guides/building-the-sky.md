@@ -21,7 +21,8 @@ layout refuses to guess which notion of closeness the sky should show.
 
 ```
 INFO lyrid::layout::build: laying out the sky metric=listenbrainz-listeners
-INFO lyrid::layout::build: graph built; running the layout stars=… edges=…
+INFO lyrid::layout::build: graph built stars=… edges=…
+INFO lyrid::layout::build: continuing the newest edition: its stars start where they were edition=3 held=… among_neighbours=… on_the_ring=…
 INFO lyrid::layout::build: laying out iteration=10 movement=…
 INFO lyrid::layout::build: positions written rows=…
 INFO lyrid::layout::build: tiles written tiles=… kilobytes=…
@@ -29,6 +30,51 @@ INFO lyrid::layout::build: tiles written tiles=… kilobytes=…
 
 Without `--tiles` the positions are stored and no files are cut, which is what
 you want while trying parameters.
+
+## A sky that remembers itself
+
+Once an edition has been [sealed](#sealing-the-edition), the next layout starts
+from it rather than from nothing. Every star that is still in the graph starts
+where that edition had it — found by its MusicBrainz id, or through the redirect
+MusicBrainz left when it merged that id into another artist — and is held near
+that place while the forces run. A new star starts in the middle of the stars it
+is similar to, weighted by how similar; one whose neighbours are all new waits a
+round for them and lands beside them; a new island of the graph, with no path to
+any star that had a place, starts on a ring just outside the sky. Then a few
+cool rounds make room for what is new:
+
+| | Fresh | Continuing an edition |
+| --- | --- | --- |
+| Starts from | a golden-angle spiral | the newest edition's places |
+| Rounds by default | 300 | 40 |
+| First round's heat | 1 | a tenth: where a fresh run ends |
+| Old stars | free | held to their places, 10 per unit of distance |
+| Frame | its own, named by its key | the edition's |
+
+The point is the person on the other side: their home sector is still where they
+left it, the camera saved in their account opens on the same stars, and a link
+to a view (`#x,y,scale`) still shows what it showed. A camera is kept by the
+**frame** it was taken in, and a continued layout keeps the frame — see [the
+camera](/lyrid/reference/accounts/#the-camera-and-the-frame-it-belongs-to).
+
+`--fresh` draws from the spiral instead. Use it when the graph is not the one
+before — another metric, a different notion of closeness — whose old places would
+be a worse start than none. It moves every star and starts a frame of its own, so
+every camera and view link saved in the old one stops pointing anywhere. The
+first sky, with no edition before it, is drawn fresh without asking.
+
+Measured on edition 3 of the full canon — 282,887 stars, with one in a hundred
+hidden from the previous places so that it had to be placed as new: the held
+stars moved 0.84 units on the median and 1.67 at the ninetieth percentile, and
+the hidden ones came to sit as close to the stars they are similar to as the
+whole layout had put them (a similarity-weighted distance of 297 on the median,
+against 332). Forty rounds are a seventh of the work of a fresh three hundred.
+
+MusicBrainz's **special purpose artists** — "Various Artists", "[unknown]",
+"[traditional]" and the rest of [its documented list](https://musicbrainz.org/doc/Style/Unknown_and_untitled/Special_purpose_artist)
+— are not stars: they are credits, not acts. The layout leaves their edges out of
+the graph and the tiles leave them out of the cut, so they have no place on the
+sky.
 
 ## Cutting tiles from a stored layout
 
@@ -90,12 +136,14 @@ The full reasoning is in
 
 ## A layout is a version, not a fact
 
-Recomputing moves every star, so layouts are versioned the way similarity
-metrics are. Coordinates are comparable **within** a layout and never across
-two.
+Layouts are versioned the way similarity metrics are. Coordinates are
+comparable **within one frame**: a layout continued from an edition keeps its
+frame, and its stars are where they were, give or take the drift sealing
+measures; a layout drawn fresh is a frame of its own, and comparing it with any
+other is comparing two pictures.
 
 ```sql
-SELECT key, description, seed, stars, created_at FROM sky_layout;
+SELECT key, frame, description, seed, stars, created_at FROM sky_layout;
 ```
 
 Reproducibility here takes more than a seed. Floating-point addition is not
@@ -215,6 +263,15 @@ Once the layout is drawn, the tiles are cut and the sky has been looked at, seal
 lyrid canon seal
 ```
 
-Sealing records the sky as the next **edition** of the canon: the newest import of each source, the layout by its key, and every star with its name. It then compares that list with the edition before and records what changed — stars that are new, stars MusicBrainz merged into another artist (the MusicBrainz import keeps its redirects in `artist_redirect` for this), and stars that went dark. The sky names its edition in the status line and shows what changed in it; see [What changed in the sky](/lyrid/concepts/what-changed-in-the-sky/).
+Sealing records the sky as the next **edition** of the canon: the newest import of each source, the layout by its key and its frame, and every star with its name, where it stands and its place by brightness. It then compares that list with the edition before and records what changed — stars that are new, stars MusicBrainz merged into another artist (the MusicBrainz import keeps its redirects in `artist_redirect` for this), and stars that went dark. The sky names its edition in the status line and shows what changed in it; see [What changed in the sky](/lyrid/concepts/what-changed-in-the-sky/).
+
+When the edition before is in the same frame — this sky was [continued from it](#a-sky-that-remembers-itself) — sealing also measures how far the stars both editions place moved, records it on the edition and prints it:
+
+```
+INFO lyrid::canon: the stars both editions place moved this far, in layout units; the fog lights 14 around an open star edition=4 shared=… median=… p90=… max=…
+```
+
+Read it against the fog: an open star lights 14 units around it, so a median well under that means a person's map has stayed theirs. A sky drawn fresh is warned about instead, because every camera and view link of the edition before now points somewhere else. The [admin page](/lyrid/guides/watching-a-stand/#the-admin-page) shows the drift of every edition.
+
 
 Seal the full canon, before cutting a slice: a slice sealed as an edition would be compared with a whole canon next time and report everything it left out as gone. One layout is one edition — sealing the same layout again is refused, so laying the sky out again is what makes room for a new edition. Measured on the full canon: 206,636 stars sealed in 15 seconds.

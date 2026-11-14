@@ -19,6 +19,7 @@ use sqlx::PgPool;
 
 use super::labels::{self, Kind};
 use super::tiles::{self, Bounds, Plan, Star, brightness};
+use crate::import::special::special_purpose;
 
 #[derive(ClapArgs)]
 pub struct Args {
@@ -151,6 +152,10 @@ fn stamp() -> u64 {
 /// Wikidata's inception only where `MusicBrainz` has none. One rule in two
 /// places would be two answers to "when did they start" -- so the card and the
 /// time machine read it the same way.
+///
+/// `MusicBrainz`'s special purpose artists are never cut into a tile, even
+/// from a layout drawn before the layout left them out: "Various Artists" is
+/// a credit, not a star, and the list is the one `lyrid layout` reads.
 async fn stars(pool: &PgPool, layout_id: i16) -> Result<Vec<Star>> {
     let rows: Vec<(i32, f32, f32, f32, Option<i16>)> = sqlx::query_as(
         "SELECT p.artist_id, p.x, p.y, COALESCE(al.listeners, 0)::real, COALESCE(a.begin_year, f.inception_year)
@@ -158,9 +163,10 @@ async fn stars(pool: &PgPool, layout_id: i16) -> Result<Vec<Star>> {
          JOIN artist a ON a.id = p.artist_id
          LEFT JOIN artist_listeners al ON al.artist_id = p.artist_id
          LEFT JOIN artist_fact f ON f.artist_id = p.artist_id
-         WHERE p.layout_id = $1",
+         WHERE p.layout_id = $1 AND a.mbid <> ALL($2)",
     )
     .bind(layout_id)
+    .bind(special_purpose())
     .fetch_all(pool)
     .await
     .context("failed to read the stored layout")?;
@@ -214,12 +220,14 @@ async fn groups(pool: &PgPool, layout_id: i16) -> Result<Vec<labels::Group>> {
     let rows: Vec<(String, bool, f32, f32)> = sqlx::query_as(
         "SELECT g.name, g.is_style, p.x, p.y
          FROM artist_position p
+         JOIN artist a ON a.id = p.artist_id
          JOIN main_genres(ARRAY(SELECT artist_id FROM artist_position WHERE layout_id = $1)) main
              ON main.artist_id = p.artist_id
          JOIN genre g ON g.id = main.genre_id
-         WHERE p.layout_id = $1",
+         WHERE p.layout_id = $1 AND a.mbid <> ALL($2)",
     )
     .bind(layout_id)
+    .bind(special_purpose())
     .fetch_all(pool)
     .await
     .context("failed to read the genres of placed artists")?;

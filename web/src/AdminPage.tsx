@@ -78,12 +78,14 @@ function useFormat() {
   const moment = (at: string | null) =>
     at === null ? '—' : new Intl.DateTimeFormat(resolved, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(at)) + ' UTC'
   const day = (at: string) => new Intl.DateTimeFormat(resolved, { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${at.slice(0, 10)}T00:00:00Z`))
-  return { number, moment, day }
+  /** A distance in layout units: a tenth is as fine as anyone reads a map. */
+  const distance = (value: number) => value.toLocaleString(resolved, { maximumFractionDigits: 1 })
+  return { number, moment, day, distance }
 }
 
 function Sections({ overview }: { overview: Overview }) {
   const { t } = useTranslation()
-  const { number, moment, day } = useFormat()
+  const { number, moment, day, distance } = useFormat()
   const { canon, feeds, accounts } = overview
   const latest = canon.editions[0]
 
@@ -111,7 +113,14 @@ function Sections({ overview }: { overview: Overview }) {
         {canon.editions.length > 0 && (
           <Table
             caption={t('admin.canon.editions')}
-            head={[t('admin.columns.edition'), t('admin.columns.sealed'), t('admin.columns.layout'), t('admin.columns.stars'), t('admin.columns.changes')]}
+            head={[
+              t('admin.columns.edition'),
+              t('admin.columns.sealed'),
+              t('admin.columns.layout'),
+              t('admin.columns.stars'),
+              t('admin.columns.changes'),
+              t('admin.columns.drift'),
+            ]}
             rows={canon.editions.map((edition, at) => [
               String(edition.number),
               moment(edition.sealed_at),
@@ -122,6 +131,13 @@ function Sections({ overview }: { overview: Overview }) {
               at === canon.editions.length - 1
                 ? t('admin.canon.first')
                 : t('admin.canon.changes', { new: number(edition.new), merged: number(edition.merged), gone: number(edition.gone) }),
+              // Nothing moved in the first edition; an edition with no drift
+              // after it was drawn in a frame of its own.
+              at === canon.editions.length - 1
+                ? '—'
+                : edition.drift
+                  ? t('admin.canon.drift', { median: distance(edition.drift.median), p90: distance(edition.drift.p90), max: distance(edition.drift.max) })
+                  : t('admin.canon.freshFrame'),
             ])}
           />
         )}

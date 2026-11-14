@@ -13,9 +13,11 @@ From the second edition on it also says what changed since the one before:
 
 - **new stars** — artists who have a place in this sky and had none in the last one; the brightest are named, and a press flies to them;
 - **merged** — stars MusicBrainz merged into another artist, by the name they had, with the star they became;
-- **gone dark** — stars that left without a merge: deleted, or left with too few listeners, or none shared with anyone else, to place them by.
+- **gone dark** — stars that left without a merge: deleted, or left with too few listeners, or none shared with anyone else, to place them by. The brightest of them are named, by the place each had in the edition it left: its listeners left with it, so the canon can no longer say, and the edition it left remembers.
 
-The first edition changed nothing, because nothing came before it, and the panel says so. Editions are explained in [ADR 0023](https://github.com/lacodda/lyrid/blob/main/docs/adr/0023-editions-of-the-canon.md).
+It also says whether the stars kept their places. A new edition is laid out from the one before: every star that stays starts where it was and moves little, and the new ones are placed among the stars they are similar to — so a view you saved, or a link you sent, still shows the same part of the sky, and your home sector is where you left it. Now and then a sky is drawn afresh, when the graph it is drawn from is a different one, and then every star moves; the panel says that too.
+
+The first edition changed nothing, because nothing came before it, and the panel says so. Editions are explained in [ADR 0023](https://github.com/lacodda/lyrid/blob/main/docs/adr/0023-editions-of-the-canon.md), and how a sky remembers its last edition in [ADR 0029](https://github.com/lacodda/lyrid/blob/main/docs/adr/0029-a-sky-that-remembers-itself.md).
 
 ## Rising this week
 

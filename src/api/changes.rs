@@ -73,6 +73,10 @@ struct EditionSource {
 struct Previous {
     number: i16,
     sealed_at: String,
+    /// Whether this edition was laid out from that one, in its frame: then
+    /// the stars kept their places, and a view saved in the edition before
+    /// still shows the same sky. False when the sky was drawn afresh.
+    same_frame: bool,
 }
 
 #[derive(Serialize)]
@@ -84,7 +88,8 @@ struct Changed {
     new_stars: Vec<PlacedStar>,
     /// Stars merged into another, by the name they had, and the star they are now.
     merges: Vec<Merge>,
-    /// Stars gone dark, by the name they had.
+    /// Stars gone dark, by the name they had: the brightest of them, by the
+    /// place each had in the edition it left.
     gone_names: Vec<String>,
 }
 
@@ -197,17 +202,22 @@ async fn edition(conn: &mut PgConnection) -> sqlx::Result<Option<Edition>> {
     })
     .collect();
 
-    let previous = sqlx::query_as::<_, (i16, OffsetDateTime)>("SELECT id, sealed_at FROM canon_edition WHERE id < $1 ORDER BY id DESC LIMIT 1")
-        .bind(number)
-        .fetch_optional(&mut *conn)
-        .await?
-        .map(|(number, sealed_at)| Previous {
-            number,
-            sealed_at: stamp(sealed_at),
-        });
+    let previous = sqlx::query_as::<_, (i16, OffsetDateTime, bool)>(
+        "SELECT o.id, o.sealed_at, o.frame = e.frame
+         FROM canon_edition o JOIN canon_edition e ON e.id = $1
+         WHERE o.id < $1 ORDER BY o.id DESC LIMIT 1",
+    )
+    .bind(number)
+    .fetch_optional(&mut *conn)
+    .await?
+    .map(|(number, sealed_at, same_frame)| Previous {
+        number,
+        sealed_at: stamp(sealed_at),
+        same_frame,
+    });
 
-    let changed = match previous {
-        Some(_) => Some(changed(conn, number).await?),
+    let changed = match &previous {
+        Some(previous) => Some(changed(conn, number, previous.number).await?),
         None => None,
     };
 
@@ -222,7 +232,7 @@ async fn edition(conn: &mut PgConnection) -> sqlx::Result<Option<Edition>> {
     }))
 }
 
-async fn changed(conn: &mut PgConnection, edition: i16) -> sqlx::Result<Changed> {
+async fn changed(conn: &mut PgConnection, edition: i16, previous: i16) -> sqlx::Result<Changed> {
     let (new_count, merged_count, gone_count): (i64, i64, i64) = sqlx::query_as(
         "SELECT count(*) FILTER (WHERE change = 'new'), count(*) FILTER (WHERE change = 'merged'), count(*) FILTER (WHERE change = 'gone')
          FROM canon_change WHERE edition_id = $1",
@@ -270,11 +280,23 @@ async fn changed(conn: &mut PgConnection, edition: i16) -> sqlx::Result<Changed>
     })
     .collect();
 
-    let gone_names = sqlx::query_scalar("SELECT name FROM canon_change WHERE edition_id = $1 AND change = 'gone' ORDER BY name LIMIT $2")
-        .bind(edition)
-        .bind(NAMED)
-        .fetch_all(&mut *conn)
-        .await?;
+    // The brightest first, by the place each had in the edition it left:
+    // its listeners went with it, so the canon can no longer say. A star of
+    // an edition sealed before places were kept has none, and comes after
+    // the ranked ones, by name.
+    let gone_names = sqlx::query_scalar(
+        "SELECT c.name
+         FROM canon_change c
+         LEFT JOIN canon_edition_star o ON o.edition_id = $2 AND o.mbid = c.mbid
+         WHERE c.edition_id = $1 AND c.change = 'gone'
+         ORDER BY o.rank NULLS LAST, c.name
+         LIMIT $3",
+    )
+    .bind(edition)
+    .bind(previous)
+    .bind(NAMED)
+    .fetch_all(&mut *conn)
+    .await?;
 
     Ok(Changed {
         new: new_count,
@@ -386,6 +408,7 @@ mod tests {
             "artist_listeners",
             "canon_edition",
             "canon_edition_source",
+            "canon_edition_star",
             "canon_change",
             "listening_day",
             "star_rising",
@@ -428,7 +451,7 @@ mod tests {
         run(&mut *tx, "INSERT INTO similarity_metric (id, key, description) VALUES (1, 'm', 'm')").await;
         run(
             &mut *tx,
-            "INSERT INTO sky_layout (id, key, metric_id, description, seed) VALUES (1, 'sky', 1, 'd', 1)",
+            "INSERT INTO sky_layout (id, key, frame, metric_id, description, seed) VALUES (1, 'sky', 'sky', 1, 'd', 1)",
         )
         .await;
         run(
@@ -443,8 +466,10 @@ mod tests {
         .await;
 
         // Edition 2 over edition 1: Bright and Dark are new, Old merged into
-        // Dim, Lost into Dark (which has no place), Faded gone dark.
-        run(&mut *tx, "INSERT INTO canon_edition (id, layout_key, artists, stars, sealed_at) VALUES (1, 'old', 3, 2, now() - interval '30 days'), (2, 'sky', 3, 2, now())").await;
+        // Dim, Lost into Dark (which has no place); Faded, Aardvark and
+        // Unranked gone dark. Faded was the brightest of the three in edition
+        // 1, Aardvark comes first by name, and Unranked has no place recorded.
+        run(&mut *tx, "INSERT INTO canon_edition (id, layout_key, frame, artists, stars, sealed_at) VALUES (1, 'old', 'old', 3, 2, now() - interval '30 days'), (2, 'sky', 'sky', 3, 2, now())").await;
         run(
             &mut *tx,
             "INSERT INTO canon_edition_source (edition_id, source, version, imported_at) VALUES (2, 'musicbrainz', '20261014-150514', now())",
@@ -453,7 +478,8 @@ mod tests {
         sqlx::query(
             "INSERT INTO canon_change (edition_id, mbid, change, into_mbid, name) VALUES
              (2, $1, 'new', NULL, 'Bright'), (2, $3, 'new', NULL, 'Dark'),
-             (2, $4, 'merged', $2, 'Old Name'), (2, $5, 'merged', $3, 'Lost Name'), (2, $6, 'gone', NULL, 'Faded')",
+             (2, $4, 'merged', $2, 'Old Name'), (2, $5, 'merged', $3, 'Lost Name'), (2, $6, 'gone', NULL, 'Faded'),
+             (2, $7, 'gone', NULL, 'Aardvark'), (2, $8, 'gone', NULL, 'Unranked')",
         )
         .bind(bright)
         .bind(dim)
@@ -461,6 +487,18 @@ mod tests {
         .bind(Uuid::from_u128(4))
         .bind(Uuid::from_u128(5))
         .bind(Uuid::from_u128(6))
+        .bind(Uuid::from_u128(7))
+        .bind(Uuid::from_u128(8))
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO canon_edition_star (edition_id, mbid, name, rank) VALUES
+             (1, $1, 'Faded', 3), (1, $2, 'Aardvark', 40), (1, $3, 'Unranked', NULL)",
+        )
+        .bind(Uuid::from_u128(6))
+        .bind(Uuid::from_u128(7))
+        .bind(Uuid::from_u128(8))
         .execute(&mut *tx)
         .await
         .unwrap();
@@ -516,11 +554,13 @@ mod tests {
         let edition = changes.edition.expect("an edition is sealed");
         assert_eq!(edition.number, 2);
         assert!(edition.current, "the sky on screen is the sealed one");
-        assert_eq!(edition.previous.map(|previous| previous.number), Some(1));
+        let previous = edition.previous.as_ref().expect("edition 2 has one before it");
+        assert_eq!(previous.number, 1);
+        assert!(!previous.same_frame, "two editions in different frames were called one map");
         let difference = edition.changed.expect("the second edition says what changed");
         assert_eq!(
             (difference.new, difference.merged, difference.gone),
-            (2, 2, 1),
+            (2, 2, 3),
             "counts include what is not listed"
         );
         assert_eq!(difference.new_stars.iter().map(|star| star.name.as_str()).collect::<Vec<_>>(), ["Bright"]);
@@ -532,7 +572,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             [("Old Name", "Dim")]
         );
-        assert_eq!(difference.gone_names, ["Faded"]);
+        // The brightest of the departed first, by the place it had: not by
+        // name, which put a sky's worth of punctuation first.
+        assert_eq!(difference.gone_names, ["Faded", "Aardvark", "Unranked"]);
 
         assert_eq!(changes.rising.through.as_deref(), Some("2026-10-15"));
         assert_eq!(changes.rising.stars.iter().map(|riser| riser.star.name.as_str()).collect::<Vec<_>>(), ["Dim"]);

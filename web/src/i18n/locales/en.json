@@ -451,9 +451,11 @@
       "source": "{{source}} — {{version}}, imported {{imported}}",
       "first": "The first edition: nothing came before it, so nothing has changed yet. The next rebuild of the canon will say what it changed.",
       "since": "Since edition {{number}}: {{new}} new stars, {{merged}} merged into others, {{gone}} gone dark.",
+      "mapKept": "The stars kept their places: a view saved in edition {{number}} still shows the same part of the sky.",
+      "mapRedrawn": "The sky was laid out afresh: every star moved, and a view saved in edition {{number}} points somewhere else now.",
       "newStars": "The brightest of the new stars",
       "merges": "Merged by MusicBrainz, by the names they had",
-      "gone": "Gone dark: {{names}}"
+      "gone": "The brightest gone dark: {{names}}"
     },
     "sources": {
       "musicbrainz": "MusicBrainz",
@@ -515,6 +517,8 @@
       "editions": "Editions",
       "imports": "Every import this database has recorded, newest first",
       "changes": "+{{new}} · merged {{merged}} · gone {{gone}}",
+      "drift": "{{median}} on the median · {{p90}} at p90 · {{max}} at most",
+      "freshFrame": "drawn fresh, in a frame of its own",
       "first": "the first edition"
     },
     "listening": {
@@ -572,6 +576,7 @@
       "layout": "Layout",
       "stars": "Stars",
       "changes": "Changed",
+      "drift": "Moved",
       "source": "Source",
       "version": "Version",
       "finished": "Finished",

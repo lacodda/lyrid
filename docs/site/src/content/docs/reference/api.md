@@ -614,10 +614,13 @@ counts are given and never listed. Cut to its first entries:
 ```
 
 - `edition` is `null` until the canon is sealed. `current` is false when the
-  sky was laid out again after sealing. `changed` is `null` for the first
-  edition; from the second it holds the counts of `new`, `merged` and `gone`
-  stars, the brightest new stars, the merges as `{ from, into }` and the names
-  of the stars gone dark — at most 24 of each.
+  sky was laid out again after sealing. `previous` is the edition before, with
+  `same_frame`: true when this one was laid out from it, so the stars kept
+  their places and a view saved before still shows the same sky. `changed` is
+  `null` for the first edition; from the second it holds the counts of `new`,
+  `merged` and `gone` stars, the brightest new stars, the merges as
+  `{ from, into }` and the names of the stars gone dark, the brightest first by
+  the place each had in the edition it left — at most 24 of each.
 - `rising.through` is the last day of the week the stars rose in, `null` until
   a week and the month before it are covered; `recent` and `earlier` are
   listeners a day. At most 12, strongest rise first.

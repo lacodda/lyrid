@@ -62,11 +62,26 @@ struct Edition {
     number: i16,
     sealed_at: String,
     layout: String,
+    /// The coordinates it is drawn in: the same as the edition before's when
+    /// it was laid out from that one.
+    frame: String,
     artists: i32,
     stars: i32,
     new: i64,
     merged: i64,
     gone: i64,
+    /// How far the stars it shares with the edition before moved; `None` for
+    /// the first edition and for one drawn in a frame of its own.
+    drift: Option<Drift>,
+}
+
+/// Layout units: the fog lights 14 around an open star.
+#[derive(Serialize)]
+struct Drift {
+    stars: i32,
+    median: f32,
+    p90: f32,
+    max: f32,
 }
 
 #[derive(Serialize)]
@@ -246,27 +261,36 @@ async fn canon(pool: &PgPool) -> sqlx::Result<Canon> {
         None => 0,
     };
 
-    let editions: Vec<Edition> = sqlx::query_as::<_, (i16, OffsetDateTime, String, i32, i32, i64, i64, i64)>(
-        "SELECT e.id, e.sealed_at, e.layout_key, e.artists, e.stars,
+    let editions: Vec<Edition> = sqlx::query_as::<_, EditionRow>(
+        "SELECT e.id, e.sealed_at, e.layout_key, e.frame, e.artists, e.stars,
                 count(c.mbid) FILTER (WHERE c.change = 'new'),
                 count(c.mbid) FILTER (WHERE c.change = 'merged'),
-                count(c.mbid) FILTER (WHERE c.change = 'gone')
+                count(c.mbid) FILTER (WHERE c.change = 'gone'),
+                e.drift_stars, e.drift_median, e.drift_p90, e.drift_max
          FROM canon_edition e LEFT JOIN canon_change c ON c.edition_id = e.id
          GROUP BY e.id ORDER BY e.id DESC",
     )
     .fetch_all(pool)
     .await?
     .into_iter()
-    .map(|(number, sealed_at, layout, artists, stars, new, merged, gone)| Edition {
-        number,
-        sealed_at: stamp(sealed_at),
-        layout,
-        artists,
-        stars,
-        new,
-        merged,
-        gone,
-    })
+    .map(
+        |(number, sealed_at, layout, frame, artists, stars, new, merged, gone, drift_stars, median, p90, max)| Edition {
+            number,
+            sealed_at: stamp(sealed_at),
+            layout,
+            frame,
+            artists,
+            stars,
+            new,
+            merged,
+            gone,
+            // The table holds the four together or not at all.
+            drift: match (drift_stars, median, p90, max) {
+                (Some(stars), Some(median), Some(p90), Some(max)) => Some(Drift { stars, median, p90, max }),
+                _ => None,
+            },
+        },
+    )
     .collect();
 
     let imports = sqlx::query_as::<_, (String, String, OffsetDateTime, Option<OffsetDateTime>, Option<i64>)>(
@@ -295,6 +319,22 @@ async fn canon(pool: &PgPool) -> sqlx::Result<Canon> {
         imports,
     })
 }
+
+type EditionRow = (
+    i16,
+    OffsetDateTime,
+    String,
+    String,
+    i32,
+    i32,
+    i64,
+    i64,
+    i64,
+    Option<i32>,
+    Option<f32>,
+    Option<f32>,
+    Option<f32>,
+);
 
 type RunRow = (
     String,

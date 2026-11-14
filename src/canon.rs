@@ -17,17 +17,39 @@
 //!
 //! A slice is cut after sealing, from the sealed canon, so a stand carries the
 //! edition of the canon it was cut from and can tell it holds part of it.
+//!
+//! An edition also keeps where each of its stars was and how bright it was.
+//! The next layout starts from those places (`lyrid layout`), and sealing
+//! measures how far the stars the two editions share have moved: the number
+//! that says whether a camera saved last month still opens on the same sky.
+//! See ADR 0029.
 
 use anyhow::{Context, Result, bail};
 use sqlx::{Connection, PgConnection, PgPool};
 
 /// What sealing wrote.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Sealed {
     pub number: i16,
     pub stars: i64,
     /// `None` for the first edition, which has nothing to be compared with.
     pub changes: Option<Changes>,
+    /// How far the shared stars moved. `None` for the first edition, and for
+    /// one drawn in a frame of its own: coordinates in two frames are two
+    /// unrelated pictures, and a distance between them means nothing.
+    pub drift: Option<Drift>,
+}
+
+/// How far the stars an edition shares with the one before moved, in layout
+/// units. The fog lights 14 of them around an open star (ADR 0026), which is
+/// the scale to read these against.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Drift {
+    /// How many stars both editions place, which is what the rest is over.
+    pub stars: i64,
+    pub median: f32,
+    pub p90: f32,
+    pub max: f32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -40,6 +62,21 @@ pub struct Changes {
 pub async fn run(pool: &PgPool) -> Result<()> {
     let mut conn = pool.acquire().await.context("failed to reach the database")?;
     let sealed = seal(&mut conn).await?;
+    match (sealed.changes, sealed.drift) {
+        (Some(_), Some(drift)) => tracing::info!(
+            edition = sealed.number,
+            shared = drift.stars,
+            median = drift.median,
+            p90 = drift.p90,
+            max = drift.max,
+            "the stars both editions place moved this far, in layout units; the fog lights 14 around an open star"
+        ),
+        (Some(_), None) => tracing::warn!(
+            edition = sealed.number,
+            "this sky was drawn in a frame of its own: every star moved, and the cameras and view links of the edition before point somewhere else"
+        ),
+        (None, _) => {}
+    }
     if let Some(changes) = sealed.changes {
         tracing::info!(
             edition = sealed.number,
@@ -67,10 +104,11 @@ pub async fn seal(conn: &mut PgConnection) -> Result<Sealed> {
     let mut tx = conn.begin().await.context("failed to open the sealing transaction")?;
 
     // The sky the server shows is the newest layout; that is what is sealed.
-    let Some((layout_id, layout_key)) = sqlx::query_as::<_, (i16, String)>("SELECT id, key FROM sky_layout ORDER BY created_at DESC LIMIT 1")
-        .fetch_optional(&mut *tx)
-        .await
-        .context("failed to read the current layout")?
+    let Some((layout_id, layout_key, frame)) =
+        sqlx::query_as::<_, (i16, String, String)>("SELECT id, key, frame FROM sky_layout ORDER BY created_at DESC LIMIT 1")
+            .fetch_optional(&mut *tx)
+            .await
+            .context("failed to read the current layout")?
     else {
         bail!("there is no layout to seal: run `lyrid layout` first");
     };
@@ -100,13 +138,14 @@ pub async fn seal(conn: &mut PgConnection) -> Result<Sealed> {
         bail!("the layout {layout_key} placed no stars: there is no sky to seal");
     }
 
-    let previous: Option<i16> = sqlx::query_scalar("SELECT max(id) FROM canon_edition")
-        .fetch_one(&mut *tx)
+    let previous: Option<(i16, String)> = sqlx::query_as("SELECT id, frame FROM canon_edition ORDER BY id DESC LIMIT 1")
+        .fetch_optional(&mut *tx)
         .await
         .context("failed to find the edition before")?;
 
-    let number: i16 = sqlx::query_scalar("INSERT INTO canon_edition (layout_key, artists, stars) VALUES ($1, $2, $3) RETURNING id")
+    let number: i16 = sqlx::query_scalar("INSERT INTO canon_edition (layout_key, frame, artists, stars) VALUES ($1, $2, $3, $4) RETURNING id")
         .bind(&layout_key)
+        .bind(&frame)
         .bind(i32::try_from(artists).context("more artists than an edition can count")?)
         .bind(i32::try_from(stars).context("more stars than an edition can count")?)
         .fetch_one(&mut *tx)
@@ -128,10 +167,17 @@ pub async fn seal(conn: &mut PgConnection) -> Result<Sealed> {
     .await
     .context("failed to record the edition's sources")?;
 
+    // Each star with where it stands and its place by brightness, in the
+    // order the tiles draw and the slice keeps: the most listened first, the
+    // canon's id breaking ties (ADR 0024). The place is what "gone dark" is
+    // sorted by once a star has left, when its listeners are gone with it.
     sqlx::query(
-        "INSERT INTO canon_edition_star (edition_id, mbid, name)
-         SELECT $1, a.mbid, a.name
-         FROM artist_position p JOIN artist a ON a.id = p.artist_id
+        "INSERT INTO canon_edition_star (edition_id, mbid, name, x, y, rank)
+         SELECT $1, a.mbid, a.name, p.x, p.y,
+                row_number() OVER (ORDER BY coalesce(al.listeners, 0) DESC, p.artist_id)
+         FROM artist_position p
+         JOIN artist a ON a.id = p.artist_id
+         LEFT JOIN artist_listeners al ON al.artist_id = p.artist_id
          WHERE p.layout_id = $2",
     )
     .bind(number)
@@ -140,13 +186,67 @@ pub async fn seal(conn: &mut PgConnection) -> Result<Sealed> {
     .await
     .context("failed to record the edition's stars")?;
 
-    let changes = match previous {
-        Some(previous) => Some(compare(&mut tx, previous, number).await?),
-        None => None,
+    let (changes, drift) = match previous {
+        Some((previous, previous_frame)) => {
+            let changes = compare(&mut tx, previous, number).await?;
+            let drift = if previous_frame == frame {
+                measure_drift(&mut tx, previous, number).await?
+            } else {
+                None
+            };
+            (Some(changes), drift)
+        }
+        None => (None, None),
     };
 
     tx.commit().await.context("failed to commit the edition")?;
-    Ok(Sealed { number, stars, changes })
+    Ok(Sealed { number, stars, changes, drift })
+}
+
+/// Measures, and records on the edition, how far the stars it shares with
+/// the edition before moved. `None` when no star has a place in both -- an
+/// edition sealed before places were recorded has none to give.
+async fn measure_drift(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, previous: i16, current: i16) -> Result<Option<Drift>> {
+    let (stars, median, p90, max): (i64, Option<f64>, Option<f64>, Option<f64>) = sqlx::query_as(
+        "SELECT count(*),
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY moved),
+                percentile_cont(0.9) WITHIN GROUP (ORDER BY moved),
+                max(moved)
+         FROM (
+             SELECT sqrt(((s.x - o.x)::float8) ^ 2 + ((s.y - o.y)::float8) ^ 2) AS moved
+             FROM canon_edition_star s
+             JOIN canon_edition_star o ON o.edition_id = $1 AND o.mbid = s.mbid
+             WHERE s.edition_id = $2 AND s.x IS NOT NULL AND o.x IS NOT NULL
+         ) AS shared",
+    )
+    .bind(previous)
+    .bind(current)
+    .fetch_one(&mut **tx)
+    .await
+    .context("failed to measure how far the stars moved")?;
+
+    let (Some(median), Some(p90), Some(max)) = (median, p90, max) else {
+        return Ok(None);
+    };
+    // Layout coordinates are `real`, so their distances carry no precision
+    // past what f32 holds.
+    #[expect(clippy::cast_possible_truncation, reason = "distances between f32 coordinates")]
+    let drift = Drift {
+        stars,
+        median: median as f32,
+        p90: p90 as f32,
+        max: max as f32,
+    };
+    sqlx::query("UPDATE canon_edition SET drift_stars = $2, drift_median = $3, drift_p90 = $4, drift_max = $5 WHERE id = $1")
+        .bind(current)
+        .bind(i32::try_from(drift.stars).context("more shared stars than an edition can count")?)
+        .bind(drift.median)
+        .bind(drift.p90)
+        .bind(drift.max)
+        .execute(&mut **tx)
+        .await
+        .context("failed to record how far the stars moved")?;
+    Ok(Some(drift))
 }
 
 /// Writes what changed between two editions, and counts it.
@@ -241,6 +341,7 @@ mod tests {
             "similarity_metric",
             "sky_layout",
             "artist_position",
+            "artist_listeners",
             "dump_import",
             "canon_edition",
             "canon_edition_source",
@@ -263,20 +364,32 @@ mod tests {
         Uuid::from_u128(n)
     }
 
-    async fn star(conn: &mut PgConnection, layout: i16, key: i32, mbid: Uuid, name: &str) {
-        sqlx::query("INSERT INTO artist (id, mbid, name, sort_name) VALUES ($1, $2, $3, $3)")
+    /// A star of `layout`: an artist, its place, and how many listen to it.
+    async fn star(conn: &mut PgConnection, layout: i16, key: i32, mbid: Uuid, name: &str, at: (f32, f32), listeners: i32) {
+        sqlx::query("INSERT INTO artist (id, mbid, name, sort_name) VALUES ($1, $2, $3, $3) ON CONFLICT (id) DO NOTHING")
             .bind(key)
             .bind(mbid)
             .bind(name)
             .execute(&mut *conn)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO artist_position (layout_id, artist_id, x, y) VALUES ($1, $2, 0, 0)")
+        sqlx::query("INSERT INTO artist_position (layout_id, artist_id, x, y) VALUES ($1, $2, $3, $4)")
             .bind(layout)
             .bind(key)
+            .bind(at.0)
+            .bind(at.1)
             .execute(&mut *conn)
             .await
             .unwrap();
+        sqlx::query(
+            "INSERT INTO artist_listeners (artist_id, listeners, listens) VALUES ($1, $2, $2)
+             ON CONFLICT (artist_id) DO UPDATE SET listeners = EXCLUDED.listeners, listens = EXCLUDED.listens",
+        )
+        .bind(key)
+        .bind(listeners)
+        .execute(&mut *conn)
+        .await
+        .unwrap();
     }
 
     async fn run(conn: &mut PgConnection, sql: &'static str) {
@@ -293,12 +406,12 @@ mod tests {
         run(&mut tx, "INSERT INTO similarity_metric (id, key, description) VALUES (1, 'test', 'test')").await;
         run(
             &mut tx,
-            "INSERT INTO sky_layout (id, key, metric_id, description, seed, created_at) VALUES (1, 'first', 1, 'test', 1, now() - interval '1 day')",
+            "INSERT INTO sky_layout (id, key, frame, metric_id, description, seed, created_at) VALUES (1, 'first', 'first', 1, 'test', 1, now() - interval '1 day')",
         )
         .await;
-        star(&mut tx, 1, 1, id(1), "Kept").await;
-        star(&mut tx, 1, 2, id(2), "Merged Away").await;
-        star(&mut tx, 1, 3, id(3), "Gone Dark").await;
+        star(&mut tx, 1, 1, id(1), "Kept", (0.0, 0.0), 10).await;
+        star(&mut tx, 1, 2, id(2), "Merged Away", (0.0, 0.0), 10).await;
+        star(&mut tx, 1, 3, id(3), "Gone Dark", (0.0, 0.0), 10).await;
         run(
             &mut tx,
             "INSERT INTO dump_import (source, version, finished_at, rows_imported) VALUES ('musicbrainz', 'one', now() - interval '2 days', 3)",
@@ -308,6 +421,7 @@ mod tests {
         let first = seal(&mut tx).await.expect("the first sky seals");
         assert_eq!(first.stars, 3);
         assert_eq!(first.changes, None, "the first edition has nothing to differ from");
+        assert_eq!(first.drift, None, "the first edition has nothing to have moved from");
 
         // The same sky again is refused: one layout, one edition.
         let again = seal(&mut tx).await.unwrap_err();
@@ -315,15 +429,16 @@ mod tests {
 
         // The canon is rebuilt: the second star is merged into the first, the
         // third is deleted, and a fourth arrives. A rebuild empties the
-        // canon's tables, as the MusicBrainz import does.
-        run(&mut tx, "TRUNCATE artist, artist_redirect, artist_position").await;
+        // canon's tables, as the MusicBrainz import does. This sky was drawn
+        // fresh, in a frame of its own.
+        run(&mut tx, "TRUNCATE artist, artist_redirect, artist_position, artist_listeners").await;
         run(
             &mut tx,
-            "INSERT INTO sky_layout (id, key, metric_id, description, seed) VALUES (2, 'second', 1, 'test', 2)",
+            "INSERT INTO sky_layout (id, key, frame, metric_id, description, seed) VALUES (2, 'second', 'second', 1, 'test', 2)",
         )
         .await;
-        star(&mut tx, 2, 1, id(1), "Kept").await;
-        star(&mut tx, 2, 4, id(4), "Newcomer").await;
+        star(&mut tx, 2, 1, id(1), "Kept", (5.0, 5.0), 10).await;
+        star(&mut tx, 2, 4, id(4), "Newcomer", (6.0, 6.0), 10).await;
         sqlx::query("INSERT INTO artist_redirect (mbid, artist_id) VALUES ($1, 1)")
             .bind(id(2))
             .execute(&mut *tx)
@@ -338,6 +453,7 @@ mod tests {
         let second = seal(&mut tx).await.expect("the rebuilt sky seals");
         assert_eq!(second.number, first.number + 1);
         assert_eq!(second.changes, Some(Changes { new: 1, merged: 1, gone: 1 }));
+        assert_eq!(second.drift, None, "a distance between two frames was measured as if it meant something");
 
         let changes: Vec<(Uuid, String, Option<Uuid>, String)> =
             sqlx::query_as("SELECT mbid, change, into_mbid, name FROM canon_change WHERE edition_id = $1 ORDER BY mbid")
@@ -361,6 +477,77 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(version, "two");
+
+        tx.rollback().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_edition_keeps_its_stars_places_and_ranks_and_measures_how_far_they_moved() {
+        let Some(pool) = database().await else { return };
+        let mut tx = pool.begin().await.unwrap();
+        world(&mut tx).await.expect("a canon of the test's own");
+
+        run(&mut tx, "INSERT INTO similarity_metric (id, key, description) VALUES (1, 'test', 'test')").await;
+        run(
+            &mut tx,
+            "INSERT INTO sky_layout (id, key, frame, metric_id, description, seed, created_at) VALUES (1, 'drawn', 'drawn', 1, 'test', 1, now() - interval '1 day')",
+        )
+        .await;
+        // Ranked by listeners, the canon's id breaking the tie between the
+        // two of ten: 3, then 1 before 2, then 4 with nobody at all.
+        star(&mut tx, 1, 1, id(1), "Ten", (0.0, 0.0), 10).await;
+        star(&mut tx, 1, 2, id(2), "Also Ten", (10.0, 0.0), 10).await;
+        star(&mut tx, 1, 3, id(3), "Ninety", (0.0, 10.0), 90).await;
+        star(&mut tx, 1, 4, id(4), "Unheard", (10.0, 10.0), 1).await;
+        run(&mut tx, "DELETE FROM artist_listeners WHERE artist_id = 4").await;
+        let first = seal(&mut tx).await.expect("the first sky seals");
+
+        let recorded: Vec<(Uuid, Option<f32>, Option<f32>, Option<i32>)> =
+            sqlx::query_as("SELECT mbid, x, y, rank FROM canon_edition_star WHERE edition_id = $1 ORDER BY rank")
+                .bind(first.number)
+                .fetch_all(&mut *tx)
+                .await
+                .unwrap();
+        assert_eq!(
+            recorded,
+            vec![
+                (id(3), Some(0.0), Some(10.0), Some(1)),
+                (id(1), Some(0.0), Some(0.0), Some(2)),
+                (id(2), Some(10.0), Some(0.0), Some(3)),
+                (id(4), Some(10.0), Some(10.0), Some(4)),
+            ]
+        );
+
+        // The next edition is laid out from this one, in its frame: two stars
+        // stay, one moves 5 (a 3-4-5 step), one moves 1, and a new one
+        // arrives, which has nothing to have moved from.
+        run(
+            &mut tx,
+            "INSERT INTO sky_layout (id, key, frame, metric_id, description, seed) VALUES (2, 'continued', 'drawn', 1, 'test', 1)",
+        )
+        .await;
+        star(&mut tx, 2, 1, id(1), "Ten", (0.0, 0.0), 10).await;
+        star(&mut tx, 2, 2, id(2), "Also Ten", (10.0, 0.0), 10).await;
+        star(&mut tx, 2, 3, id(3), "Ninety", (3.0, 14.0), 90).await;
+        star(&mut tx, 2, 4, id(4), "Unheard", (11.0, 10.0), 1).await;
+        star(&mut tx, 2, 5, id(5), "Newcomer", (50.0, 50.0), 5).await;
+        let second = seal(&mut tx).await.expect("the continued sky seals");
+
+        let drift = second.drift.expect("an edition in the same frame measures its drift");
+        assert_eq!(drift.stars, 4, "only the stars both editions place are measured");
+        assert!((drift.max - 5.0).abs() < 1e-4, "{drift:?}");
+        // Distances 0, 0, 1, 5: the median sits between 0 and 1, the
+        // ninetieth percentile between 1 and 5.
+        assert!((drift.median - 0.5).abs() < 1e-4, "{drift:?}");
+        assert!((drift.p90 - 3.8).abs() < 1e-4, "{drift:?}");
+
+        let stored: (Option<i32>, Option<f32>, Option<f32>, Option<f32>, String) =
+            sqlx::query_as("SELECT drift_stars, drift_median, drift_p90, drift_max, frame FROM canon_edition WHERE id = $1")
+                .bind(second.number)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+        assert_eq!(stored, (Some(4), Some(drift.median), Some(drift.p90), Some(drift.max), "drawn".to_string()));
 
         tx.rollback().await.unwrap();
     }
