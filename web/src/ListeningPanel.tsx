@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { cn } from 'dowel-ui'
 
 import { count } from '@/metrics'
@@ -134,7 +135,7 @@ function HomeLine({ home, onHome }: { home: PlacedStar | null; onHome: (star: Pl
  * The day is there for the grammar as much as the precision: a month alone
  * comes out of `Intl` in the nominative, and "до декабрь" is not Russian.
  */
-function historyLine(link: ListenBrainzLink, language: string, t: (key: string, values?: Record<string, unknown>) => string): string {
+function historyLine(link: ListenBrainzLink, language: string, t: TFunction): string {
   const through = link.history?.through
   const share = historyRead(link)
   if (!through || share === null) return t('listening.historyStarting', { name: link.name })
