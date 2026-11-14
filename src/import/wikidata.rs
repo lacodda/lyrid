@@ -44,8 +44,12 @@
 #![allow(clippy::doc_markdown, reason = "documentation quotes upstream property and file names throughout")]
 
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
 use std::io::BufRead;
-use std::path::PathBuf;
+use std::num::NonZero;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 use anyhow::{Context, Result, bail};
 use clap::Args as ClapArgs;
@@ -302,18 +306,72 @@ fn leading_id(text: &[u8]) -> Option<&str> {
 
 /// Reads the dump: facts first, then the labels those facts refer to.
 fn read_dump(args: &Args, canon: &HashMap<String, i32>) -> Result<Harvest> {
-    let mut harvest = read_facts(args, canon)?;
-    harvest.labels = read_labels(args, &wanted_qids(&harvest))?;
+    let (mut harvest, index) = read_facts(args, canon)?;
+    harvest.labels = read_labels(args, &wanted_qids(&harvest), index.as_ref())?;
     Ok(harvest)
 }
 
-/// First pass: every fact this import keeps, and nothing else.
-fn read_facts(args: &Args, canon: &HashMap<String, i32>) -> Result<Harvest> {
+/// Where each item's line starts in the dump: the block, by Q-number, and
+/// where every block lies in the file.
+///
+/// The fact pass sees every line and every block go by, so writing down which
+/// block each item starts in costs it next to nothing, and it lets the label
+/// pass decompress only the blocks its few tens of thousands of items are in
+/// rather than the whole dump again: minutes instead of hours. The price is
+/// memory -- four bytes for every Q-number up to the largest, half a gigabyte
+/// at 140 million -- and a dump that can be read again from any block, which
+/// only a local file is.
+#[derive(Default)]
+struct Index {
+    /// The block each item's line starts in, by its Q-number; `UNSEEN` for an
+    /// item the pass did not read.
+    blocks: Vec<u32>,
+    extents: Vec<bz::Extent>,
+}
+
+/// An item the fact pass never read: deleted, or past a `--limit`.
+const UNSEEN: u32 = u32::MAX;
+
+impl Index {
+    fn record(&mut self, qid: i32, block: u32) {
+        let Ok(at) = usize::try_from(qid) else { return };
+        if at >= self.blocks.len() {
+            // Q-numbers rise through the dump, not in order: grown by an
+            // eighth at a time, so most new ones need no copy and the largest
+            // costs little beyond what it holds.
+            let len = (at + 1).max(self.blocks.len() + self.blocks.len() / 8);
+            self.blocks.resize(len, UNSEEN);
+        }
+        self.blocks[at] = block;
+    }
+
+    fn block_of(&self, qid: i32) -> Option<usize> {
+        let block = *self.blocks.get(usize::try_from(qid).ok()?)?;
+        if block == UNSEEN { None } else { usize::try_from(block).ok() }
+    }
+}
+
+/// First pass: every fact this import keeps, and nothing else -- and, for a
+/// dump read from a file, the index the label pass goes by.
+fn read_facts(args: &Args, canon: &HashMap<String, i32>) -> Result<(Harvest, Option<Index>)> {
+    let indexing = args.dump.is_some();
     let mut reader = open_dump(args)?;
+    if indexing {
+        reader = reader.keeping_extents();
+    }
+    let mut index = Index::default();
     let mut harvest = Harvest::default();
     let mut line = Vec::new();
 
-    while next_line(&mut reader, &mut line)? {
+    loop {
+        // Asked before the line is read: the block it starts in.
+        let block = if indexing { reader.block().context("failed to read the dump")? } else { None };
+        if !next_line(&mut reader, &mut line)? {
+            break;
+        }
+        if let Some(qid) = block.and(entity_text(&line)).and_then(leading_id).and_then(qid_number) {
+            index.record(qid, block.expect("a block was asked for"));
+        }
         harvest.entities += take_line(&line, canon, &mut harvest.by_mbid, &mut harvest.with_mbid);
 
         if harvest.entities % 1_000_000 == 0 && harvest.entities > 0 {
@@ -326,7 +384,11 @@ fn read_facts(args: &Args, canon: &HashMap<String, i32>) -> Result<Harvest> {
     }
 
     tracing::info!(entities = harvest.entities, matched = harvest.by_mbid.len(), "facts read");
-    Ok(harvest)
+    let index = indexing.then(|| {
+        index.extents = reader.take_extents();
+        index
+    });
+    Ok((harvest, index))
 }
 
 /// Which item ids the harvested facts point at and therefore need naming.
@@ -350,13 +412,18 @@ fn wanted_qids(harvest: &Harvest) -> HashSet<i32> {
 ///
 /// This is why the dump is read twice rather than held in memory. The wanted
 /// set is tens of thousands of items; every label in the file is tens of
-/// millions, which does not fit.
-fn read_labels(args: &Args, wanted: &HashSet<i32>) -> Result<HashMap<i32, String>> {
+/// millions, which does not fit. With the fact pass's index the second read
+/// is of the wanted items' blocks only; a dump streamed from the network
+/// cannot be read from the middle, and is read through again.
+fn read_labels(args: &Args, wanted: &HashSet<i32>, index: Option<&Index>) -> Result<HashMap<i32, String>> {
     if wanted.is_empty() {
         return Ok(HashMap::new());
     }
+    if let (Some(index), Some(path)) = (index, &args.dump) {
+        return read_labels_indexed(path, wanted, index);
+    }
 
-    tracing::info!(wanted = wanted.len(), "reading labels for the items the facts point at");
+    tracing::info!(wanted = wanted.len(), "reading labels for the items the facts point at, through the whole dump");
     let mut reader = open_dump(args)?;
     let mut labels = HashMap::with_capacity(wanted.len());
     let mut entities = 0u64;
@@ -381,6 +448,96 @@ fn read_labels(args: &Args, wanted: &HashSet<i32>) -> Result<HashMap<i32, String
     }
 
     tracing::info!(labels = labels.len(), wanted = wanted.len(), "labels read");
+    Ok(labels)
+}
+
+/// The label pass by the index: each block a wanted item starts in, read
+/// straight from the file and decompressed on its own, on every core.
+fn read_labels_indexed(path: &Path, wanted: &HashSet<i32>, index: &Index) -> Result<HashMap<i32, String>> {
+    let mut blocks: Vec<usize> = wanted.iter().filter_map(|&qid| index.block_of(qid)).collect();
+    let unseen = wanted.len() - blocks.len();
+    blocks.sort_unstable();
+    blocks.dedup();
+    tracing::info!(
+        wanted = wanted.len(),
+        unseen,
+        blocks = blocks.len(),
+        of = index.extents.len(),
+        "reading labels for the items the facts point at, from their blocks only"
+    );
+
+    let next = AtomicUsize::new(0);
+    let done = AtomicUsize::new(0);
+    let workers = thread::available_parallelism().map_or(4, NonZero::get).min(blocks.len()).max(1);
+    let found: Vec<Result<HashMap<i32, String>>> = thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| -> Result<HashMap<i32, String>> {
+                    let mut file = File::open(path).with_context(|| format!("cannot open {}", path.display()))?;
+                    let mut labels = HashMap::new();
+                    while let Some(&block) = blocks.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        labels.extend(labels_in_block(&mut file, &index.extents, block, wanted)?);
+                        let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
+                        if finished.is_multiple_of(5_000) {
+                            tracing::info!(blocks = finished, of = blocks.len(), "still reading labels");
+                        }
+                    }
+                    Ok(labels)
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap_or_else(|_| bail!("a label reader stopped with a panic")))
+            .collect()
+    });
+
+    let mut labels = HashMap::with_capacity(wanted.len());
+    for part in found {
+        labels.extend(part?);
+    }
+    tracing::info!(labels = labels.len(), wanted = wanted.len(), "labels read");
+    Ok(labels)
+}
+
+/// The labels of the wanted items whose lines start in `block`.
+///
+/// A block begins where the compressor cut it, which is mostly in the middle
+/// of a line: what comes before its first line break belongs to a line of the
+/// block before, and is let go -- it starts with no id, and a part of an
+/// entity is not one. The last line runs on into the next blocks, and is
+/// followed into them only when it is wanted.
+fn labels_in_block(file: &mut File, extents: &[bz::Extent], block: usize, wanted: &HashSet<i32>) -> Result<HashMap<i32, String>> {
+    let read = |file: &mut File, block: usize| bz::read_block(file, extents[block]).with_context(|| format!("failed to read block {block} of the dump again"));
+    let mut data = read(file, block)?;
+    let own = data.len();
+    let mut next = block + 1;
+    let mut labels = HashMap::new();
+
+    let mut at = 0;
+    while at < own {
+        let end = if let Some(offset) = memchr::memchr(b'\n', &data[at..]) {
+            at + offset
+        } else {
+            let Some(head) = entity_text(&data[at..]) else { break };
+            if leading_id(head).and_then(qid_number).is_some_and(|qid| !wanted.contains(&qid)) {
+                break;
+            }
+            loop {
+                if next >= extents.len() {
+                    break data.len();
+                }
+                let from = data.len();
+                data.extend(read(file, next)?);
+                next += 1;
+                if let Some(offset) = memchr::memchr(b'\n', &data[from..]) {
+                    break from + offset;
+                }
+            }
+        };
+        take_label(&data[at..end], wanted, &mut labels);
+        at = end + 1;
+    }
     Ok(labels)
 }
 
@@ -1011,5 +1168,113 @@ mod tests {
         // The label pass has to skip it too, and for the same reason: no
         // Q-number to key it by.
         assert!(take_labels(&[lexeme], &[1234]).is_empty());
+    }
+
+    /// Letters that compress like text rather than like a run: bzip2 folds a
+    /// run into a few bytes, and a long line has to stay long inside a block.
+    fn filler(len: usize, seed: u64) -> String {
+        let mut state = seed | 1;
+        (0..len)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                char::from(b'a' + u8::try_from(state % 26).unwrap())
+            })
+            .collect()
+    }
+
+    /// A small dump in bzip2's smallest blocks: 2,000 items, a property and a
+    /// lexeme, with lines from a few bytes to 150 kB, so lines start at every
+    /// place a block allows and some run across several blocks.
+    fn small_dump() -> tempfile::NamedTempFile {
+        let mut text = String::from("[\n");
+        for q in 1..=2000u64 {
+            let len = usize::try_from(q * 7919 % 900).unwrap() + if q % 211 == 0 { 150_000 } else { 0 };
+            text.push_str(&format!(
+                r#"{{"type":"item","id":"Q{q}","labels":{{"en":{{"language":"en","value":"Item {q}"}}}},"claims":{{"P1":"{}"}}}},"#,
+                filler(len, q)
+            ));
+            text.push('\n');
+            if q == 1000 {
+                text.push_str(r#"{"type":"property","id":"P31","labels":{"en":{"language":"en","value":"instance of"}}},"#);
+                text.push('\n');
+                text.push_str(r#"{"type":"lexeme","id":"L7","lemmas":{}},"#);
+                text.push('\n');
+            }
+        }
+        text.push_str("]\n");
+
+        let mut encoder = bzip2::write::BzEncoder::new(Vec::new(), bzip2::Compression::new(1));
+        std::io::Write::write_all(&mut encoder, text.as_bytes()).unwrap();
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(&mut file, &encoder.finish().unwrap()).unwrap();
+        file
+    }
+
+    #[test]
+    fn the_label_pass_by_the_index_finds_what_reading_the_whole_dump_finds() {
+        let dump = small_dump();
+        let args = Args {
+            dump: Some(dump.path().to_path_buf()),
+            url: None,
+            version: None,
+            limit: None,
+        };
+        let (harvest, index) = read_facts(&args, &HashMap::new()).unwrap();
+        let index = index.expect("a dump read from a file is indexed");
+        assert_eq!(harvest.entities, 2002);
+        assert!(index.extents.len() > 20, "only {} blocks: lines would not cross them", index.extents.len());
+        let indexed = index.blocks.iter().filter(|&&block| block != UNSEEN).count();
+        assert_eq!(indexed, 2000, "every item and nothing else is indexed");
+
+        // Every seventh item, every long one, and one the dump never had.
+        let mut wanted: HashSet<i32> = (1..=2000).filter(|q| q % 7 == 0 || q % 211 == 0).collect();
+        wanted.insert(1_000_000);
+        let read_through = read_labels(&args, &wanted, None).unwrap();
+        let by_index = read_labels(&args, &wanted, Some(&index)).unwrap();
+
+        assert_eq!(by_index, read_through);
+        assert_eq!(by_index.len(), wanted.len() - 1, "an item was missed");
+        assert_eq!(by_index.get(&1688).map(String::as_str), Some("Item 1688"), "a line across blocks was missed");
+    }
+
+    #[test]
+    #[ignore = "reads the head of a real dump named by LYRID_WIKIDATA_SAMPLE"]
+    fn the_label_pass_by_the_index_agrees_with_reading_through_on_a_real_dump() {
+        // The real blocks of somebody else's encoder, and real lines up to
+        // megabytes long. A head of the dump will do -- the passes stop at the
+        // limit, before the cut end:
+        //   curl -r 0-299999999 -o head.json.bz2 <dump url>
+        //   LYRID_WIKIDATA_SAMPLE=head.json.bz2 cargo test the_label_pass_by_the_index_agrees -- --ignored --nocapture
+        let path = std::path::PathBuf::from(std::env::var_os("LYRID_WIKIDATA_SAMPLE").expect("LYRID_WIKIDATA_SAMPLE names the dump"));
+        let args = Args {
+            dump: Some(path),
+            url: None,
+            version: None,
+            limit: Some(500_000),
+        };
+        let began = std::time::Instant::now();
+        let (_, index) = read_facts(&args, &HashMap::new()).unwrap();
+        let index = index.expect("a file is indexed");
+        let facts = began.elapsed();
+        let wanted: HashSet<i32> = (0..index.blocks.len())
+            .filter(|&qid| index.blocks[qid] != UNSEEN && qid % 50 == 0)
+            .filter_map(|qid| i32::try_from(qid).ok())
+            .collect();
+
+        let began = std::time::Instant::now();
+        let by_index = read_labels(&args, &wanted, Some(&index)).unwrap();
+        let indexed = began.elapsed();
+        let began = std::time::Instant::now();
+        let read_through = read_labels(&args, &wanted, None).unwrap();
+        let through = began.elapsed();
+
+        eprintln!(
+            "{} wanted, {} labelled; facts {facts:?}, labels by the index {indexed:?}, reading through {through:?}",
+            wanted.len(),
+            by_index.len()
+        );
+        assert_eq!(by_index, read_through);
     }
 }

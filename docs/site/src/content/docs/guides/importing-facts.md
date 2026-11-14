@@ -148,9 +148,25 @@ A Wikidata fact points at an item, not a word: place of birth is `Q24826`, not
 pass, but 123 million labels do not fit in memory — measured at 3.1 GB a
 quarter of the way through. So the dump is read twice: the first pass collects
 the facts and the items they point at, tens of thousands of them; the second
-reads the labels of exactly those, stopping as soon as all are found, and
-writes them to `wikidata_item`. A label may be `NULL` — the item exists and has
-no English name — which is why the queries above use `LEFT JOIN`.
+reads the labels of exactly those and writes them to `wikidata_item`. A label
+may be `NULL` — the item exists and has no English name — which is why the
+queries above use `LEFT JOIN`.
+
+The second read is short. The first pass sees every line go by, so it writes
+down which bzip2 block each item's line starts in — four bytes per Q-number,
+half a gigabyte for the whole dump — and where each block lies in the file. The
+label pass then decompresses only the blocks the wanted items are in, on every
+core, straight from the file, following a line into the blocks after it when it
+runs on:
+
+```
+INFO lyrid::import::wikidata: reading labels for the items the facts point at, from their blocks only wanted=… unseen=… blocks=… of=…
+```
+
+That needs a dump on disk. Read with `--url`, the stream cannot be read again
+from the middle, and the second pass reads it through, stopping as soon as every
+label is found.
+
 
 ## Influence
 

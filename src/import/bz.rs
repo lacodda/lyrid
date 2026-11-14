@@ -36,7 +36,8 @@
 
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{self, BufRead, Read};
+use std::io::{self, BufRead, Read, Seek, SeekFrom};
+
 use std::num::NonZero;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
@@ -188,6 +189,15 @@ impl Segment {
         self
     }
 
+    /// Where the block lies in the input.
+    fn extent(&self) -> Extent {
+        Extent {
+            at: self.at,
+            len: self.len,
+            level: self.level,
+        }
+    }
+
     /// Decompresses the block, returning its bytes and its CRC.
     ///
     /// The block is wrapped into a stream of its own, so libbzip2 checks it
@@ -214,8 +224,8 @@ enum Piece {
     /// A block to decompress. When the reader receives one, the worker could
     /// not decompress it alone.
     Block(Segment),
-    /// A block decompressed, with its CRC.
-    Data(Vec<u8>, u32),
+    /// A block decompressed, with its CRC and where it lies in the input.
+    Data(Vec<u8>, u32, Extent),
     /// The end of a stream, with the combined CRC it declares.
     End(u32),
     /// The input stopped making sense here.
@@ -481,11 +491,74 @@ pub struct ParallelDecoder {
     combined: u32,
     finished: bool,
     fault: Option<String>,
+    /// How many blocks have been decompressed so far: the one being read is
+    /// the last of them.
+    blocks: u32,
+    /// Where each block read so far lies in the input, when asked to keep it.
+    extents: Option<Vec<Extent>>,
+}
+
+/// Where one block lies in the compressed input: what it takes to decompress
+/// it again on its own, straight from the file, with [`read_block`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Extent {
+    /// Its first bit, counted from the start of the input.
+    pub at: u64,
+    /// Its length in bits.
+    pub len: u64,
+    /// The block-size digit of its stream's header, `b'1'..=b'9'`.
+    pub level: u8,
+}
+
+/// Decompresses one block on its own, from a seekable copy of the input a
+/// [`ParallelDecoder`] kept the extents of.
+///
+/// The block's own CRC is checked, as libbzip2 checks every block; the
+/// stream's combined CRC cannot be, since that needs every block before it.
+pub fn read_block(input: &mut (impl Read + Seek), extent: Extent) -> io::Result<Vec<u8>> {
+    let first = extent.at / 8;
+    let end = (extent.at + extent.len).div_ceil(8);
+    let mut bytes = vec![0u8; usize::try_from(end - first).map_err(io::Error::other)?];
+    input.seek(SeekFrom::Start(first))?;
+    input.read_exact(&mut bytes)?;
+    let segment = Segment {
+        bytes,
+        skip: u8::try_from(extent.at % 8).expect("a bit within a byte"),
+        len: extent.len,
+        at: extent.at,
+        level: extent.level,
+    };
+    segment.decode().map(|(data, _)| data)
 }
 
 impl ParallelDecoder {
     pub fn new<R: Read + Send + 'static>(source: R) -> Self {
         Self::from_pieces(Splitter::new(source))
+    }
+
+    /// Keeps where each block lies as it is read, so that a later pass can go
+    /// straight to the few blocks it needs ([`read_block`]) instead of
+    /// decompressing the whole input again.
+    #[must_use]
+    pub fn keeping_extents(mut self) -> Self {
+        self.extents = Some(Vec::new());
+        self
+    }
+
+    /// The number of the block the next byte will be read from, counting from
+    /// zero, or `None` at the end of the input. Asked before reading a line,
+    /// it is the block the line starts in.
+    pub fn block(&mut self) -> io::Result<Option<u32>> {
+        if self.fill_buf()?.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(self.blocks - 1))
+    }
+
+    /// Where each block read so far lies, in order: block `n` is the `n`th.
+    /// Empty unless the decoder was made [`keeping_extents`](Self::keeping_extents).
+    pub fn take_extents(&mut self) -> Vec<Extent> {
+        self.extents.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
     fn from_pieces<I: Iterator<Item = Piece> + Send + 'static>(pieces: I) -> Self {
@@ -514,6 +587,8 @@ impl ParallelDecoder {
             combined: 0,
             finished: false,
             fault: None,
+            blocks: 0,
+            extents: None,
         }
     }
 
@@ -544,13 +619,13 @@ impl ParallelDecoder {
             let piece = self.take(self.next)?;
             self.next += 1;
             match piece {
-                Piece::Data(bytes, crc) => {
-                    self.accept(bytes, crc);
+                Piece::Data(bytes, crc, extent) => {
+                    self.accept(bytes, crc, extent);
                     return Ok(true);
                 }
                 Piece::Block(segment) => match self.mend(segment) {
-                    Ok((bytes, crc)) => {
-                        self.accept(bytes, crc);
+                    Ok((bytes, crc, extent)) => {
+                        self.accept(bytes, crc, extent);
                         return Ok(true);
                     }
                     Err(message) => self.fault = Some(message),
@@ -569,16 +644,20 @@ impl ParallelDecoder {
         }
     }
 
-    fn accept(&mut self, bytes: Vec<u8>, crc: u32) {
+    fn accept(&mut self, bytes: Vec<u8>, crc: u32, extent: Extent) {
         self.combined = self.combined.rotate_left(1) ^ crc;
         self.block = bytes;
         self.pos = 0;
+        self.blocks += 1;
+        if let Some(extents) = &mut self.extents {
+            extents.push(extent);
+        }
     }
 
     /// Decodes a segment that would not decode alone, by joining the segments
     /// after it: a false signature inside a block cuts it in two, and the
     /// pieces are each other's missing half.
-    fn mend(&mut self, mut segment: Segment) -> Result<(Vec<u8>, u32), String> {
+    fn mend(&mut self, mut segment: Segment) -> Result<(Vec<u8>, u32, Extent), String> {
         let corrupt = format!("a corrupt bzip2 block at byte {} of the input", segment.at / 8);
         for _ in 0..MAX_MEND {
             let Ok(Piece::Block(rest)) = self.take(self.next) else {
@@ -586,8 +665,8 @@ impl ParallelDecoder {
             };
             self.next += 1;
             segment = segment.join(&rest);
-            if let Ok(decoded) = segment.decode() {
-                return Ok(decoded);
+            if let Ok((bytes, crc)) = segment.decode() {
+                return Ok((bytes, crc, segment.extent()));
             }
         }
         Err(corrupt)
@@ -615,7 +694,7 @@ fn work(jobs: &Mutex<Receiver<(u64, Piece)>>, results: &Sender<(u64, Piece)>) {
         let Ok((seq, piece)) = job else { return };
         let piece = match piece {
             Piece::Block(segment) => match segment.decode() {
-                Ok((bytes, crc)) => Piece::Data(bytes, crc),
+                Ok((bytes, crc)) => Piece::Data(bytes, crc, segment.extent()),
                 Err(_) => Piece::Block(segment),
             },
             other => other,
@@ -769,6 +848,82 @@ mod tests {
             }
         }
         assert_eq!(read_all(ParallelDecoder::from_pieces(cut.into_iter())).unwrap(), data);
+    }
+
+    /// Every block a decoder hands out, by the number `block()` gives it.
+    fn blocks_of(mut decoder: ParallelDecoder) -> (Vec<Vec<u8>>, Vec<Extent>) {
+        let mut blocks: Vec<Vec<u8>> = Vec::new();
+        while let Some(block) = decoder.block().unwrap() {
+            let index = usize::try_from(block).unwrap();
+            if blocks.len() <= index {
+                blocks.resize(index + 1, Vec::new());
+            }
+            let data = decoder.fill_buf().unwrap().to_vec();
+            decoder.consume(data.len());
+            blocks[index].extend(data);
+        }
+        (blocks, decoder.take_extents())
+    }
+
+    #[test]
+    fn a_block_read_on_its_own_is_the_block_the_stream_gave() {
+        // Two streams of different levels, so extents carry the level of the
+        // stream they are in and not the first one's.
+        let mut compressed = compress(&text(2_500_000, 21), 1);
+        compressed.extend(compress(&text(1_200_000, 22), 9));
+        let (blocks, extents) = blocks_of(ParallelDecoder::new(io::Cursor::new(compressed.clone())).keeping_extents());
+
+        assert!(blocks.len() > 10, "only {} blocks: the test would not reach a second stream", blocks.len());
+        assert_eq!(extents.len(), blocks.len(), "an extent for every block");
+        assert!(extents.iter().any(|e| e.level == b'1') && extents.iter().any(|e| e.level == b'9'));
+        let mut file = io::Cursor::new(compressed);
+        for (number, (extent, block)) in extents.iter().zip(&blocks).enumerate() {
+            assert_eq!(&read_block(&mut file, *extent).unwrap(), block, "block {number} read on its own differs");
+        }
+        // And backwards, as a pass that only wants a few blocks reads them.
+        assert_eq!(&read_block(&mut file, extents[3]).unwrap(), &blocks[3]);
+    }
+
+    #[test]
+    fn a_mended_block_is_kept_whole() {
+        // A block cut at a false signature is two segments, decoded as one:
+        // its extent has to cover both, or reading it again finds half.
+        let data = text(1_500_000, 3);
+        let compressed = compress(&data, 1);
+        let mut cut = Vec::new();
+        for piece in pieces(&compressed) {
+            match piece {
+                Piece::Block(segment) if cut.len() == 4 => {
+                    let half = segment.len / 2 + 3;
+                    let at = u64::from(segment.skip) + half;
+                    cut.push(Piece::Block(Segment {
+                        bytes: segment.bytes[..usize::try_from(at.div_ceil(8)).unwrap()].to_vec(),
+                        len: half,
+                        ..segment.clone()
+                    }));
+                    cut.push(Piece::Block(Segment {
+                        bytes: segment.bytes[usize::try_from(at / 8).unwrap()..].to_vec(),
+                        skip: u8::try_from(at % 8).unwrap(),
+                        len: segment.len - half,
+                        at: segment.at + half,
+                        level: segment.level,
+                    }));
+                }
+                other => cut.push(other),
+            }
+        }
+        let (blocks, extents) = blocks_of(ParallelDecoder::from_pieces(cut.into_iter()).keeping_extents());
+        assert_eq!(blocks.concat(), data);
+        let mut file = io::Cursor::new(compressed);
+        for (extent, block) in extents.iter().zip(&blocks) {
+            assert_eq!(&read_block(&mut file, *extent).unwrap(), block);
+        }
+    }
+
+    #[test]
+    fn a_decoder_not_asked_keeps_no_extents() {
+        let (_, extents) = blocks_of(ParallelDecoder::new(io::Cursor::new(compress(&text(500_000, 4), 1))));
+        assert!(extents.is_empty());
     }
 
     #[test]
