@@ -27,7 +27,7 @@ The universe is assembled locally from open dumps and datasets — MusicBrainz, 
 
 ## Status
 
-Pre-alpha: 283,062 artists in WebGL2 with cards, radio, dossiers and your listening history, in English and Russian. Both modes work; exploration starts dark and begins with an expedition and a first contract. The ship comes next. What landed when: the [CHANGELOG](https://github.com/lacodda/lyrid/blob/main/CHANGELOG.md).
+Pre-alpha: 282,887 artists in WebGL2 with cards, radio, dossiers and your listening history, in English and Russian. Both modes work; exploration starts dark and begins with an expedition and a first contract. A new edition of the canon keeps every star where it was, so your map stays yours. The ship comes next. What landed when: the [CHANGELOG](https://github.com/lacodda/lyrid/blob/main/CHANGELOG.md).
 
 ## Documentation
 

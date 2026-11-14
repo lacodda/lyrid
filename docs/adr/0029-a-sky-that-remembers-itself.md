@@ -107,3 +107,12 @@ be read from the middle, and is still read through.
   the canon has since lost have neither, so edition 3's thirty gone-dark stars are
   still named by name. Edition 2's list now opens with The Overlanders, Michael
   Morgan and Nico Gemba, where it opened with `!!*`.
+- **The label pass by the index** was checked against reading through on the
+  head of the `20261026` dump, its first 500,000 entities, in a debug build. With
+  one item in two thousand wanted -- about as sparse as the places, genres and
+  labels a whole import's facts point at -- the 247 wanted items lay in 247 of
+  12,046 blocks, and the pass took 3.8 s against 156 s, with the same labels. With
+  one in fifty wanted, nearly every block holds one, and the two came out 102 s
+  against 170 s: the gain is the share of blocks left alone, so on the whole dump
+  the three hours of the second pass should come to minutes. Recording the index
+  is a lookup and a store per line in a pass bound by decompression.

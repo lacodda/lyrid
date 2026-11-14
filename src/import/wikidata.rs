@@ -1261,10 +1261,14 @@ mod tests {
         let (_, index) = read_facts(&args, &HashMap::new()).unwrap();
         let index = index.expect("a file is indexed");
         let facts = began.elapsed();
+        // One item in two thousand: about as sparse as the places, genres and
+        // labels the facts of a whole import point at (11,000 to 60,000 of
+        // 123 million), which is what decides how few blocks are read.
         let wanted: HashSet<i32> = (0..index.blocks.len())
-            .filter(|&qid| index.blocks[qid] != UNSEEN && qid % 50 == 0)
+            .filter(|&qid| index.blocks[qid] != UNSEEN && qid % 2000 == 0)
             .filter_map(|qid| i32::try_from(qid).ok())
             .collect();
+        let blocks: HashSet<usize> = wanted.iter().filter_map(|&qid| index.block_of(qid)).collect();
 
         let began = std::time::Instant::now();
         let by_index = read_labels(&args, &wanted, Some(&index)).unwrap();
@@ -1274,8 +1278,10 @@ mod tests {
         let through = began.elapsed();
 
         eprintln!(
-            "{} wanted, {} labelled; facts {facts:?}, labels by the index {indexed:?}, reading through {through:?}",
+            "{} wanted in {} of {} blocks, {} labelled; facts {facts:?}, labels by the index {indexed:?}, reading through {through:?}",
             wanted.len(),
+            blocks.len(),
+            index.extents.len(),
             by_index.len()
         );
         assert_eq!(by_index, read_through);

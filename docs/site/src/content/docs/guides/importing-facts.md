@@ -163,6 +163,12 @@ runs on:
 INFO lyrid::import::wikidata: reading labels for the items the facts point at, from their blocks only wanted=… unseen=… blocks=… of=…
 ```
 
+What it saves is the share of blocks it leaves alone. Measured on the first
+500,000 entities of `20261026`: with one item in two thousand wanted — about as
+sparse as a whole import's facts point at — the wanted items lay in 247 of
+12,046 blocks, and the second pass took 3.8 seconds where reading through took
+156, with the same labels.
+
 That needs a dump on disk. Read with `--url`, the stream cannot be read again
 from the middle, and the second pass reads it through, stopping as soon as every
 label is found.
