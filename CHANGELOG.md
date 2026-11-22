@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.25.0] - 2026-11-22
+
+### Bug Fixes
+- Take lettre 0.11.24 and url 2.5.9 past their advisories
+
+### Features
+- Give every refusal a stable code the interface translates
+- Show the stand's admin page to the accounts that run it
+
 ## [0.24.0] - 2026-11-14
 
 ### Bug Fixes

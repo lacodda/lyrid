@@ -1286,7 +1286,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "lyrid"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "anyhow",
  "argon2",
