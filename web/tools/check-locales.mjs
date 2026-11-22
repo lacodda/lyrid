@@ -153,6 +153,11 @@ for (const file of sources(SOURCE_DIR)) {
   for (const match of text.matchAll(/\bt\(\s*'([A-Za-z][\w.]*)'/g)) {
     if (!used.has(match[1])) used.set(match[1], basename(file))
   }
+  // The screen's own words for a failure that said nothing: `explain(failure,
+  // 'account.failed')` asks for that key as surely as `t` does.
+  for (const match of text.matchAll(/\bexplain\(\s*\w+\s*,\s*'([A-Za-z][\w.]*)'\s*\)/g)) {
+    if (!used.has(match[1])) used.set(match[1], basename(file))
+  }
 }
 
 for (const [key, file] of used) {

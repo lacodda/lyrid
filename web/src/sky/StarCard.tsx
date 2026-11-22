@@ -14,6 +14,7 @@ import type { Echo, Fog } from './fog'
 import type { Dossier } from './location'
 import { Spectrum } from './Spectrum'
 import { reasons } from './why'
+import { explain } from '@/refusal'
 
 interface Props {
   artistId: number
@@ -77,7 +78,7 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
       .then(setArtist)
       .catch((cause: unknown) => {
         if (abort.signal.aborted) return
-        setError(cause instanceof Error ? cause.message : t('card.failed'))
+        setError(explain(cause, 'card.failed'))
       })
     return () => abort.abort()
   }, [artistId, t])

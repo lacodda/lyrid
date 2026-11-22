@@ -30,6 +30,7 @@ import {
   type PlacedStar,
   type ReadNow,
 } from '@/scrobbling'
+import { explain } from '@/refusal'
 
 /**
  * Real listening, brought to the sky: linking ListenBrainz, and what the
@@ -224,7 +225,7 @@ function LinkDialog({ open, onOpenChange, onLinked }: { open: boolean; onOpenCha
         onLinked(next)
       },
       (failure: unknown) => {
-        setError(failure instanceof Error ? failure.message : t('account.failed'))
+        setError(explain(failure, 'account.failed'))
         setBusy(false)
       }
     )
@@ -351,7 +352,7 @@ function Linked({
         setBusy(null)
       },
       (failure: unknown) => {
-        setError(failure instanceof Error ? failure.message : t('account.failed'))
+        setError(explain(failure, 'account.failed'))
         setBusy(null)
       }
     )
@@ -367,7 +368,7 @@ function Linked({
         onChange(next)
       },
       (failure: unknown) => {
-        setError(failure instanceof Error ? failure.message : t('account.failed'))
+        setError(explain(failure, 'account.failed'))
         setBusy(null)
       }
     )

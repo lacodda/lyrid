@@ -5,7 +5,7 @@
 //! `crate::expedition` for what an expedition is and ADR 0028 for why.
 
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router, routing::get};
 use serde::{Deserialize, Serialize};
@@ -13,10 +13,10 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
-use super::accounts::{bad_request, server_error};
+use super::refusal::Refusal;
 use super::scrobbling::signed_in;
 use crate::app::AppState;
-use crate::expedition::{self, Contract, Port, Refusal};
+use crate::expedition::{self, Contract, Port};
 
 pub fn routes() -> Router<AppState> {
     Router::new().route("/api/me/expedition", get(show).put(begin))
@@ -77,7 +77,7 @@ async fn show(State(state): State<AppState>, headers: HeaderMap) -> Response {
         Ok(expedition) => Json(expedition).into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read an expedition");
-            server_error("the expedition could not be read")
+            Refusal::ExpeditionUnreadable.into_response()
         }
     }
 }
@@ -124,27 +124,21 @@ async fn begin(State(state): State<AppState>, headers: HeaderMap, Json(body): Js
             Ok(expedition) => Json(expedition).into_response(),
             Err(error) => {
                 tracing::error!(%error, "failed to read an expedition just begun");
-                server_error("the expedition began, and could not be read back")
+                Refusal::ExpeditionNotReadBack.into_response()
             }
         },
-        Ok(Err(Refusal::NotOnSky)) => bad_request("that artist is not a star on this sky"),
-        Ok(Err(Refusal::NotExploring)) => conflict("only the exploration mode sets out on an expedition"),
-        Ok(Err(Refusal::Begun)) => conflict("the expedition has begun, from the star it began at"),
+        Ok(Err(declined)) => Refusal::from(declined).into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to begin an expedition");
-            server_error("the expedition could not begin")
+            Refusal::ExpeditionNotBegun.into_response()
         }
     }
-}
-
-fn conflict(message: &str) -> Response {
-    (StatusCode::CONFLICT, Json(serde_json::json!({ "error": message }))).into_response()
 }
 
 #[cfg(test)]
 mod tests {
     use axum::body::Body;
-    use axum::http::Request;
+    use axum::http::{Request, StatusCode};
     use sqlx::postgres::PgPoolOptions;
     use tower::ServiceExt;
 

@@ -24,6 +24,7 @@ import {
   type PlacedStar,
   type Youth,
 } from '@/scrobbling'
+import { explain } from '@/refusal'
 
 /**
  * Your life on the sky: the home your listening gathers around, the stars of
@@ -163,7 +164,7 @@ function YouthSection({
       },
       (failure: unknown) => {
         setSaving(false)
-        setError(failure instanceof Error ? failure.message : t('account.failed'))
+        setError(explain(failure, 'account.failed'))
       }
     )
   }
@@ -264,7 +265,7 @@ function LastfmSection({ listening, onListening }: { listening: Listening; onLis
       },
       (failure: unknown) => {
         setBusy(null)
-        setError(failure instanceof Error ? failure.message : t('account.failed'))
+        setError(explain(failure, 'account.failed'))
       }
     )
   }
@@ -280,7 +281,7 @@ function LastfmSection({ listening, onListening }: { listening: Listening; onLis
       },
       (failure: unknown) => {
         setBusy(null)
-        setError(failure instanceof Error ? failure.message : t('account.failed'))
+        setError(explain(failure, 'account.failed'))
       }
     )
   }
@@ -359,7 +360,7 @@ function LetterSection({ me, onMe }: { me: Me; onMe: (me: Me) => void }) {
       },
       (failure: unknown) => {
         setBusy(false)
-        setError(failure instanceof Error ? failure.message : t('account.failed'))
+        setError(explain(failure, 'account.failed'))
       }
     )
   }

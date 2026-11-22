@@ -6,13 +6,13 @@
 //! letter, or the mail client's own button, stops it with one request.
 
 use axum::extract::{Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router, routing::post, routing::put};
 use serde::Deserialize;
 use time::OffsetDateTime;
 
-use super::accounts::{bad_request, server_error};
+use super::refusal::Refusal;
 use super::scrobbling::signed_in;
 use crate::app::AppState;
 use crate::letter;
@@ -45,7 +45,7 @@ async fn ask(State(state): State<AppState>, headers: HeaderMap, Json(body): Json
         Err(refused) => return refused.into_response(),
     };
     if !letter::LANGUAGES.contains(&body.language.as_str()) {
-        return bad_request("the letter is not written in that language");
+        return Refusal::LetterLanguageUnknown.into_response();
     }
 
     let confirmed: Result<Option<bool>, _> = sqlx::query_scalar("SELECT email_confirmed_at IS NOT NULL FROM app_user WHERE id = $1")
@@ -54,16 +54,10 @@ async fn ask(State(state): State<AppState>, headers: HeaderMap, Json(body): Json
         .await;
     match confirmed {
         Ok(Some(true)) => {}
-        Ok(Some(false) | None) => {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({ "error": "confirm your address first - the letter goes only to an address you have shown is yours" })),
-            )
-                .into_response();
-        }
+        Ok(Some(false) | None) => return Refusal::AddressUnconfirmed.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read an account");
-            return server_error("the letter could not be asked for");
+            return Refusal::LetterNotAskedFor.into_response();
         }
     }
 
@@ -71,7 +65,7 @@ async fn ask(State(state): State<AppState>, headers: HeaderMap, Json(body): Json
         Ok(()) => letter_state(Some(&body.language)),
         Err(error) => {
             tracing::error!(%error, "failed to ask for the weekly letter");
-            server_error("the letter could not be asked for")
+            Refusal::LetterNotAskedFor.into_response()
         }
     }
 }
@@ -85,7 +79,7 @@ async fn stop_from_account(State(state): State<AppState>, headers: HeaderMap) ->
         Ok(()) => letter_state(None),
         Err(error) => {
             tracing::error!(%error, "failed to stop the weekly letter");
-            server_error("the letter could not be stopped")
+            Refusal::LetterNotStopped.into_response()
         }
     }
 }
@@ -98,13 +92,13 @@ async fn stop_from_account(State(state): State<AppState>, headers: HeaderMap) ->
 /// there was none: either way none will come.
 async fn stop_by_link(State(state): State<AppState>, Query(stopping): Query<Stopping>) -> Response {
     if stopping.token.is_empty() || stopping.token.len() > 128 {
-        return bad_request("that link was cut short - open it from the letter again");
+        return Refusal::StopLinkCut.into_response();
     }
     match letter::stop(&state.pool, &stopping.token).await {
         Ok(()) => Json(serde_json::json!({ "status": "stopped" })).into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to stop a weekly letter by its link");
-            server_error("the letter could not be stopped")
+            Refusal::LetterNotStopped.into_response()
         }
     }
 }
@@ -112,7 +106,7 @@ async fn stop_by_link(State(state): State<AppState>, Query(stopping): Query<Stop
 #[cfg(test)]
 mod tests {
     use axum::body::Body;
-    use axum::http::Request;
+    use axum::http::{Request, StatusCode};
     use sqlx::postgres::PgPoolOptions;
     use tower::ServiceExt;
 

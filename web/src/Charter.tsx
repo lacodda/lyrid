@@ -13,6 +13,7 @@ import {
   ConfirmDialogPopup,
   ConfirmDialogTitle,
 } from '@/components/ui/confirm-dialog'
+import { explain } from '@/refusal'
 
 /**
  * The privacy charter: a promise, and the two buttons that make it checkable.
@@ -121,7 +122,7 @@ function Controls({ onSignedOut }: { onSignedOut: () => void }) {
         setBusy(null)
       },
       (failure: unknown) => {
-        setError(failure instanceof Error ? failure.message : t('charter.controls.exportFailed'))
+        setError(explain(failure, 'charter.controls.exportFailed'))
         setBusy(null)
       }
     )
@@ -138,7 +139,7 @@ function Controls({ onSignedOut }: { onSignedOut: () => void }) {
         setBusy(null)
       },
       (failure: unknown) => {
-        setError(failure instanceof Error ? failure.message : t('charter.controls.deleteFailed'))
+        setError(explain(failure, 'charter.controls.deleteFailed'))
         setBusy(null)
       }
     )

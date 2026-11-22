@@ -27,6 +27,7 @@ import {
 import { SectionLabel } from '@/components/ui/panel'
 import { Spinner } from '@/components/ui/spinner'
 import { useLanguage } from '@/lib/language'
+import { refusedAs } from '@/refusal'
 import { memberAt, peak, yearDomain, yearTicks, yearX, type Member, type Span } from './roster'
 import { useSkyField } from './field'
 import type { Dossier as Target } from './location'
@@ -95,7 +96,7 @@ export function Dossier({ target, overview, onClose, onOpenStar, onOpenDossier, 
     const abort = new AbortController()
     const failed = (cause: unknown) => {
       if (abort.signal.aborted) return
-      const missing = cause instanceof Error && cause.message.startsWith('no such')
+      const missing = refusedAs(cause, 'no_such_label', 'no_such_scene')
       setError(missing ? t('dossier.missing') : t('dossier.failed'))
     }
     if (target.kind === 'label') fetchLabel(target.id, abort.signal).then(setLabel, failed)

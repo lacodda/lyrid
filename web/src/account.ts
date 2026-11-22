@@ -9,6 +9,8 @@
  * by asking `/api/me` rather than by consulting a local flag.
  */
 
+import { refusalOf } from '@/refusal'
+
 /** The two modes, of which a profile holds one for good once it has chosen. */
 export type Mode = 'create' | 'explore'
 
@@ -69,7 +71,7 @@ export interface ProfileUpdate {
 export async function fetchMe(signal?: AbortSignal): Promise<Me | null> {
   const response = await fetch('/api/me', { signal, credentials: 'same-origin' })
   if (response.status === 401) return null
-  if (!response.ok) throw new Error('the account could not be read')
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Me
 }
 
@@ -93,7 +95,7 @@ export async function chooseMode(mode: Mode): Promise<Me> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ mode }),
   })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Me
 }
 
@@ -132,14 +134,14 @@ export async function resetPassword(token: string, password: string): Promise<vo
  */
 export async function exportAccount(): Promise<Blob> {
   const response = await fetch('/api/me/export', { credentials: 'same-origin' })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return response.blob()
 }
 
 /** Destroys the account. Immediate, total, and not undoable. */
 export async function deleteAccount(): Promise<void> {
   const response = await fetch('/api/me', { method: 'DELETE', credentials: 'same-origin' })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
 }
 
 /** A POST that carries a small JSON body and returns nothing worth reading. */
@@ -150,7 +152,7 @@ async function post(path: string, body: Record<string, string>): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
 }
 
 /**
@@ -166,7 +168,7 @@ export async function saveProfile(update: ProfileUpdate): Promise<Me> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(update),
   })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Me
 }
 
@@ -177,29 +179,8 @@ async function send(path: string, body: Record<string, string>): Promise<Me> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Me
-}
-
-/**
- * The server's own words for what went wrong.
- *
- * The API answers a refusal with `{"error": "..."}` written for a person to
- * read, so it is shown as it is. A response that carries no such message —
- * a proxy's HTML error page, a truncated body — falls back to something
- * honest rather than showing "undefined" to the user.
- */
-export async function messageOf(response: Response): Promise<string> {
-  try {
-    const body: unknown = await response.json()
-    if (typeof body === 'object' && body !== null) {
-      const error = (body as Record<string, unknown>).error
-      if (typeof error === 'string' && error !== '') return error
-    }
-  } catch {
-    // Not JSON: falls through to the generic message below.
-  }
-  return 'something went wrong'
 }
 
 /**

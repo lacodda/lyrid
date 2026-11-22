@@ -10,7 +10,7 @@
 //! (`lyrid admin grant`). Anyone else is told no without being told why.
 
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router, routing::get};
 use serde::Serialize;
@@ -18,8 +18,8 @@ use sqlx::PgPool;
 use time::format_description::well_known::Rfc3339;
 use time::{Date, OffsetDateTime};
 
-use super::accounts::server_error;
-use super::scrobbling::{Refused, signed_in};
+use super::refusal::Refusal;
+use super::scrobbling::signed_in;
 use crate::app::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -202,17 +202,17 @@ async fn overview(State(state): State<AppState>, headers: HeaderMap) -> Response
     };
     match is_admin(&state.pool, user).await {
         Ok(true) => {}
-        Ok(false) => return forbidden(),
+        Ok(false) => return Refusal::NotAdmin.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read whether an account is an admin");
-            return Refused::SessionUnreadable.into_response();
+            return Refusal::SessionUnreadable.into_response();
         }
     }
     match read(&state.pool).await {
         Ok(overview) => Json(overview).into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read the stand's state");
-            server_error("the stand's state could not be read")
+            Refusal::StandUnreadable.into_response()
         }
     }
 }
@@ -223,10 +223,6 @@ pub(crate) async fn is_admin(pool: &PgPool, user: i32) -> sqlx::Result<bool> {
         .fetch_optional(pool)
         .await?
         .unwrap_or(false))
-}
-
-fn forbidden() -> Response {
-    (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "not an admin" }))).into_response()
 }
 
 fn stamp(at: OffsetDateTime) -> String {
@@ -517,7 +513,7 @@ async fn mechanics(pool: &PgPool) -> sqlx::Result<Vec<MechanicUse>> {
 #[cfg(test)]
 mod tests {
     use axum::body::Body;
-    use axum::http::Request;
+    use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use sqlx::postgres::PgPoolOptions;
     use tower::ServiceExt;
@@ -589,6 +585,7 @@ mod tests {
 
         assert_eq!(unsigned.0, StatusCode::UNAUTHORIZED);
         assert_eq!(refused.0, StatusCode::FORBIDDEN, "an account that is not an admin is shown nothing");
+        assert!(refused.1.contains(r#""code":"not_admin""#), "the refusal says why by code: {}", refused.1);
         assert!(!refused.1.contains("canon"), "a refusal carries nothing of the stand: {}", refused.1);
         assert_eq!(shown.0, StatusCode::OK, "{}", shown.1);
         let overview: serde_json::Value = serde_json::from_str(&shown.1).unwrap();

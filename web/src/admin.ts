@@ -4,7 +4,7 @@
  * mechanics. Counts only -- nobody is named.
  */
 
-import { messageOf } from '@/account'
+import { refusalOf } from '@/refusal'
 
 export interface AdminEdition {
   number: number
@@ -103,20 +103,9 @@ export interface Overview {
   mechanics: { mechanic: string; total: number; days: { day: string; uses: number }[] }[]
 }
 
-/** Why the page shows nothing: not signed in, or not an admin. */
-export class Refused extends Error {
-  readonly status: 401 | 403
-
-  constructor(status: 401 | 403) {
-    super(status === 401 ? 'not signed in' : 'not an admin')
-    this.status = status
-  }
-}
-
 export async function fetchOverview(signal?: AbortSignal): Promise<Overview> {
   const response = await fetch('/api/admin', { credentials: 'same-origin', signal })
-  if (response.status === 401 || response.status === 403) throw new Refused(response.status)
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Overview
 }
 

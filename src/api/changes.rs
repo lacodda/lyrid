@@ -16,7 +16,7 @@ use time::format_description::well_known::Rfc3339;
 use time::{Date, OffsetDateTime};
 
 use super::PlacedStar;
-use super::accounts::server_error;
+use super::refusal::Refusal;
 use crate::app::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -141,7 +141,7 @@ async fn changes(State(state): State<AppState>) -> Response {
         Ok(conn) => conn,
         Err(error) => {
             tracing::error!(%error, "failed to reach the database for what changed in the sky");
-            return server_error("what changed in the sky could not be read");
+            return Refusal::ChangesUnreadable.into_response();
         }
     };
     match read(&mut conn).await {
@@ -154,7 +154,7 @@ async fn changes(State(state): State<AppState>) -> Response {
             .into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read what changed in the sky");
-            server_error("what changed in the sky could not be read")
+            Refusal::ChangesUnreadable.into_response()
         }
     }
 }

@@ -24,6 +24,7 @@ use sqlx::{PgConnection, PgPool};
 use tokio::sync::Mutex;
 
 use crate::api::artists::channel_of;
+use crate::api::refusal::Refusal;
 use crate::app::AppState;
 use crate::layout::tiles::brightness;
 
@@ -343,7 +344,7 @@ async fn radio(State(state): State<AppState>, Query(query): Query<RadioQuery>) -
         Ok(Some(_)) => {}
         // A name the canon does not have is a wrong address, not a quiet
         // nebula: an empty queue would read as "nobody here has a channel".
-        Ok(None) => return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "no such genre or style" }))).into_response(),
+        Ok(None) => return Refusal::NoSuchGenre.into_response(),
         Err(error) => return unreadable(&error),
     }
 
@@ -425,11 +426,7 @@ const SIGNAL_CANDIDATES: usize = 5;
 /// everyone, for when its channel will not play.
 async fn signal(State(state): State<AppState>, Query(query): Query<SignalQuery>) -> Response {
     let Some(day) = julian_day(&query.day) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "day must be a date written YYYY-MM-DD" })),
-        )
-            .into_response();
+        return Refusal::DayMalformed.into_response();
     };
     match state.dial.tuning(&state.pool).await {
         Ok(tuning) => {
@@ -491,11 +488,7 @@ fn mix(value: u64) -> u64 {
 
 fn unreadable(error: &sqlx::Error) -> Response {
     tracing::error!(%error, "the playable stars could not be read");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(serde_json::json!({ "error": "the sky could not be read" })),
-    )
-        .into_response()
+    Refusal::SkyUnreadable.into_response()
 }
 
 #[cfg(test)]

@@ -33,6 +33,7 @@ use sqlx::PgPool;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+use super::refusal::Refusal;
 use crate::app::AppState;
 use crate::auth;
 
@@ -186,26 +187,14 @@ async fn start_session(pool: &PgPool, user_id: i32, secure: bool) -> sqlx::Resul
     Ok(auth::set_cookie(&token, secure))
 }
 
-pub(crate) fn bad_request(message: &str) -> Response {
-    (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": message }))).into_response()
-}
-
-pub(crate) fn server_error(message: &str) -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": message }))).into_response()
-}
-
-pub(crate) fn unauthorised() -> Response {
-    (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "not signed in" }))).into_response()
-}
-
 async fn register(State(state): State<AppState>, Json(body): Json<Registration>) -> Response {
     let email = auth::normalise_email(&body.email);
-    if let Err(error) = auth::check_credentials(&email, &body.password) {
-        return bad_request(&error.to_string());
+    if let Err(unfit) = auth::check_credentials(&email, &body.password) {
+        return Refusal::from(unfit).into_response();
     }
 
     let Ok(hash) = auth::hash_password(&body.password) else {
-        return server_error("the account could not be created");
+        return Refusal::AccountNotCreated.into_response();
     };
 
     match create_account(&state.pool, &email, &hash, state.secure_cookie).await {
@@ -226,14 +215,10 @@ async fn register(State(state): State<AppState>, Json(body): Json<Registration>)
         // tells you this anyway -- an account you cannot create and cannot be
         // told why is a dead end, and the address is already discoverable by
         // trying to register with it.
-        Ok(None) => (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({ "error": "an account with that address already exists" })),
-        )
-            .into_response(),
+        Ok(None) => Refusal::EmailTaken.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to create an account");
-            server_error("the account could not be created")
+            Refusal::AccountNotCreated.into_response()
         }
     }
 }
@@ -324,7 +309,7 @@ async fn login(State(state): State<AppState>, Json(body): Json<Login>) -> Respon
         Ok(found) => found,
         Err(error) => {
             tracing::error!(%error, "failed to read an account");
-            return server_error("the account could not be read");
+            return Refusal::AccountUnreadable.into_response();
         }
     };
 
@@ -332,36 +317,28 @@ async fn login(State(state): State<AppState>, Json(body): Json<Login>) -> Respon
     // apart turns the login form into a way of asking whether someone has an
     // account here, which is a fact about a person and not ours to publish.
     let Some((user_id, hash)) = found else {
-        return unauthorised_login();
+        return Refusal::CredentialsWrong.into_response();
     };
     if !auth::verify_password(&body.password, &hash) {
-        return unauthorised_login();
+        return Refusal::CredentialsWrong.into_response();
     }
 
     let cookie = match start_session(&state.pool, user_id, state.secure_cookie).await {
         Ok(cookie) => cookie,
         Err(error) => {
             tracing::error!(%error, "failed to open a session");
-            return server_error("the session could not be opened");
+            return Refusal::SessionNotOpened.into_response();
         }
     };
 
     match load_me(&state.pool, user_id).await {
         Ok(Some(me)) => ([(header::SET_COOKIE, cookie)], Json(me)).into_response(),
-        Ok(None) => server_error("the profile could not be read"),
+        Ok(None) => Refusal::ProfileUnreadable.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read a profile");
-            server_error("the profile could not be read")
+            Refusal::ProfileUnreadable.into_response()
         }
     }
-}
-
-fn unauthorised_login() -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        Json(serde_json::json!({ "error": "that address and password do not match an account" })),
-    )
-        .into_response()
 }
 
 /// Ends the session, and says so even when there was none.
@@ -377,7 +354,7 @@ async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
         && let Err(error) = sqlx::query("DELETE FROM user_session WHERE token = $1").bind(token).execute(&state.pool).await
     {
         tracing::error!(%error, "failed to end a session");
-        return server_error("the session could not be ended");
+        return Refusal::SessionNotEnded.into_response();
     }
 
     // The cookie is cleared either way. A browser holding a token this server
@@ -402,10 +379,10 @@ struct ModeChoice {
 async fn choose_mode(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<ModeChoice>) -> Response {
     let session = match current_session(&state.pool, &headers).await {
         Ok(Some(session)) => session,
-        Ok(None) => return unauthorised(),
+        Ok(None) => return Refusal::NotSignedIn.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read a session");
-            return server_error("the session could not be read");
+            return Refusal::SessionUnreadable.into_response();
         }
     };
 
@@ -416,20 +393,16 @@ async fn choose_mode(State(state): State<AppState>, headers: HeaderMap, Json(bod
     match chosen {
         Ok(true) => match load_me(&state.pool, session.user_id).await {
             Ok(Some(me)) => Json(me).into_response(),
-            Ok(None) => unauthorised(),
+            Ok(None) => Refusal::NotSignedIn.into_response(),
             Err(error) => {
                 tracing::error!(%error, "failed to read a profile");
-                server_error("the profile could not be read")
+                Refusal::ProfileUnreadable.into_response()
             }
         },
-        Ok(false) => (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({ "error": "the mode has been chosen, and it stays" })),
-        )
-            .into_response(),
+        Ok(false) => Refusal::ModeChosen.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to choose a mode");
-            server_error("the mode could not be chosen")
+            Refusal::ModeNotChosen.into_response()
         }
     }
 }
@@ -437,10 +410,10 @@ async fn choose_mode(State(state): State<AppState>, headers: HeaderMap, Json(bod
 async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let session = match current_session(&state.pool, &headers).await {
         Ok(Some(session)) => session,
-        Ok(None) => return unauthorised(),
+        Ok(None) => return Refusal::NotSignedIn.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read a session");
-            return server_error("the session could not be read");
+            return Refusal::SessionUnreadable.into_response();
         }
     };
 
@@ -448,10 +421,10 @@ async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
         Ok(Some(me)) => (StatusCode::OK, Json(me)).into_response(),
         // A live session whose account is gone: treat it as signed out rather
         // than as a server fault.
-        Ok(None) => unauthorised(),
+        Ok(None) => Refusal::NotSignedIn.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read a profile");
-            server_error("the profile could not be read")
+            Refusal::ProfileUnreadable.into_response()
         }
     }
 }
@@ -538,48 +511,48 @@ type MeRow = (
 async fn update_profile(State(state): State<AppState>, headers: HeaderMap, Json(body): Json<ProfileUpdate>) -> Response {
     let session = match current_session(&state.pool, &headers).await {
         Ok(Some(session)) => session,
-        Ok(None) => return unauthorised(),
+        Ok(None) => return Refusal::NotSignedIn.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read a session");
-            return server_error("the session could not be read");
+            return Refusal::SessionUnreadable.into_response();
         }
     };
 
     if let Some(shape) = &body.halo_shape
         && shape.len() > 32
     {
-        return bad_request("that marker shape is not one of ours");
+        return Refusal::HaloShapeUnknown.into_response();
     }
     if let Some(colour) = &body.halo_colour
         && colour.len() > 32
     {
-        return bad_request("that marker colour is not one of ours");
+        return Refusal::HaloColourUnknown.into_response();
     }
     if let Some(camera) = body.camera
         && !(camera.x.is_finite() && camera.y.is_finite() && camera.scale.is_finite() && camera.scale > 0.0)
     {
         // A non-finite coordinate is not a position, and Postgres would take
         // NaN happily -- leaving a profile that opens the sky nowhere.
-        return bad_request("that is not a place on the map");
+        return Refusal::CameraOffMap.into_response();
     }
     if let Some(Some(born)) = body.born
         && !(BORN_FROM..=current_year()).contains(&born)
     {
-        return bad_request("that is not a year someone listening now was born in");
+        return Refusal::BornOutOfRange.into_response();
     }
 
     match save_profile(&state.pool, session.user_id, &body).await {
         Ok(()) => match load_me(&state.pool, session.user_id).await {
             Ok(Some(me)) => (StatusCode::OK, Json(me)).into_response(),
-            Ok(None) => unauthorised(),
+            Ok(None) => Refusal::NotSignedIn.into_response(),
             Err(error) => {
                 tracing::error!(%error, "failed to read a profile");
-                server_error("the profile could not be read")
+                Refusal::ProfileUnreadable.into_response()
             }
         },
         Err(error) => {
             tracing::error!(%error, "failed to save a profile");
-            server_error("the profile could not be saved")
+            Refusal::ProfileNotSaved.into_response()
         }
     }
 }
@@ -658,7 +631,7 @@ async fn confirm(State(state): State<AppState>, Json(body): Json<TokenBody>) -> 
         Ok(spent) => spent,
         Err(error) => {
             tracing::error!(%error, "failed to spend a confirmation token");
-            return server_error("the link could not be checked");
+            return Refusal::LinkUnchecked.into_response();
         }
     };
 
@@ -667,7 +640,7 @@ async fn confirm(State(state): State<AppState>, Json(body): Json<TokenBody>) -> 
         // different facts, and none of them is the visitor's business: a link
         // that says "this token was already used" is a link that confirms a
         // guess.
-        return bad_request("that link is not valid any more - ask for a new one");
+        return Refusal::TokenInvalid.into_response();
     };
 
     // Written unconditionally rather than only when NULL: confirming an
@@ -679,7 +652,7 @@ async fn confirm(State(state): State<AppState>, Json(body): Json<TokenBody>) -> 
         .await
     {
         tracing::error!(%error, "failed to confirm an address");
-        return server_error("the address could not be confirmed");
+        return Refusal::AddressNotConfirmed.into_response();
     }
 
     (StatusCode::OK, Json(serde_json::json!({ "status": "confirmed" }))).into_response()
@@ -693,10 +666,10 @@ async fn confirm(State(state): State<AppState>, Json(body): Json<TokenBody>) -> 
 async fn resend_confirmation(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let session = match current_session(&state.pool, &headers).await {
         Ok(Some(session)) => session,
-        Ok(None) => return unauthorised(),
+        Ok(None) => return Refusal::NotSignedIn.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read a session");
-            return server_error("the session could not be read");
+            return Refusal::SessionUnreadable.into_response();
         }
     };
 
@@ -707,10 +680,10 @@ async fn resend_confirmation(State(state): State<AppState>, headers: HeaderMap) 
 
     let (email, already_confirmed) = match account {
         Ok(Some(account)) => account,
-        Ok(None) => return unauthorised(),
+        Ok(None) => return Refusal::NotSignedIn.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read an account");
-            return server_error("the account could not be read");
+            return Refusal::AccountUnreadable.into_response();
         }
     };
 
@@ -722,7 +695,7 @@ async fn resend_confirmation(State(state): State<AppState>, headers: HeaderMap) 
         Ok(token) => token,
         Err(error) => {
             tracing::error!(%error, "failed to issue a confirmation token");
-            return server_error("the letter could not be sent");
+            return Refusal::LetterNotSent.into_response();
         }
     };
 
@@ -733,7 +706,7 @@ async fn resend_confirmation(State(state): State<AppState>, headers: HeaderMap) 
         // letter. Reporting success would leave someone waiting for mail that
         // was never sent.
         tracing::error!(%error, "the confirmation letter could not be sent");
-        return server_error("the letter could not be sent");
+        return Refusal::LetterNotSent.into_response();
     }
 
     (StatusCode::OK, Json(serde_json::json!({ "status": "sent" }))).into_response()
@@ -765,7 +738,7 @@ async fn forgot_password(State(state): State<AppState>, Json(body): Json<EmailBo
         Ok(found) => found,
         Err(error) => {
             tracing::error!(%error, "failed to read an account for a reset");
-            return server_error("the request could not be handled");
+            return Refusal::RequestFailed.into_response();
         }
     };
 
@@ -795,29 +768,29 @@ async fn reset_password(State(state): State<AppState>, Json(body): Json<ResetBod
     // The password is checked before the token is spent. A token burnt on a
     // password the server was going to refuse anyway leaves the person with a
     // dead link and a typo.
-    if let Err(error) = auth::check_password(&body.password) {
-        return bad_request(&error.to_string());
+    if let Err(unfit) = auth::check_password(&body.password) {
+        return Refusal::from(unfit).into_response();
     }
 
     let Ok(hash) = auth::hash_password(&body.password) else {
-        return server_error("the password could not be changed");
+        return Refusal::PasswordNotChanged.into_response();
     };
 
     let spent = match spend_token(&state.pool, &body.token, "reset").await {
         Ok(spent) => spent,
         Err(error) => {
             tracing::error!(%error, "failed to spend a reset token");
-            return server_error("the link could not be checked");
+            return Refusal::LinkUnchecked.into_response();
         }
     };
 
     let Some(user_id) = spent else {
-        return bad_request("that link is not valid any more - ask for a new one");
+        return Refusal::TokenInvalid.into_response();
     };
 
     if let Err(error) = change_password(&state.pool, user_id, &hash).await {
         tracing::error!(%error, "failed to change a password");
-        return server_error("the password could not be changed");
+        return Refusal::PasswordNotChanged.into_response();
     }
 
     // The cookie is cleared as well. Whoever is at this browser has just
@@ -869,10 +842,10 @@ async fn change_password(pool: &PgPool, user_id: i32, hash: &str) -> sqlx::Resul
 async fn export_account(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let session = match current_session(&state.pool, &headers).await {
         Ok(Some(session)) => session,
-        Ok(None) => return unauthorised(),
+        Ok(None) => return Refusal::NotSignedIn.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read a session");
-            return server_error("the session could not be read");
+            return Refusal::SessionUnreadable.into_response();
         }
     };
 
@@ -885,10 +858,10 @@ async fn export_account(State(state): State<AppState>, headers: HeaderMap) -> Re
             Json(document),
         )
             .into_response(),
-        Ok(None) => unauthorised(),
+        Ok(None) => Refusal::NotSignedIn.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to export an account");
-            server_error("the account could not be exported")
+            Refusal::AccountNotExported.into_response()
         }
     }
 }
@@ -1087,10 +1060,10 @@ fn stamp(at: OffsetDateTime) -> String {
 async fn delete_account(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let session = match current_session(&state.pool, &headers).await {
         Ok(Some(session)) => session,
-        Ok(None) => return unauthorised(),
+        Ok(None) => return Refusal::NotSignedIn.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read a session");
-            return server_error("the session could not be read");
+            return Refusal::SessionUnreadable.into_response();
         }
     };
 
@@ -1106,7 +1079,7 @@ async fn delete_account(State(state): State<AppState>, headers: HeaderMap) -> Re
             .into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to delete an account");
-            server_error("the account could not be deleted")
+            Refusal::AccountNotDeleted.into_response()
         }
     }
 }
@@ -1186,10 +1159,12 @@ mod tests {
         Body::from(body.to_string())
     }
 
-    async fn error_of(response: Response) -> String {
+    /// The refusal's code and its English phrase.
+    async fn refusal_of(response: Response) -> (String, String) {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-        body.get("error").and_then(|value| value.as_str()).unwrap_or_default().to_string()
+        let field = |name: &str| body.get(name).and_then(|value| value.as_str()).unwrap_or_default().to_string();
+        (field("code"), field("error"))
     }
 
     #[tokio::test]
@@ -1206,7 +1181,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert!(error_of(response).await.contains("email"));
+        let (code, phrase) = refusal_of(response).await;
+        assert_eq!(code, "email_malformed");
+        assert!(phrase.contains("email"), "{phrase}");
     }
 
     #[tokio::test]
@@ -1221,7 +1198,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert!(error_of(response).await.contains("password"));
+        let (code, phrase) = refusal_of(response).await;
+        assert_eq!(code, "password_too_short");
+        assert!(phrase.contains("password"), "{phrase}");
     }
 
     #[test]
@@ -1303,10 +1282,20 @@ mod tests {
 
     #[tokio::test]
     async fn a_wrong_login_does_not_reveal_whether_the_address_exists() {
-        // Both halves of a failed login say the same thing. The wording is
-        // asserted because the whole point is that it cannot differ.
-        let unknown = unauthorised_login();
-        assert_eq!(unknown.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(error_of(unknown).await, "that address and password do not match an account");
+        // Both halves of a failed login are one refusal, so they cannot say
+        // different things. The wording is asserted because the whole point
+        // is that it names neither half.
+        let refused = Refusal::CredentialsWrong.into_response();
+        assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            refusal_of(refused).await,
+            ("credentials_wrong".to_string(), "that address and password do not match an account".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn asking_who_i_am_without_a_cookie_says_why_by_code() {
+        let response = app().oneshot(Request::get("/api/me").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(refusal_of(response).await.0, "not_signed_in");
     }
 }

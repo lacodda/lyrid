@@ -8,7 +8,7 @@
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router, routing::get, routing::post, routing::put};
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use super::PlacedStar;
-use super::accounts::{bad_request, current_session, server_error, unauthorised};
+use super::accounts::current_session;
+use super::refusal::Refusal;
 use crate::app::AppState;
 use crate::scrobbling::{self, ByHand, Failure, ReadError, home, lastfm};
 
@@ -137,29 +138,15 @@ fn stamp(at: OffsetDateTime) -> String {
     at.format(&Rfc3339).unwrap_or_else(|_| at.to_string())
 }
 
-/// Why a request was turned away before it began.
-pub(crate) enum Refused {
-    NotSignedIn,
-    SessionUnreadable,
-}
-
-impl IntoResponse for Refused {
-    fn into_response(self) -> Response {
-        match self {
-            Self::NotSignedIn => unauthorised(),
-            Self::SessionUnreadable => server_error("the session could not be read"),
-        }
-    }
-}
-
-/// The session's account.
-pub(crate) async fn signed_in(pool: &PgPool, headers: &HeaderMap) -> Result<i32, Refused> {
+/// The session's account, or the refusal that turns the request away before
+/// it begins: nobody signed in, or a session that could not be read.
+pub(crate) async fn signed_in(pool: &PgPool, headers: &HeaderMap) -> Result<i32, Refusal> {
     match current_session(pool, headers).await {
         Ok(Some(session)) => Ok(session.user_id),
-        Ok(None) => Err(Refused::NotSignedIn),
+        Ok(None) => Err(Refusal::NotSignedIn),
         Err(error) => {
             tracing::error!(%error, "failed to read a session");
-            Err(Refused::SessionUnreadable)
+            Err(Refusal::SessionUnreadable)
         }
     }
 }
@@ -178,7 +165,7 @@ async fn answer<T: Serialize>(pool: &PgPool, user: i32, wrap: impl FnOnce(Listen
         Ok(listening) => Json(wrap(listening)).into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read a listening summary");
-            server_error("the listening could not be read")
+            Refusal::ListeningUnreadable.into_response()
         }
     }
 }
@@ -270,7 +257,7 @@ async fn link(State(state): State<AppState>, headers: HeaderMap, Json(body): Jso
 
     let token = body.token.trim().to_string();
     if !looks_like_a_token(&token) {
-        return bad_request("that does not look like a ListenBrainz token");
+        return Refusal::ListenBrainzTokenMalformed.into_response();
     }
 
     let client = state.listenbrainz.clone();
@@ -280,21 +267,9 @@ async fn link(State(state): State<AppState>, headers: HeaderMap, Json(body): Jso
 
     let name = match whose {
         Ok(Some(name)) => name,
-        Ok(None) => return bad_request("ListenBrainz does not know that token"),
-        Err(Failure::Throttled) => {
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(serde_json::json!({ "error": "ListenBrainz asked us to wait - try again in a minute" })),
-            )
-                .into_response();
-        }
-        Err(_) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({ "error": "ListenBrainz did not answer - try again in a minute" })),
-            )
-                .into_response();
-        }
+        Ok(None) => return Refusal::ListenBrainzTokenUnknown.into_response(),
+        Err(Failure::Throttled) => return Refusal::ListenBrainzThrottled.into_response(),
+        Err(_) => return Refusal::ListenBrainzUnreachable.into_response(),
     };
 
     // Linking another account starts over: reading begins again from the
@@ -316,15 +291,11 @@ async fn link(State(state): State<AppState>, headers: HeaderMap, Json(body): Jso
         Ok(_) => {}
         // The unique index on the name: the account feeds someone else.
         Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
-            return (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({ "error": "that ListenBrainz account is already linked to another lyrid account" })),
-            )
-                .into_response();
+            return Refusal::ListenBrainzTaken.into_response();
         }
         Err(error) => {
             tracing::error!(%error, "failed to link a ListenBrainz account");
-            return server_error("the account could not be linked");
+            return Refusal::ListenBrainzNotLinkedNow.into_response();
         }
     }
 
@@ -343,7 +314,7 @@ async fn unlink(State(state): State<AppState>, headers: HeaderMap) -> Response {
         .await
     {
         tracing::error!(%error, "failed to unlink a ListenBrainz account");
-        return server_error("the account could not be unlinked");
+        return Refusal::ListenBrainzNotUnlinked.into_response();
     }
     answer(&state.pool, user, |listening| listening).await
 }
@@ -359,30 +330,18 @@ async fn read_now(State(state): State<AppState>, headers: HeaderMap) -> Response
         Ok(conn) => conn,
         Err(error) => {
             tracing::error!(%error, "failed to reach the database");
-            return server_error("the listening could not be read");
+            return Refusal::ListeningUnreadable.into_response();
         }
     };
 
     let claim = match scrobbling::claim_now(&mut conn, user).await {
         Ok(ByHand::Claimed(claim)) => claim,
-        Ok(ByHand::TooSoon) => {
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(serde_json::json!({ "error": "read a moment ago - try again in a minute" })),
-            )
-                .into_response();
-        }
-        Ok(ByHand::ReadingHistory) => {
-            return (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({ "error": "your history is still being read - it carries on by itself" })),
-            )
-                .into_response();
-        }
-        Ok(ByHand::NotLinked) => return bad_request("no ListenBrainz account is linked"),
+        Ok(ByHand::TooSoon) => return Refusal::ReadTooSoon.into_response(),
+        Ok(ByHand::ReadingHistory) => return Refusal::HistoryBeingRead.into_response(),
+        Ok(ByHand::NotLinked) => return Refusal::ListenBrainzNotLinked.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to take a link for reading");
-            return server_error("the listening could not be read");
+            return Refusal::ListeningUnreadable.into_response();
         }
     };
 
@@ -394,7 +353,7 @@ async fn read_now(State(state): State<AppState>, headers: HeaderMap) -> Response
         Err(ReadError::ListenBrainz(_)) => scrobbling::Read::default(),
         Err(ReadError::Database(error)) => {
             tracing::error!(%error, "failed to write a read");
-            return server_error("the listening could not be read");
+            return Refusal::ListeningUnreadable.into_response();
         }
     };
     drop(conn);
@@ -421,8 +380,8 @@ async fn import_lastfm(State(state): State<AppState>, headers: HeaderMap, body: 
     let text = String::from_utf8_lossy(&body);
     let parsed = match lastfm::parse(&text) {
         Ok(parsed) => parsed,
-        Err(lastfm::Refusal::NotCsv) => return bad_request("that file is not a CSV export"),
-        Err(lastfm::Refusal::NoColumns) => return bad_request("that file has no column with a time or none with an artist"),
+        Err(lastfm::Refusal::NotCsv) => return Refusal::LastfmNotCsv.into_response(),
+        Err(lastfm::Refusal::NoColumns) => return Refusal::LastfmNoColumns.into_response(),
     };
     drop(text);
 
@@ -430,14 +389,14 @@ async fn import_lastfm(State(state): State<AppState>, headers: HeaderMap, body: 
         Ok(conn) => conn,
         Err(error) => {
             tracing::error!(%error, "failed to reach the database");
-            return server_error("the file could not be read in");
+            return Refusal::LastfmNotRead.into_response();
         }
     };
     let imported = match lastfm::import(&mut conn, user, parsed).await {
         Ok(imported) => imported,
         Err(error) => {
             tracing::error!(%error, "failed to write a Last.fm file");
-            return server_error("the file could not be read in");
+            return Refusal::LastfmNotRead.into_response();
         }
     };
     drop(conn);
@@ -472,7 +431,7 @@ async fn forget_lastfm(State(state): State<AppState>, headers: HeaderMap) -> Res
     };
     if let Err(error) = forgotten {
         tracing::error!(%error, "failed to forget a Last.fm history");
-        return server_error("the file's history could not be forgotten");
+        return Refusal::LastfmNotForgotten.into_response();
     }
     answer(&state.pool, user, |listening| listening).await
 }
@@ -498,7 +457,7 @@ async fn heard_stars(State(state): State<AppState>, headers: HeaderMap) -> Respo
         Ok(stars) => Json(serde_json::json!({ "stars": stars })).into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read heard stars");
-            server_error("the listening could not be read")
+            Refusal::ListeningUnreadable.into_response()
         }
     }
 }
@@ -531,7 +490,7 @@ async fn heard_star(State(state): State<AppState>, headers: HeaderMap, Path(id):
         .into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read what was heard of a star");
-            server_error("the listening could not be read")
+            Refusal::ListeningUnreadable.into_response()
         }
     }
 }
@@ -539,7 +498,7 @@ async fn heard_star(State(state): State<AppState>, headers: HeaderMap, Path(id):
 #[cfg(test)]
 mod tests {
     use axum::body::Body;
-    use axum::http::Request;
+    use axum::http::{Request, StatusCode};
     use sqlx::postgres::PgPoolOptions;
     use tower::ServiceExt;
 

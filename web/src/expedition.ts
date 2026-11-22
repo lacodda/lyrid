@@ -6,7 +6,7 @@
  * file only reads it, and decides what the panel shows.
  */
 
-import { messageOf } from '@/account'
+import { refusalOf } from '@/refusal'
 import type { Echo, PersonalSky } from '@/sky/fog'
 
 /** A star the expedition names: always by MusicBrainz id, placed when the sky holds it. */
@@ -46,13 +46,13 @@ export const NO_EXPEDITION: Expedition = { home: null, contracts: [] }
 
 export async function fetchExpedition(signal?: AbortSignal): Promise<Expedition> {
   const response = await fetch('/api/me/expedition', { signal, credentials: 'same-origin' })
-  if (!response.ok) throw new Error('the expedition could not be read')
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Expedition
 }
 
 /**
- * Sets out from the artist with this MusicBrainz id. Rejects with the server's
- * own words when it refuses: a star off the sky, an expedition already begun.
+ * Sets out from the artist with this MusicBrainz id. Rejects with the refusal
+ * the server gives: a star off the sky, an expedition already begun.
  */
 export async function beginExpedition(mbid: string): Promise<Expedition> {
   const response = await fetch('/api/me/expedition', {
@@ -61,7 +61,7 @@ export async function beginExpedition(mbid: string): Promise<Expedition> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ mbid }),
   })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Expedition
 }
 

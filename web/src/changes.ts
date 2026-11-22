@@ -6,7 +6,7 @@
  * whatever this sky cannot fly to, and gives counts for the rest.
  */
 
-import { messageOf } from '@/account'
+import { refusalOf } from '@/refusal'
 import type { PlacedStar } from '@/scrobbling'
 
 export interface EditionSource {
@@ -83,7 +83,7 @@ export interface SkyChanges {
 
 export async function fetchChanges(signal?: AbortSignal): Promise<SkyChanges> {
   const response = await fetch('/api/sky/changes', { signal })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as SkyChanges
 }
 

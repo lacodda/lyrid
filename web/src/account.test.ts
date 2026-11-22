@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { fetchMe, saveProfile, worthSaving, type Camera } from './account'
+import { Refusal } from './refusal'
 
 describe('deciding when a camera is worth a round trip', () => {
   const at = (x: number, y: number, scale: number): Camera => ({ x, y, scale })
@@ -44,7 +45,7 @@ describe('asking who is signed in', () => {
   it('reads an anonymous visitor as nobody, not as a failure', async () => {
     // The sky is public: 401 is the ordinary answer for a visitor, and
     // treating it as an error would put a red message on a working page.
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"error":"not signed in"}', { status: 401 })))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"code":"not_signed_in","error":"not signed in"}', { status: 401 })))
     await expect(fetchMe()).resolves.toBeNull()
   })
 
@@ -68,21 +69,35 @@ describe('reporting what the server said', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shows the servers own words for a refusal', async () => {
-    // The API writes these for a person to read; rewording them here would
-    // mean saying "invalid input" where the server said what was wrong.
+  it('rejects with the refusal the server gave, code and all', async () => {
+    // The code is what the screen says it by, in the reader's language; the
+    // English rides along for a code the page does not know yet.
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(new Response('{"error":"a password needs at least 10 characters"}', { status: 400 }))
+      vi.fn().mockResolvedValue(new Response('{"code":"halo_shape_unknown","error":"that marker shape is not one of ours"}', { status: 400 }))
     )
-    await expect(saveProfile({ halo_shape: 'ring' })).rejects.toThrow('a password needs at least 10 characters')
+    const failure: unknown = await saveProfile({ halo_shape: 'ring' }).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(Refusal)
+    expect((failure as Refusal).code).toBe('halo_shape_unknown')
+    expect((failure as Refusal).message).toBe('that marker shape is not one of ours')
   })
 
   it('does not show undefined when the body is not ours', async () => {
     // A proxy answering with an HTML error page must not become the string
-    // "undefined" in front of the user.
+    // "undefined" in front of the user: the refusal carries nothing, and the
+    // screen says its own words for what it was doing.
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>502</html>', { status: 502 })))
-    await expect(saveProfile({ halo_shape: 'ring' })).rejects.toThrow('something went wrong')
+    const failure: unknown = await saveProfile({ halo_shape: 'ring' }).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(Refusal)
+    expect((failure as Refusal).code).toBeNull()
+  })
+
+  it('says why the account could not be read, rather than a fixed English line', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('{"code":"profile_unreadable","error":"the profile could not be read"}', { status: 500 }))
+    )
+    await expect(fetchMe()).rejects.toMatchObject({ code: 'profile_unreadable' })
   })
 
   it('sends only the fields it was given', async () => {

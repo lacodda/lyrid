@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/field'
 import { PasswordField } from '@/components/ui/password-field'
 import { Spinner } from '@/components/ui/spinner'
+import { explain } from '@/refusal'
 
 /**
  * The pages a link in a letter lands on.
@@ -42,7 +43,7 @@ export function ConfirmPage({ token, onClose }: { token: string; onClose: () => 
         if (live) setOutcome({ state: 'done', message: t('letter.confirm.done') })
       },
       (failure: unknown) => {
-        if (live) setOutcome({ state: 'failed', message: failure instanceof Error ? failure.message : t('letter.confirm.failed') })
+        if (live) setOutcome({ state: 'failed', message: explain(failure, 'letter.confirm.failed') })
       }
     )
     return () => {
@@ -89,7 +90,7 @@ export function ResetPage({ token, onClose }: { token: string; onClose: () => vo
           // half of that.
           message: t('letter.reset.done'),
         }),
-      (failure: unknown) => setOutcome({ state: 'failed', message: failure instanceof Error ? failure.message : t('letter.reset.failed') })
+      (failure: unknown) => setOutcome({ state: 'failed', message: explain(failure, 'letter.reset.failed') })
     )
   }
 
@@ -147,7 +148,7 @@ export function StopLetterPage({ token, onClose }: { token: string; onClose: () 
     setOutcome({ state: 'working' })
     stopLetterByLink(token).then(
       () => setOutcome({ state: 'done', message: t('letter.stop.done') }),
-      (failure: unknown) => setOutcome({ state: 'failed', message: failure instanceof Error ? failure.message : t('letter.stop.failed') })
+      (failure: unknown) => setOutcome({ state: 'failed', message: explain(failure, 'letter.stop.failed') })
     )
   }
 

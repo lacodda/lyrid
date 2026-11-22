@@ -3,7 +3,7 @@ use axum::{
     extract::State,
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{any, get},
 };
 use std::path::{Path, PathBuf};
 
@@ -12,6 +12,8 @@ use sqlx::PgPool;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
+
+use crate::api::refusal::Refusal;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -60,7 +62,16 @@ pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
         .merge(crate::api::youth::routes())
         .merge(crate::api::changes::routes())
         .merge(crate::api::admin::routes())
-        .with_state(state);
+        // An address under `/api` that is no route is a refusal like any
+        // other, not the SPA's index page with a 200 -- which is what the
+        // fallback below would otherwise hand a client asking for JSON.
+        .route("/api", any(|| async { Refusal::NoSuchRoute }))
+        .route("/api/{*rest}", any(|| async { Refusal::NoSuchRoute }))
+        .with_state(state)
+        // Every failure that leaves the API carries a code, including the
+        // ones axum writes itself before a handler runs. Laid over these
+        // routes only: the tiles and the SPA added below answer files.
+        .layer(axum::middleware::map_response(crate::api::refusal::coded));
 
     let Some(root) = static_dir else {
         return api.layer(TraceLayer::new_for_http());
@@ -494,5 +505,68 @@ mod tests {
     async fn unknown_routes_return_404() {
         let response = router(state(), None).oneshot(Request::get("/nope").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    async fn code_of(response: Response) -> serde_json::Value {
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+        body["code"].clone()
+    }
+
+    #[tokio::test]
+    async fn an_unknown_api_address_is_a_refusal_and_never_the_spa() {
+        // Behind the SPA fallback, a mistyped API call used to come back as
+        // index.html with a 200: a client asking for JSON was handed a page.
+        let dir = static_root();
+        for path in ["/api", "/api/nothing", "/api/me/nothing/at/all"] {
+            let response = router(state(), Some(dir.path()))
+                .oneshot(Request::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+            assert_eq!(code_of(response).await, "no_such_route", "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn what_axum_refuses_on_a_real_route_carries_a_code() {
+        let app = router(state(), None);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{not json"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(code_of(response).await, "malformed_request");
+
+        let response = app
+            .clone()
+            .oneshot(Request::get("/api/auth/register").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(code_of(response).await, "method_not_allowed");
+
+        let response = app.oneshot(Request::get("/api/artists/seven").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(code_of(response).await, "malformed_request");
+    }
+
+    #[tokio::test]
+    async fn a_refusal_from_a_handler_reaches_the_client_as_written() {
+        // The layer leaves JSON alone: a handler's own refusal is not
+        // rewritten into a framework one.
+        let response = router(state(), None)
+            .oneshot(Request::get("/api/me").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(code_of(response).await, "not_signed_in");
     }
 }

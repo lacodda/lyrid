@@ -28,7 +28,7 @@ use sqlx::PgExecutor;
 use time::OffsetDateTime;
 
 use super::PlacedStar;
-use super::accounts::{bad_request, server_error};
+use super::refusal::Refusal;
 use crate::app::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -59,7 +59,7 @@ struct Youth {
 async fn youth(State(state): State<AppState>, Path(from): Path<i16>) -> Response {
     let now = OffsetDateTime::now_utc().year();
     if from < EARLIEST || i32::from(from) > now {
-        return bad_request("that youth is not one the canon can answer for");
+        return Refusal::YouthUnknown.into_response();
     }
     let to = from + YEARS - 1;
 
@@ -77,7 +77,7 @@ async fn youth(State(state): State<AppState>, Path(from): Path<i16>) -> Response
             .into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read the stars of a youth");
-            server_error("the stars of that youth could not be read")
+            Refusal::YouthUnreadable.into_response()
         }
     }
 }

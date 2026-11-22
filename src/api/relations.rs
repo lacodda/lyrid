@@ -22,6 +22,7 @@ use axum::{Json, Router, routing::get};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgConnection, PgPool};
 
+use crate::api::refusal::Refusal;
 use crate::app::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -192,22 +193,14 @@ struct Shared {
 
 async fn compare(State(state): State<AppState>, Query(query): Query<CompareQuery>) -> Response {
     if query.a == query.b {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "a star compared with itself has nothing to show" })),
-        )
-            .into_response();
+        return Refusal::SameStar.into_response();
     }
     match load_comparison(&state.pool, query.a, query.b).await {
         Ok(Some(comparison)) => (StatusCode::OK, Json(comparison)).into_response(),
-        Ok(None) => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "no such artist" }))).into_response(),
+        Ok(None) => Refusal::NoSuchArtist.into_response(),
         Err(error) => {
             tracing::error!(%error, a = query.a, b = query.b, "failed to compare two artists");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "the canon could not be read" })),
-            )
-                .into_response()
+            Refusal::CanonUnreadable.into_response()
         }
     }
 }

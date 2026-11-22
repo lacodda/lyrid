@@ -13,6 +13,7 @@ pub mod fog;
 pub mod letter;
 pub mod listening;
 pub mod metrics;
+pub mod refusal;
 pub mod relations;
 pub mod scrobbling;
 pub mod spectrum;

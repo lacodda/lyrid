@@ -155,10 +155,22 @@ pub fn looks_like_email(email: &str) -> bool {
         && !domain.contains('@')
 }
 
-/// Why a registration was refused, in words the client shows as they are.
-pub fn check_credentials(email: &str, password: &str) -> Result<()> {
+/// Why an address or a password was not taken.
+///
+/// Named rather than worded: the words belong to the API's refusals
+/// (`api::refusal`), which carry a code the interface says them by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unfit {
+    /// Not the shape of an address.
+    Email,
+    /// Shorter than [`MIN_PASSWORD`] characters.
+    Password,
+}
+
+/// Why a registration was refused.
+pub fn check_credentials(email: &str, password: &str) -> Result<(), Unfit> {
     if !looks_like_email(email) {
-        return Err(anyhow!("that does not look like an email address"));
+        return Err(Unfit::Email);
     }
     // Counted in characters rather than bytes: a passphrase in Cyrillic is
     // twice the bytes of one in ASCII, and a floor that varies by alphabet is
@@ -171,9 +183,9 @@ pub fn check_credentials(email: &str, password: &str) -> Result<()> {
 /// A reset sets a password without an address beside it, and it must hold
 /// that password to the same floor the door does -- otherwise "forgot my
 /// password" is the way around the rule.
-pub fn check_password(password: &str) -> Result<()> {
+pub fn check_password(password: &str) -> Result<(), Unfit> {
     if password.chars().count() < MIN_PASSWORD {
-        return Err(anyhow!("a password needs at least {MIN_PASSWORD} characters"));
+        return Err(Unfit::Password);
     }
     Ok(())
 }
@@ -239,10 +251,8 @@ mod tests {
         assert!(check_password("a long enough passphrase").is_ok());
         // And the two really are one rule, not two that agree today.
         let short = "x".repeat(MIN_PASSWORD - 1);
-        assert_eq!(
-            check_credentials("ada@example.com", &short).unwrap_err().to_string(),
-            check_password(&short).unwrap_err().to_string()
-        );
+        assert_eq!(check_credentials("ada@example.com", &short), Err(Unfit::Password));
+        assert_eq!(check_password(&short), Err(Unfit::Password));
     }
 
     #[test]

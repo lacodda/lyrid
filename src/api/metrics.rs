@@ -31,8 +31,9 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::{Json, Router, routing::post};
+use axum::{Router, routing::post};
 
+use crate::api::refusal::Refusal;
 use crate::app::AppState;
 
 /// The mechanics worth counting, listed here rather than accepted from the
@@ -107,7 +108,7 @@ async fn count(State(state): State<AppState>, axum::extract::Path(mechanic): axu
         // 404 rather than 400: an unknown mechanic is an unknown address, and
         // saying "that is not one of the six" is a more useful answer than
         // pretending the write happened.
-        return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "not a mechanic we count" }))).into_response();
+        return Refusal::NoSuchMechanic.into_response();
     }
 
     // Per day, so the counter says something about when without saying

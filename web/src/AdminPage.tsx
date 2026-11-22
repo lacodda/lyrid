@@ -5,8 +5,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { KeyValue, KeyValueRow } from '@/components/ui/key-value'
 import { Spinner } from '@/components/ui/spinner'
-import { covered, feedState, fetchOverview, missing, Refused, shortSource, took, type Health, type Overview } from '@/admin'
+import { covered, feedState, fetchOverview, missing, shortSource, took, type Health, type Overview } from '@/admin'
 import { useLanguage } from '@/lib/language'
+import { explain, refusedAs } from '@/refusal'
 
 /**
  * The stand's own state, for whoever runs it: the canon it holds, how its
@@ -19,15 +20,18 @@ import { useLanguage } from '@/lib/language'
 export function AdminPage({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation()
   const [overview, setOverview] = useState<Overview | null>(null)
-  const [refused, setRefused] = useState<401 | 403 | null>(null)
+  // Why the page shows nothing, by the refusal's code: nobody signed in, or
+  // an account that does not run this stand.
+  const [refused, setRefused] = useState<'not_signed_in' | 'not_admin' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const abort = new AbortController()
     fetchOverview(abort.signal).then(setOverview, (failure: unknown) => {
       if (abort.signal.aborted) return
-      if (failure instanceof Refused) setRefused(failure.status)
-      else setError(failure instanceof Error ? failure.message : t('admin.failed'))
+      if (refusedAs(failure, 'not_signed_in')) setRefused('not_signed_in')
+      else if (refusedAs(failure, 'not_admin')) setRefused('not_admin')
+      else setError(explain(failure, 'admin.failed'))
     })
     return () => abort.abort()
   }, [t])
@@ -45,8 +49,8 @@ export function AdminPage({ onClose }: { onClose: () => void }) {
           </Button>
         </header>
 
-        {refused === 401 && <p className="m-0 text-sm text-dim">{t('admin.signIn')}</p>}
-        {refused === 403 && (
+        {refused === 'not_signed_in' && <p className="m-0 text-sm text-dim">{t('admin.signIn')}</p>}
+        {refused === 'not_admin' && (
           <p className="m-0 text-sm text-dim">
             {t('admin.notAdmin')} <code className="font-mono text-xs text-text">lyrid admin grant</code>
           </p>

@@ -16,6 +16,7 @@ import {
 import { SectionLabel } from '@/components/ui/panel'
 import { Spinner } from '@/components/ui/spinner'
 import { reasons } from './why'
+import { explain } from '@/refusal'
 
 /** One side of a comparison: enough to name it. */
 export interface Side {
@@ -49,7 +50,7 @@ export function Compare({ a, b, onClose, onOpen }: Props) {
     const abort = new AbortController()
     fetchComparison(a.id, b.id, abort.signal).then(setComparison, (cause: unknown) => {
       if (abort.signal.aborted) return
-      setError(cause instanceof Error ? cause.message : t('compare.failed'))
+      setError(explain(cause, 'compare.failed'))
     })
     return () => abort.abort()
   }, [a.id, b.id, t])

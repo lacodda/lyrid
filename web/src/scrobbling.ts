@@ -7,7 +7,7 @@
  * only after it has opened, and only when there is listening to ask about.
  */
 
-import { messageOf } from '@/account'
+import { refusalOf } from '@/refusal'
 
 /**
  * Why the last read of ListenBrainz failed, as the server stores it. A code
@@ -105,7 +105,7 @@ const same = { credentials: 'same-origin' } as const
 
 export async function fetchListening(signal?: AbortSignal): Promise<Listening> {
   const response = await fetch('/api/me/listening', { ...same, signal })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Listening
 }
 
@@ -122,21 +122,21 @@ export async function linkListenBrainz(token: string): Promise<Listening> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ token }),
   })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Listening
 }
 
 /** Stops reading. What the listening gathered stays with the account. */
 export async function unlinkListenBrainz(): Promise<Listening> {
   const response = await fetch('/api/me/listenbrainz', { ...same, method: 'DELETE' })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Listening
 }
 
 /** Reads ListenBrainz now rather than at the next quarter hour. */
 export async function readNow(): Promise<ReadNow> {
   const response = await fetch('/api/me/listenbrainz/read', { ...same, method: 'POST' })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as ReadNow
 }
 
@@ -153,14 +153,14 @@ export async function bringLastfm(file: Blob): Promise<Brought> {
     headers: { 'content-type': 'text/csv' },
     body: file,
   })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Brought
 }
 
 /** Takes back every listen a Last.fm file brought. */
 export async function forgetLastfm(): Promise<Listening> {
   const response = await fetch('/api/me/lastfm', { ...same, method: 'DELETE' })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Listening
 }
 
@@ -171,7 +171,7 @@ export async function forgetLastfm(): Promise<Listening> {
  */
 export async function fetchYouth(from: number, signal?: AbortSignal): Promise<Youth> {
   const response = await fetch(`/api/youth/${String(from)}`, { signal })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Youth
 }
 
@@ -188,21 +188,21 @@ export async function askForLetter(language: string): Promise<{ letter: { langua
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ language }),
   })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as { letter: { language: string } | null }
 }
 
 /** Stops the weekly letter from the account. */
 export async function stopLetter(): Promise<{ letter: null }> {
   const response = await fetch('/api/me/letter', { ...same, method: 'DELETE' })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as { letter: null }
 }
 
 /** Stops the weekly letter by the token in a letter's link. No session. */
 export async function stopLetterByLink(token: string): Promise<void> {
   const response = await fetch(`/api/letter/stop?token=${encodeURIComponent(token)}`, { method: 'POST' })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
 }
 
 /**
@@ -222,14 +222,14 @@ export function historyRead(link: ListenBrainzLink): number | null {
 
 export async function fetchHeardStars(signal?: AbortSignal): Promise<HeardStar[]> {
   const response = await fetch('/api/me/heard', { ...same, signal })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   const body = (await response.json()) as { stars: HeardStar[] }
   return body.stars
 }
 
 export async function fetchHeard(id: number, signal?: AbortSignal): Promise<Heard> {
   const response = await fetch(`/api/me/heard/${String(id)}`, { ...same, signal })
-  if (!response.ok) throw new Error(await messageOf(response))
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Heard
 }
 

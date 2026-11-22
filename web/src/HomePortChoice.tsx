@@ -6,6 +6,7 @@ import { Dialog, DialogBody, DialogDescription, DialogHeader, DialogPopup, Dialo
 import { SearchField } from '@/components/ui/search-field'
 import { beginExpedition, type Expedition as Begun } from '@/expedition'
 import { count } from '@/metrics'
+import { explain } from '@/refusal'
 
 interface Props {
   /** The expedition as the server holds it once it has begun. */
@@ -62,7 +63,7 @@ export function HomePortChoice({ onBegun, onLater }: Props) {
       },
       (error: unknown) => {
         setBusy(false)
-        setFailure(error instanceof Error ? error.message : t('expedition.failed'))
+        setFailure(explain(error, 'expedition.failed'))
       }
     )
   }

@@ -21,6 +21,7 @@ use sqlx::PgPool;
 
 use crate::api::dossiers::{LabelRef, SceneRef, plain_name};
 use crate::api::listening::{Dial, Nebula, radio_here, radio_of};
+use crate::api::refusal::Refusal;
 use crate::api::relations::{Why, why_many};
 use crate::api::spectrum::{self, Spectrum};
 use crate::app::AppState;
@@ -195,14 +196,10 @@ struct Alongside {
 async fn artist(State(state): State<AppState>, Path(id): Path<i32>) -> Response {
     match load_artist(&state.pool, &state.dial, id).await {
         Ok(Some(artist)) => (StatusCode::OK, Json(artist)).into_response(),
-        Ok(None) => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "no such artist" }))).into_response(),
+        Ok(None) => Refusal::NoSuchArtist.into_response(),
         Err(error) => {
             tracing::error!(%error, artist = id, "failed to read an artist");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "the canon could not be read" })),
-            )
-                .into_response()
+            Refusal::CanonUnreadable.into_response()
         }
     }
 }
@@ -720,11 +717,7 @@ async fn search(State(state): State<AppState>, Query(query): Query<SearchQuery>)
         Ok(hits) => (StatusCode::OK, Json(hits)).into_response(),
         Err(error) => {
             tracing::error!(%error, "search failed");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "the canon could not be searched" })),
-            )
-                .into_response()
+            Refusal::CanonUnsearchable.into_response()
         }
     }
 }
@@ -834,22 +827,14 @@ pub const MAX_STARS: usize = 50;
 /// stale stop should not erase a route someone sent.
 async fn stars(State(state): State<AppState>, Query(query): Query<StarsQuery>) -> Response {
     let Some(ids) = parse_ids(&query.ids) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": format!("ids must be 1 to {MAX_STARS} numbers separated by commas") })),
-        )
-            .into_response();
+        return Refusal::IdsMalformed.into_response();
     };
 
     match run_stars(&state.pool, &ids).await {
         Ok(stars) => (StatusCode::OK, Json(stars)).into_response(),
         Err(error) => {
             tracing::error!(%error, "reading stars failed");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "the canon could not be read" })),
-            )
-                .into_response()
+            Refusal::CanonUnreadable.into_response()
         }
     }
 }
@@ -932,11 +917,7 @@ async fn nearby(State(state): State<AppState>, Query(query): Query<NearbyQuery>)
         Ok(stars) => (StatusCode::OK, Json(stars)).into_response(),
         Err(error) => {
             tracing::error!(%error, "nearby failed");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "the sky could not be read" })),
-            )
-                .into_response()
+            Refusal::SkyUnreadable.into_response()
         }
     }
 }
@@ -1015,11 +996,7 @@ async fn region(State(state): State<AppState>, Query(query): Query<NearbyQuery>)
         }
         Err(error) => {
             tracing::error!(%error, "region failed");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "the sky could not be read" })),
-            )
-                .into_response()
+            Refusal::SkyUnreadable.into_response()
         }
     }
 }
@@ -1202,6 +1179,7 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(body.get("error").is_some(), "an error response should say so: {body}");
+        assert_eq!(body["code"], "canon_unreadable");
     }
 
     #[tokio::test]
@@ -1267,6 +1245,12 @@ mod tests {
     async fn a_garbled_list_of_stars_is_a_bad_request_before_the_database() {
         let response = app().oneshot(Request::get("/api/stars?ids=1,two").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        // With the bound it was refused against, for the reader's words.
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["code"], "ids_malformed");
+        assert_eq!(body["max"], MAX_STARS);
     }
 
     #[tokio::test]
@@ -1280,5 +1264,6 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(body.get("error").is_some(), "an error response should say so: {body}");
+        assert_eq!(body["code"], "sky_unreadable");
     }
 }

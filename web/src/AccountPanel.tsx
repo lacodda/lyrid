@@ -10,6 +10,7 @@ import { panelVariants } from '@/components/ui/panel'
 import { PasswordField } from '@/components/ui/password-field'
 import { Truncate } from '@/components/ui/truncate'
 import { remembered } from '@/sky/openings'
+import { explain } from '@/refusal'
 
 /**
  * Signing in, signing up, and signing out.
@@ -162,7 +163,7 @@ function AccountForm({ onSignedIn, onClose, onCharter }: { onSignedIn: (me: Me) 
           setBusy(false)
         },
         (failure: unknown) => {
-          setError(failure instanceof Error ? failure.message : t('account.failed'))
+          setError(explain(failure, 'account.failed'))
           setBusy(false)
         }
       )
@@ -176,7 +177,7 @@ function AccountForm({ onSignedIn, onClose, onCharter }: { onSignedIn: (me: Me) 
       },
       (failure: unknown) => {
         // The server's own words: it wrote them for a person to read.
-        setError(failure instanceof Error ? failure.message : t('account.failed'))
+        setError(explain(failure, 'account.failed'))
         setBusy(false)
       }
     )

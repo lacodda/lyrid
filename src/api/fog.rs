@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
-use super::accounts::{bad_request, server_error};
+use super::refusal::Refusal;
 use super::scrobbling::signed_in;
 use crate::app::AppState;
 use crate::fog::{self, Brought, How};
@@ -51,7 +51,7 @@ async fn sky(State(state): State<AppState>, headers: HeaderMap) -> Response {
         Ok(sky) => Json(sky).into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to read a personal sky");
-            server_error("your sky could not be read")
+            Refusal::YourSkyUnreadable.into_response()
         }
     }
 }
@@ -96,7 +96,7 @@ async fn open(State(state): State<AppState>, headers: HeaderMap, Path(mbid): Pat
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to open a star");
-            server_error("the star could not be opened")
+            Refusal::StarNotOpened.into_response()
         }
     }
 }
@@ -118,7 +118,7 @@ async fn bring(State(state): State<AppState>, headers: HeaderMap, Json(body): Js
         Err(refused) => return refused.into_response(),
     };
     if body.stars.len() > MOST_BROUGHT {
-        return bad_request("too many stars at once");
+        return Refusal::TooManyStars.into_response();
     }
     let done = match state.pool.acquire().await {
         Ok(mut conn) => fog::bring(&mut conn, user, &body.stars).await,
@@ -128,7 +128,7 @@ async fn bring(State(state): State<AppState>, headers: HeaderMap, Json(body): Js
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => {
             tracing::error!(%error, "failed to bring stars into an account");
-            server_error("the stars could not be brought")
+            Refusal::StarsNotBrought.into_response()
         }
     }
 }

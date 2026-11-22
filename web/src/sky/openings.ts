@@ -9,6 +9,8 @@
  * the charter says so, and it is true of this file and nothing else.
  */
 
+import { refusalOf } from '@/refusal'
+
 import type { Echo, OpenStar, PersonalSky } from './fog'
 
 export type How = 'played' | 'followed'
@@ -73,8 +75,8 @@ export function forget(): void {
   }
 }
 
-async function refused(response: Response, what: string): Promise<void> {
-  if (!response.ok) throw new Error(what)
+async function refused(response: Response): Promise<void> {
+  if (!response.ok) throw await refusalOf(response)
   await response.body?.cancel()
 }
 
@@ -86,7 +88,7 @@ export async function openStar(mbid: string, how: How): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ how }),
   })
-  await refused(response, 'the star could not be opened')
+  await refused(response)
 }
 
 /** Moves what this browser remembers into the account. Safe to send twice. */
@@ -97,7 +99,7 @@ export async function bringOpenings(stars: readonly Remembered[]): Promise<void>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ stars }),
   })
-  await refused(response, 'the stars could not be brought')
+  await refused(response)
 }
 
 type OpenRow = [number, number, number, number, number, string, string]
@@ -106,7 +108,7 @@ type EchoRow = [number, number, number, string, number[]]
 /** The stars that are this person's, in the sky being shown now. */
 export async function fetchPersonalSky(signal?: AbortSignal): Promise<PersonalSky> {
   const response = await fetch('/api/me/sky', { signal, credentials: 'same-origin' })
-  if (!response.ok) throw new Error('your sky could not be read')
+  if (!response.ok) throw await refusalOf(response)
   const body = (await response.json()) as { opened: OpenRow[]; echoes: EchoRow[] }
   return {
     opened: body.opened.map(

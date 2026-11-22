@@ -9,6 +9,10 @@ one exception, the list of stars in view beside the canvas, which asks
 `/api/nearby` once per settled view because the tiles carry no names. Otherwise
 these endpoints serve what a click and a search box need.
 
+Every failure answers `{"code": "...", "error": "..."}`: a stable code to
+branch on and English to read. [Refusals](/lyrid/reference/refusals/) lists
+the codes.
+
 ## `GET /health`
 
 Liveness and readiness in one place.

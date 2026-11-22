@@ -23,6 +23,7 @@ use serde::Serialize;
 use sqlx::PgPool;
 
 use crate::api::listening::{Dial, Sky};
+use crate::api::refusal::Refusal;
 use crate::app::AppState;
 use crate::layout::tiles::brightness;
 use crate::markup::{self, Kind, Piece};
@@ -168,24 +169,20 @@ impl Segment {
 }
 
 async fn label(State(state): State<AppState>, Path(id): Path<i32>) -> Response {
-    answer(load_label(&state.pool, &state.dial, id).await, "label", id)
+    answer(load_label(&state.pool, &state.dial, id).await, Refusal::NoSuchLabel, id)
 }
 
 async fn scene(State(state): State<AppState>, Path(qid): Path<i32>) -> Response {
-    answer(load_scene(&state.pool, &state.dial, qid).await, "scene", qid)
+    answer(load_scene(&state.pool, &state.dial, qid).await, Refusal::NoSuchScene, qid)
 }
 
-fn answer<T: Serialize>(result: sqlx::Result<Option<T>>, what: &'static str, id: i32) -> Response {
+fn answer<T: Serialize>(result: sqlx::Result<Option<T>>, missing: Refusal, id: i32) -> Response {
     match result {
         Ok(Some(dossier)) => (StatusCode::OK, Json(dossier)).into_response(),
-        Ok(None) => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": format!("no such {what}") }))).into_response(),
+        Ok(None) => missing.into_response(),
         Err(error) => {
-            tracing::error!(%error, what, id, "failed to read a dossier");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "the canon could not be read" })),
-            )
-                .into_response()
+            tracing::error!(%error, missing = missing.code(), id, "failed to read a dossier");
+            Refusal::CanonUnreadable.into_response()
         }
     }
 }

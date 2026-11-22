@@ -34,7 +34,7 @@ An account adds memory to the sky and takes nothing away from it. The map, the s
 | `PUT` | `/api/me/expedition` | Set out from an artist you love, once. Body: `mbid`. |
 | `POST` | `/api/letter/stop?token=…` | Stop the weekly letter by the token in its link. No session. |
 
-All answer JSON. A refusal carries `{"error": "..."}` written for a person to read, and the client shows those words as they are rather than substituting its own.
+All answer JSON. A refusal carries a stable `code` beside an English `error`, `{"code": "email_taken", "error": "an account with that address already exists"}`, and the interface says the code in the reader's language rather than showing the English: [Refusals](/lyrid/reference/refusals/) has the shape and every code.
 
 ### The profile
 
@@ -83,7 +83,7 @@ Passwords are stored as Argon2id PHC strings with a random per-password salt. A 
 
 Registration issues a confirmation token in the same database transaction as the account — an account without one is an account that can never be confirmed and can never be told why — and mails a link, `{LYRID_PUBLIC_URL}/confirm?token=...`, after the transaction commits. Sending inside the transaction would hold a connection open across a round trip to a mail server, which is how one slow SMTP host empties the pool. A letter that fails to send does not undo the registration: the account exists either way, and there is a button to ask for the letter again.
 
-`POST /api/auth/confirm` with `{token}` spends it and confirms the address. It answers `{"status":"confirmed"}`, or `400` with `{"error":"that link is not valid any more - ask for a new one"}` for a token that is expired, already used, or was never issued — one answer for all three, because none of them is the visitor's business: a link that says "this was already used" is a link that confirms a guess.
+`POST /api/auth/confirm` with `{token}` spends it and confirms the address. It answers `{"status":"confirmed"}`, or `400` with `token_invalid` for a token that is expired, already used, or was never issued — one answer and one code for all three, because none of them is the visitor's business: a link that says "this was already used" is a link that confirms a guess.
 
 `POST /api/auth/confirm/resend` needs a session and takes no body. It sends the letter again and answers `{"status":"sent"}`, or `{"status":"already confirmed"}` if there is nothing left to do. It sits behind the session rather than behind an address typed into a form, because a form taking an address would let anyone post letters to anyone from this server.
 
@@ -148,12 +148,12 @@ How linking works, what pays what and when listening is read is told in [Scrobbl
 A wrong password and an address with no account give the same answer, in the same words:
 
 ```json
-{ "error": "that address and password do not match an account" }
+{ "code": "credentials_wrong", "error": "that address and password do not match an account" }
 ```
 
 Telling them apart would turn the sign-in form into a way of asking whether a particular person has an account here, which is a fact about them and not ours to publish.
 
-Registration is different and says plainly that an address is taken (`409`). There is no way to offer an account and hide that the address already has one, and the address is discoverable by trying to register with it regardless.
+Registration is different and says plainly that an address is taken (`409`, `email_taken`). There is no way to offer an account and hide that the address already has one, and the address is discoverable by trying to register with it regardless.
 
 ## The camera and the frame it belongs to
 

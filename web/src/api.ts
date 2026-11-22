@@ -1,3 +1,5 @@
+import { refusalOf } from '@/refusal'
+
 /** Shape of `GET /health` as served by the axum backend. */
 export interface Health {
   status: 'ok' | 'degraded'
@@ -175,7 +177,7 @@ export interface Hit {
 
 export async function fetchArtist(id: number, signal?: AbortSignal): Promise<Artist> {
   const response = await fetch(`/api/artists/${String(id)}`, { signal })
-  if (!response.ok) throw new Error(response.status === 404 ? 'no such artist' : 'the canon could not be read')
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Artist
 }
 
@@ -188,7 +190,7 @@ export interface Found {
 
 export async function search(term: string, signal?: AbortSignal): Promise<Found> {
   const response = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { signal })
-  if (!response.ok) throw new Error('the canon could not be searched')
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Found
 }
 
@@ -293,13 +295,13 @@ export interface SceneDossier {
 
 export async function fetchLabel(id: number, signal?: AbortSignal): Promise<LabelDossier> {
   const response = await fetch(`/api/labels/${String(id)}`, { signal })
-  if (!response.ok) throw new Error(response.status === 404 ? 'no such label' : 'the canon could not be read')
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as LabelDossier
 }
 
 export async function fetchScene(qid: number, signal?: AbortSignal): Promise<SceneDossier> {
   const response = await fetch(`/api/scenes/${String(qid)}`, { signal })
-  if (!response.ok) throw new Error(response.status === 404 ? 'no such scene' : 'the canon could not be read')
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as SceneDossier
 }
 
@@ -320,7 +322,7 @@ export interface Comparison {
 
 export async function fetchComparison(a: number, b: number, signal?: AbortSignal): Promise<Comparison> {
   const response = await fetch(`/api/compare?a=${String(a)}&b=${String(b)}`, { signal })
-  if (!response.ok) throw new Error(response.status === 404 ? 'no such artist' : 'the canon could not be read')
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Comparison
 }
 
@@ -331,7 +333,7 @@ export async function fetchComparison(a: number, b: number, signal?: AbortSignal
 export async function fetchStars(ids: readonly number[], signal?: AbortSignal): Promise<Hit[]> {
   if (ids.length === 0) return []
   const response = await fetch(`/api/stars?ids=${ids.join(',')}`, { signal })
-  if (!response.ok) throw new Error('the canon could not be read')
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Hit[]
 }
 
@@ -383,7 +385,7 @@ export interface Station {
 export async function fetchRadio(nebula: Nebula, seed: number, signal?: AbortSignal): Promise<Station[]> {
   const query = new URLSearchParams({ name: nebula.name, kind: nebula.kind, seed: String(seed) })
   const response = await fetch(`/api/radio?${query.toString()}`, { signal })
-  if (!response.ok) throw new Error(response.status === 404 ? 'no such genre or style' : 'the sky could not be read')
+  if (!response.ok) throw await refusalOf(response)
   const body = (await response.json()) as { stations: Station[] }
   return body.stations
 }
@@ -395,7 +397,7 @@ export async function fetchRadio(nebula: Nebula, seed: number, signal?: AbortSig
  */
 export async function fetchSignal(day: string, signal?: AbortSignal): Promise<Station[]> {
   const response = await fetch(`/api/signal?day=${encodeURIComponent(day)}`, { signal })
-  if (!response.ok) throw new Error('the sky could not be read')
+  if (!response.ok) throw await refusalOf(response)
   const body = (await response.json()) as { stars: Station[] }
   return body.stars
 }
@@ -411,7 +413,7 @@ export async function fetchRegion(
     max_y: String(bounds.maxY),
   })
   const response = await fetch(`/api/region?${query.toString()}`, { signal })
-  if (!response.ok) throw new Error('the sky could not be read')
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as Region
 }
 
@@ -427,6 +429,6 @@ export async function fetchNearby(
     max_y: String(bounds.maxY),
   })
   const response = await fetch(`/api/nearby?${query.toString()}`, { signal })
-  if (!response.ok) throw new Error('the sky could not be read')
+  if (!response.ok) throw await refusalOf(response)
   return (await response.json()) as NearbyStar[]
 }
