@@ -114,6 +114,13 @@ export function App() {
     window.history.replaceState(null, '', '/charter')
   }, [])
 
+  // The admin page, for the accounts that run this stand: the panel shows them
+  // the way in, everyone else reaches it only by its address.
+  const openStand = useCallback(() => {
+    setPage({ kind: 'admin' })
+    window.history.replaceState(null, '', '/admin')
+  }, [])
+
   // Stable callbacks: the render loop lives outside React, and a new function
   // every render would tear the canvas down and build it again.
   const onState = useCallback((next: SkyState) => setState(next), [])
@@ -1106,7 +1113,7 @@ export function App() {
             />
           )}
           <NearbyStars className="min-h-0" visible={state.visible} onPick={goTo} fog={fog} />
-          <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} onCharter={openCharter} />
+          <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} onCharter={openCharter} onStand={openStand} />
           {me && (
             <ListeningPanel
               className="shrink-0"

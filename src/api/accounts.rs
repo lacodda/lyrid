@@ -140,6 +140,11 @@ struct Me {
     born: Option<i16>,
     /// The weekly letter, if asked for.
     letter: Option<Letter>,
+    /// Whether this account may read the stand's admin page: what lets the
+    /// interface show the way in to the people who run the stand and to
+    /// nobody else. Granted only from the server's command line (`admin.rs`);
+    /// the page itself still asks the server, so the flag opens no door.
+    admin: bool,
 }
 
 /// The weekly letter as an account sees it.
@@ -293,6 +298,9 @@ async fn create_account(pool: &PgPool, email: &str, hash: &str, secure: bool) ->
         email_confirmed: false,
         born: None,
         letter: None,
+        // Only the command line makes an admin, and never of an account
+        // still being created.
+        admin: false,
     };
     Ok(Some((me, auth::set_cookie(&session, secure), confirmation)))
 }
@@ -437,14 +445,15 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
     // Dropped by the query rather than by a second one: the profile itself
     // must come back either way, and a WHERE clause on the layout would hide
     // the whole account behind a camera it no longer needs.
-    let Some((id, email, mode, canon_edition, home_port, halo_shape, halo_colour, x, y, scale, confirmed, born, letter)) = sqlx::query_as::<_, MeRow>(
+    let Some((id, email, mode, canon_edition, home_port, halo_shape, halo_colour, x, y, scale, confirmed, born, letter, admin)) = sqlx::query_as::<_, MeRow>(
         "SELECT u.id, u.email, p.mode, p.canon_edition, p.home_port, p.halo_shape, p.halo_colour,
                     CASE WHEN current.keep THEN p.camera_x END,
                     CASE WHEN current.keep THEN p.camera_y END,
                     CASE WHEN current.keep THEN p.camera_scale END,
                     u.email_confirmed_at IS NOT NULL,
                     p.born,
-                    w.language
+                    w.language,
+                    u.admin
              FROM app_user u
              JOIN user_profile p ON p.user_id = u.id
              LEFT JOIN weekly_letter w ON w.user_id = u.id
@@ -485,6 +494,7 @@ async fn load_me(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<Me>> {
         email_confirmed: confirmed,
         born,
         letter: letter.map(|language| Letter { language }),
+        admin,
     }))
 }
 
@@ -502,6 +512,7 @@ type MeRow = (
     bool,
     Option<i16>,
     Option<String>,
+    bool,
 );
 
 /// Saves what the client asks to be remembered.
@@ -888,14 +899,14 @@ fn current_year() -> i16 {
 }
 
 async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde_json::Value>> {
-    let account = sqlx::query_as::<_, (i32, String, Option<OffsetDateTime>, OffsetDateTime)>(
-        "SELECT id, email, email_confirmed_at, created_at FROM app_user WHERE id = $1",
+    let account = sqlx::query_as::<_, (i32, String, Option<OffsetDateTime>, OffsetDateTime, bool)>(
+        "SELECT id, email, email_confirmed_at, created_at, admin FROM app_user WHERE id = $1",
     )
     .bind(user_id)
     .fetch_optional(pool)
     .await?;
 
-    let Some((id, email, confirmed_at, created_at)) = account else {
+    let Some((id, email, confirmed_at, created_at, admin)) = account else {
         return Ok(None);
     };
 
@@ -948,6 +959,7 @@ async fn gather_export(pool: &PgPool, user_id: i32) -> sqlx::Result<Option<serde
             "email": email,
             "email_confirmed_at": confirmed_at.map(stamp),
             "created_at": stamp(created_at),
+            "admin": admin,
         },
         "profile": profile.map(|(mode, canon_edition, home_port, halo_shape, halo_colour, x, y, scale, frame, born)| serde_json::json!({
             "mode": mode,
@@ -1291,6 +1303,75 @@ mod tests {
             refusal_of(refused).await,
             ("credentials_wrong".to_string(), "that address and password do not match an account".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn the_profile_says_whether_the_account_runs_the_stand() {
+        // What the account panel's way in to the admin page is shown by. Read
+        // from the column the command line writes, so granting and revoking
+        // show up on the next `/api/me` without anything else to keep in step.
+        let _ = dotenvy::dotenv();
+        let Ok(url) = std::env::var("LYRID_TEST_DATABASE_URL") else {
+            eprintln!("LYRID_TEST_DATABASE_URL is not set; skipping whether the profile names an admin");
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("the test database is reachable");
+        sqlx::migrate!().run(&pool).await.expect("migrations apply");
+
+        // Committed, because the handler reads through the pool, under an
+        // address nobody else has; deleted at the end with its session and
+        // profile.
+        let email = format!("me-admin-{:016x}@lyrid.test", rand::random::<u64>());
+        let token = format!("me-admin-test-{:016x}", rand::random::<u64>());
+        let user: i32 = sqlx::query_scalar("INSERT INTO app_user (email, password_hash) VALUES ($1, 'x') RETURNING id")
+            .bind(&email)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_profile (user_id) VALUES ($1)")
+            .bind(user)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO user_session (token, user_id, expires_at) VALUES ($1, $2, now() + interval '1 hour')")
+            .bind(&token)
+            .bind(user)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let ask = || async {
+            let app = routes().with_state(AppState {
+                pool: pool.clone(),
+                secure_cookie: false,
+                public_url: "http://localhost:8080".to_string(),
+                mailer: crate::mail::Mailer::Log,
+                dial: crate::api::listening::Dial::default(),
+                listenbrainz: crate::scrobbling::Client::new("http://127.0.0.1:1"),
+            });
+            let request = Request::get("/api/me").header(header::COOKIE, format!("{}={token}", auth::COOKIE));
+            let response = app.oneshot(request.body(Body::empty()).unwrap()).await.unwrap();
+            let status = response.status();
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            (status, serde_json::from_slice::<serde_json::Value>(&body).unwrap_or(serde_json::Value::Null))
+        };
+
+        let before = ask().await;
+        sqlx::query("UPDATE app_user SET admin = true WHERE id = $1")
+            .bind(user)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let after = ask().await;
+        sqlx::query("DELETE FROM app_user WHERE id = $1").bind(user).execute(&pool).await.unwrap();
+
+        assert_eq!(before.0, StatusCode::OK, "{}", before.1);
+        assert_eq!(before.1["admin"], false, "an account is not an admin until the command line says so");
+        assert_eq!(after.1["admin"], true, "a grant shows on the next read of the profile");
     }
 
     #[tokio::test]

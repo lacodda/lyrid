@@ -57,4 +57,4 @@ docker compose -f docker-compose.prod.yml exec server lyrid admin grant someone@
 docker compose -f docker-compose.prod.yml exec server lyrid admin revoke someone@example.com
 ```
 
-The account must already exist. Anyone else opening `/admin` is told to sign in, or that the account does not run this stand.
+The account must already exist. Once it is an admin, the account panel on the sky shows it a way in, **this stand**, beside the charter's link; nobody else sees one. The way in is only a link — `/api/me` says `admin`, and the page still asks the server — so anyone else opening `/admin` by its address is told to sign in, or that the account does not run this stand.

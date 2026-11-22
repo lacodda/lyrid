@@ -50,6 +50,12 @@ export interface Me {
   born: number | null
   /** The weekly letter, if asked for, and the language it is written in. */
   letter: { language: string } | null
+  /**
+   * Whether this account may read the stand's admin page: what shows it the
+   * way in, and nobody else. The page asks the server again, so the flag opens
+   * no door by itself.
+   */
+  admin: boolean
 }
 
 /** What may be saved back. Deliberately without a mode. */

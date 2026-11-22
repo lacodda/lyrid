@@ -29,9 +29,11 @@ interface Props {
   onSignedIn: (me: Me) => void
   onSignedOut: () => void
   onCharter: () => void
+  /** Opens the stand's admin page; offered only to an account that runs it. */
+  onStand: () => void
 }
 
-export function AccountPanel({ me, onSignedIn, onSignedOut, onCharter }: Props) {
+export function AccountPanel({ me, onSignedIn, onSignedOut, onCharter, onStand }: Props) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
 
@@ -50,7 +52,14 @@ export function AccountPanel({ me, onSignedIn, onSignedOut, onCharter }: Props) 
           </Button>
         </div>
         {!me.email_confirmed && <Unconfirmed />}
-        <CharterLink onCharter={onCharter} />
+        <div className="flex items-center gap-3">
+          <CharterLink onCharter={onCharter} />
+          {me.admin && (
+            <button type="button" className={QUIET} onClick={onStand}>
+              {t('account.standLink')}
+            </button>
+          )}
+        </div>
       </div>
     )
   }
