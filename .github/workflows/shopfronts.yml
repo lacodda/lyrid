@@ -24,7 +24,7 @@ jobs:
       # its own one morning with rules nobody here has read yet.
       - name: Install lyrn
         run: |
-          curl -fsSL https://raw.githubusercontent.com/lacodda/lyrn/v2.20.0/tools/install.sh | LYRN_VERSION=v2.20.0 sh
+          curl -fsSL https://raw.githubusercontent.com/lacodda/lyrn/v2.22.1/tools/install.sh | LYRN_VERSION=v2.22.1 sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Check the shopfronts
         run: lyrn check
