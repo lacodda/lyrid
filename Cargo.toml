@@ -21,7 +21,7 @@ bzip2 = "0.6.1"
 # The byte buffers Parquet's reader is handed: already in the tree through
 # axum, named here because the feed implements Parquet's reader over them.
 bytes = "1.12"
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.9", features = ["derive"] }
 # Last.fm exports arrive as CSV with quoted fields that may hold commas and
 # line breaks: a reader that gets that right is a library, not twenty lines.
 csv = "1.4"
@@ -30,16 +30,16 @@ flate2 = "1.1"
 # rustls with ring and the platform trust store, to match what sqlx already
 # pulls in: a second crypto provider in one binary is two implementations of
 # the same thing, and rustls refuses to guess which one to install.
-lettre = { version = "0.11.23", default-features = false, features = ["tokio1-rustls", "smtp-transport", "builder", "ring", "rustls-platform-verifier"] }
+lettre = { version = "0.11.24", default-features = false, features = ["tokio1-rustls", "smtp-transport", "builder", "ring", "rustls-platform-verifier"] }
 # Already in the tree through axum and csv; named here because the Wikidata
 # pass looks for a key in every line of a terabyte and a half before parsing.
 memchr = "2.8"
 # ListenBrainz publishes its daily listening as Parquet, already matched to
 # artists. Without arrow: rows are read through the record API, and only the
 # columns lyrid counts are fetched.
-parquet = { version = "60.1.0", default-features = false, features = ["zstd"] }
+parquet = { version = "60.2.0", default-features = false, features = ["zstd"] }
 quick-xml = "0.42"
-rand = "0.10.3"
+rand = "0.10.4"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "migrate", "uuid", "time"] }
@@ -57,7 +57,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ureq = "3.5"
 # v5: a listen from a Last.fm file is identified by a UUID derived from its
 # names, so the same file uploaded twice is the same rows.
-uuid = { version = "1.29.2", features = ["serde", "v5"] }
+uuid = { version = "1.29.3", features = ["serde", "v5"] }
 zstd = "0.14.4"
 
 [dev-dependencies]
