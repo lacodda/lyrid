@@ -5,6 +5,7 @@ import { advance } from './flight'
 import { pickInFog, placeOpenNames, type Fog } from './fog'
 import { layerFor, placeLabels, type Label } from './labels'
 import { SkyRenderer, type Camera, type Halo, type Instruments, type Star } from './renderer'
+import { pinch, type Point } from './touch'
 import { fetchLevel, fetchSky, levelFor, neighbouringLevels, tileAction, type Sky as SkyMeta, type Tile } from './tiles'
 
 /** The whole sky at a glance: its extent and its brightest stars. */
@@ -358,33 +359,64 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture, instr
   }, [onState, onCapture])
 
   // ------------------------------------------------------------- controls
-  const dragging = useRef(false)
-  const last = useRef({ x: 0, y: 0 })
+  // Every finger or button that is down, by pointer id, in client pixels. One
+  // of them pans; two pinch -- the only way to zoom on a screen with no wheel.
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
   const moved = useRef(0)
 
   const onPointerDown = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
-    dragging.current = true
-    moved.current = 0
-    last.current = { x: event.clientX, y: event.clientY }
+    // A second finger makes the gesture a pinch, and a pinch is never a click.
+    moved.current = pointers.current.size === 0 ? 0 : Infinity
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
     event.currentTarget.setPointerCapture(event.pointerId)
   }, [])
 
   const onPointerMove = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!dragging.current) return
+    const was = pointers.current.get(event.pointerId)
+    if (!was) return
     const canvas = event.currentTarget
     const ratio = canvas.width / canvas.clientWidth
-    const dx = event.clientX - last.current.x
-    const dy = event.clientY - last.current.y
-    moved.current += Math.abs(dx) + Math.abs(dy)
-    camera.current.x -= (dx * ratio) / camera.current.scale
-    camera.current.y += (dy * ratio) / camera.current.scale
-    last.current = { x: event.clientX, y: event.clientY }
+    const now = { x: event.clientX, y: event.clientY }
+
+    if (pointers.current.size === 1) {
+      const dx = now.x - was.x
+      const dy = now.y - was.y
+      moved.current += Math.abs(dx) + Math.abs(dy)
+      camera.current.x -= (dx * ratio) / camera.current.scale
+      camera.current.y += (dy * ratio) / camera.current.scale
+      pointers.current.set(event.pointerId, now)
+      return
+    }
+
+    // The first two fingers down are the pinch; a third is ignored rather
+    // than given a meaning nobody would guess.
+    const [first, second] = [...pointers.current.keys()]
+    if (first === undefined || second === undefined || (event.pointerId !== first && event.pointerId !== second)) return
+    const rect = canvas.getBoundingClientRect()
+    const onCanvas = (at: { x: number; y: number }) => ({
+      x: (at.x - rect.left) * ratio - canvas.width / 2,
+      y: canvas.height / 2 - (at.y - rect.top) * ratio,
+    })
+    const pair = (): [Point, Point] => [
+      onCanvas(pointers.current.get(first) ?? now),
+      onCanvas(pointers.current.get(second) ?? now),
+    ]
+    const from = pair()
+    pointers.current.set(event.pointerId, now)
+    const sky = meta.current
+    if (!sky) return
+    camera.current = pinch(camera.current, from, pair(), leastScale(canvas.width, sky), MOST_SCALE)
+    // A hand on the sky outranks a flight still under way.
+    flight.current = null
   }, [])
 
   const onPointerUp = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
-      dragging.current = false
+      if (!pointers.current.delete(event.pointerId)) return
       event.currentTarget.releasePointerCapture(event.pointerId)
+      // One finger of a pinch lifted: the other carries on as a pan from where
+      // it is, and the gesture is still not a click.
+      if (pointers.current.size > 0) return
       // A drag is not a click. Without this every pan would also select
       // whatever star happened to be under the finger when it stopped.
       if (moved.current > 4 || !onPick) return
@@ -408,14 +440,21 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture, instr
     [onPick],
   )
 
+  // The browser took the gesture back -- a call came in, the page lost the
+  // touch. The finger is gone without having been lifted, and nothing was
+  // picked.
+  const onPointerCancel = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    pointers.current.delete(event.pointerId)
+    moved.current = Infinity
+  }, [])
+
   const onWheel = useCallback((event: React.WheelEvent<HTMLCanvasElement>) => {
     const sky = meta.current
     if (!sky) return
     const canvas = event.currentTarget
-    const span = sky.max_x - sky.min_x
     const next = camera.current.scale * Math.exp(-event.deltaY * 0.001)
     // Bounded so the sky cannot be lost off-screen or zoomed past its detail.
-    camera.current.scale = Math.max(canvas.width / span / 4, Math.min(next, 400))
+    camera.current.scale = Math.max(leastScale(canvas.width, sky), Math.min(next, MOST_SCALE))
   }, [])
 
   return (
@@ -432,6 +471,7 @@ export function Sky({ onState, onPick, target, initial, marked, onCapture, instr
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
         onWheel={onWheel}
       />
       {/* Hidden from assistive technology: the names are the same words the
@@ -552,6 +592,14 @@ function drawRegionNames(
     context.fillStyle = layer === 'genre' ? 'rgba(214, 222, 240, 0.72)' : 'rgba(190, 204, 232, 0.8)'
     context.fillText(text(label), x, y)
   }
+}
+
+/** The closest the camera goes: past this there is no more detail to show. */
+const MOST_SCALE = 400
+
+/** The furthest: the whole sky a quarter of the canvas wide. */
+function leastScale(width: number, sky: SkyMeta): number {
+  return width / (sky.max_x - sky.min_x) / 4
 }
 
 /** The closest star within `radius` world units, or null. */
