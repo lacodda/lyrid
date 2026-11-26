@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.26.0] - 2026-11-26
+
+### Features
+- Zoom the sky with two fingers
+- Arrange the sky for a phone's width
+
 ## [0.25.0] - 2026-11-22
 
 ### Bug Fixes
