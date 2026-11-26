@@ -60,6 +60,25 @@ as a PNG at the resolution it is drawn. It is captured inside the render loop �
 a WebGL colour buffer is undefined the moment a frame ends, so a screenshot
 taken from outside would save an empty image.
 
+## On a phone
+
+At a phone's width the same sky is arranged for one column. One finger pans, two
+fingers zoom, a tap picks a star.
+
+- **The card is a sheet** that rises from the bottom edge. The sky above it stays
+  live — tap another star and the card becomes that star's — and the view moves
+  just enough to keep the picked star in sight above the sheet. Swipe the sheet
+  down, or press its close button, to put it away.
+- **The player is under the search box**, and a sheet never rises over it: the
+  video above, what you are reading below.
+- **Everything else is behind Menu**, the button in the bottom corner: the era
+  lens and the time machine, the compass, the nearest stars, the account, the
+  halo, sharing. It is a sheet too, so the sky is still in view while you move
+  the time machine.
+
+Why it is arranged this way:
+[ADR 0031](https://github.com/lacodda/lyrid/blob/main/docs/adr/0031-sheets-on-a-narrow-screen.md).
+
 ## The fog is yours
 
 The only per-user layer of the map is the fog of war: what you have and have not heard. It is a small coverage texture worked out in your browser from the stars you have opened, sampled by the star shader, so the map itself stays the same for everyone and nothing about light is stored anywhere.

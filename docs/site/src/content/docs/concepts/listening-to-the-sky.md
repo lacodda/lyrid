@@ -4,7 +4,8 @@ description: The one player, the radio of a nebula, and the signal of the day.
 ---
 
 The sky shows where music sits; listening is how you find out what it sounds
-like. Everything plays through **one player**, in the corner under the card, and
+like. Everything plays through **one player**, in the corner under the card (on a
+phone, under the search box), and
 keeps playing while you fly somewhere else — close the card, search for another
 star, open a third, and the music carries on.
 

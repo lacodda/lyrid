@@ -58,8 +58,8 @@ ground on the map.
 The compass draws the whole sky small with the view marked on it, and names the
 region the middle of the view is in — the style most of the stars there carry
 as their main one. It is also the keyboard's way of moving the sky: arrows pan,
-`+` and `-` zoom, Home shows everything. On a phone's width the compass and the
-instruments are hidden for now; the sky there needs a layout of its own.
+`+` and `-` zoom, Home shows everything. On a phone the compass and the
+instruments are in the menu — see [On a phone](/lyrid/concepts/the-sky/#on-a-phone).
 
 ## Routes
 

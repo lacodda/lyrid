@@ -48,6 +48,12 @@ interface Props {
   listener: boolean
   /** This person's fog, in the mode that has one. */
   fog: Fog | null
+  /**
+   * Whether the card is the content of a sheet rather than a panel of its
+   * own: on a narrow screen the sheet is the surface, and a panel inside it
+   * would be a frame in a frame.
+   */
+  sheet?: boolean
 }
 
 /**
@@ -63,7 +69,7 @@ interface Props {
  * of three million have no encyclopaedia article and no influence links, so an
  * empty section is the normal case, not a failure to render.
  */
-export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare, onListen, onFollow, onRadio, onDossier, sounding, listener, fog }: Props) {
+export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, pinned, onPin, onCompare, onListen, onFollow, onRadio, onDossier, sounding, listener, fog, sheet = false }: Props) {
   const { t } = useTranslation()
   const { resolved } = useLanguage()
   const [artist, setArtist] = useState<Artist | null>(null)
@@ -91,8 +97,8 @@ export function StarCard({ artistId, className, onClose, onOpen, onAddToRoute, p
   return (
     <aside
       className={cn(
-        panelVariants(),
-        'glass relative flex w-[min(22rem,calc(100vw-3rem))] flex-col gap-2 overflow-y-auto p-4',
+        'relative flex flex-col gap-2 overflow-y-auto p-4',
+        sheet ? 'min-h-0 w-full overscroll-contain pt-2' : [panelVariants(), 'glass w-[min(22rem,calc(100vw-3rem))]'],
         className
       )}
     >

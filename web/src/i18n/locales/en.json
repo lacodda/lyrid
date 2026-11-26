@@ -3,6 +3,11 @@
     "tagline": "a music universe",
     "status": "{{stars}} stars · level {{level}} · v{{version}}"
   },
+  "narrow": {
+    "menu": "Menu",
+    "card": "Star card",
+    "close": "close"
+  },
   "sky": {
     "label": "The canonical sky: artists as stars, laid out by who is listened to alongside whom. The list of nearest stars beside it is the way through this by keyboard.",
     "loading": "reading the sky…",

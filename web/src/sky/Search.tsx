@@ -67,7 +67,9 @@ export function Search({ onPick, onDossier }: Props) {
   // Above the column under it: the card opens there and, coming later in the
   // page, would otherwise paint over the results it is asked to replace.
   return (
-    <div className="absolute right-6 top-5 z-10 w-[min(22rem,calc(100vw-3rem))]">
+    // Beside the mark on a phone, from it to the edge; a column's width in the
+    // corner where there is room for a corner.
+    <div className="absolute left-16 right-4 top-4 z-10 md:left-auto md:right-6 md:top-5 md:w-[min(22rem,calc(100vw-3rem))]">
       <SearchField
         className="glass"
         value={term}

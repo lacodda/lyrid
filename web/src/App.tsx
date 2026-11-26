@@ -35,6 +35,8 @@ import { fitView, freeFrame, WHOLE, type Frame, type Member, type Placed } from 
 import { HaloPicker, HALO_COLOURS, HALO_DEFAULT } from '@/sky/HaloPicker'
 import { HALO_SHAPES, type HaloShape, type Instruments as InstrumentSettings } from '@/sky/renderer'
 import { Player } from '@/sky/Player'
+import { Sheet } from '@/sky/Sheet'
+import { aboveSheet, sheetHeight, useNarrow } from '@/sky/narrow'
 import { follows, localDay, newSeed, refill, sounding, stepRadio, type Listening } from '@/sky/listening'
 import { useRegion } from '@/sky/region'
 import { fetchArtist, fetchRadio, fetchSignal, fetchStars, type Hit, type Nebula, type Station } from '@/api'
@@ -71,6 +73,10 @@ const Dossier = lazy(() => import('@/sky/Dossier').then(module => ({ default: mo
  * someone else. See `location.ts` for why the two live in different halves of
  * the URL.
  *
+ * At a phone's width the same pieces are arranged another way -- the card and
+ * the left column become sheets that rise from the bottom edge, the player
+ * moves under the search box -- and `narrow.ts` says why (ADR 0031).
+ *
  * An account adds memory to all of that and takes nothing away: a visitor who
  * never signs in gets the same sky, with their marker remembered per browser
  * as it always was. That is the whole of the public preview — there is no
@@ -91,6 +97,36 @@ export function App() {
   const [picked, setPicked] = useState<Place | null>(null)
   const [target, setTarget] = useState<View | null>(null)
   const [me, setMe] = useState<Me | null>(null)
+
+  // ---------------------------------------------------------------- narrow
+  // Whether this is the narrow layout, and whether its menu sheet is up.
+  const narrow = useNarrow()
+  const [tools, setTools] = useState(false)
+  // The window's height and where the pieces under the search box end, both
+  // in CSS pixels: what a sheet's height is worked out from. Measured rather
+  // than known, because the player there is two heights and a route panel can
+  // join it.
+  const [room, setRoom] = useState({ height: 0, ceiling: 0 })
+
+  // What aiming a flight reads, for callbacks that must stay stable -- the
+  // sky's `onPick` among them, which would rebuild the canvas if it changed.
+  const sight = useRef<{ narrow: boolean; height: number; ceiling: number; state: SkyState | null }>({
+    narrow: false,
+    height: 0,
+    ceiling: 0,
+    state: null,
+  })
+  useEffect(() => {
+    sight.current = { narrow, height: room.height, ceiling: room.ceiling, state }
+  }, [narrow, room, state])
+
+  // Where the camera goes to show a star: the star itself, or on a narrow
+  // screen the place that puts it above the sheet its card opens in.
+  const aim = useCallback((star: { x: number; y: number }, scale: number): View => {
+    const { narrow, height, ceiling, state } = sight.current
+    if (!narrow || !state) return { x: star.x, y: star.y, scale }
+    return aboveSheet(star, scale, state, height, ceiling)
+  }, [])
 
   // Read once, before anything renders: the opening view must reach the sky
   // on its first frame, not after a flight from somewhere else. A lazy
@@ -163,14 +199,19 @@ export function App() {
   const onPick = useCallback(
     (star: Star | null) => {
       setPicked(star)
-      if (star) {
-        count('card_opened')
-        reach(star.artistId)
-      }
+      if (!star) return
+      count('card_opened')
+      reach(star.artistId)
+      setTools(false)
       // A star picked on the map is already on screen; flying to it would yank
-      // the view out from under the click.
+      // the view out from under the click. Except on a narrow screen, where
+      // the card rises over the lower half of the sky and may well cover the
+      // star it is about: there the view moves just enough to keep it in
+      // sight, at the distance it was picked from.
+      const { narrow, state } = sight.current
+      if (narrow && state) setTarget(aim(star, state.view.scale))
     },
-    [reach]
+    [reach, aim]
   )
 
   // A star chosen by name or arrived at by link has to be found first.
@@ -178,10 +219,11 @@ export function App() {
     (star: Place) => {
       setPicked(star)
       count('card_opened')
-      setTarget({ x: star.x, y: star.y, scale: 8 })
+      setTools(false)
+      setTarget(aim(star, 8))
       reach(star.artistId)
     },
-    [reach]
+    [reach, aim]
   )
 
   const goToStation = useCallback((station: Station) => goTo({ artistId: station.id, x: station.x, y: station.y }), [goTo])
@@ -346,6 +388,13 @@ export function App() {
   const region = useRegion(state?.visible ?? null)
   const playing = sounding(listening)
 
+  // The last star picked, kept after its card is closed: the sheet a card
+  // lives in on a narrow screen slides away with the card still in it.
+  // Adjusted while rendering, which is how React asks for state that follows
+  // a prop to be kept.
+  const [shownCard, setShownCard] = useState<Place | null>(null)
+  if (picked && picked !== shownCard) setShownCard(picked)
+
   // ---------------------------------------------------------- instruments
   const [instruments, setInstruments] = useState<InstrumentSettings>({ lens: false, until: null })
 
@@ -447,14 +496,14 @@ export function App() {
         setPicked({ artistId, x: at?.x ?? 0, y: at?.y ?? 0 })
         // A fragment in the link wins: it says where the sender was looking,
         // which may be a wide view holding this star among others.
-        if (!view && at) setTarget({ x: at.x, y: at.y, scale: 8 })
+        if (!view && at) setTarget(aim(at, 8))
       })
       .catch(() => {
         // A link to a star that is not there opens the sky rather than an
         // error: the sky is still worth looking at.
       })
     return () => abort.abort()
-  }, [opened])
+  }, [opened, aim])
 
   // How the marked star is drawn. Without an account this is remembered per
   // browser, as it always was; with one it follows the person to their next
@@ -703,9 +752,38 @@ export function App() {
   const leftRef = useRef<HTMLDivElement>(null)
   const dockRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLElement>(null)
+  const columnRef = useRef<HTMLDivElement>(null)
+
+  // The narrow layout's measurements, kept as the window turns and as the
+  // player under the search box starts and stops. `page` is here because a
+  // standalone page takes the sky's elements away and closing it brings new
+  // ones.
+  useEffect(() => {
+    const main = mainRef.current
+    const column = columnRef.current
+    if (!narrow || !main || !column) return
+    const measure = () => {
+      const frame = main.getBoundingClientRect()
+      const next = { height: Math.round(frame.height), ceiling: Math.round(column.getBoundingClientRect().bottom - frame.top) }
+      setRoom(current => (current.height === next.height && current.ceiling === next.ceiling ? current : next))
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(main)
+    observer.observe(column)
+    measure()
+    return () => observer.disconnect()
+  }, [narrow, page])
+
   const frame = useCallback((): Frame => {
     const main = mainRef.current?.getBoundingClientRect()
     if (!main) return WHOLE
+    if (sight.current.narrow) {
+      // Under the pieces at the top, with room for the panel that names what
+      // is marked to join them, and above the menu button in the corner.
+      const top = columnRef.current ? columnRef.current.getBoundingClientRect().bottom - main.top + GATHERING_ROW + EDGE : 0
+      const bottom = leftRef.current ? main.bottom - leftRef.current.getBoundingClientRect().top + EDGE : 0
+      return freeFrame(main.width, main.height, { left: EDGE, right: EDGE, top, bottom })
+    }
     const left = leftRef.current ? leftRef.current.getBoundingClientRect().right - main.left + EDGE : 0
     const top = headerRef.current ? headerRef.current.getBoundingClientRect().bottom - main.top + EDGE : 0
     const bottom = dockRef.current ? main.bottom - dockRef.current.getBoundingClientRect().top + EDGE : 0
@@ -754,7 +832,7 @@ export function App() {
       setYourSky(false)
       goTo({ artistId: star.id, x: star.x, y: star.y })
     },
-    [goTo]
+    [goTo, setYourSky]
   )
 
   const showYouth = useCallback(
@@ -766,7 +844,7 @@ export function App() {
         null
       )
     },
-    [gather, t]
+    [gather, t, setYourSky]
   )
 
   // One count for the visit, not one per render: a mechanic opened twice in a
@@ -866,6 +944,146 @@ export function App() {
     return <AdminPage onClose={leavePage} />
   }
 
+  // The card, on whichever surface this layout gives it.
+  const card = (place: Place, sheet: boolean) => (
+    // Keyed by the star: picking another one mounts a fresh card rather than
+    // leaving the previous artist on screen while the new one loads.
+    <StarCard
+      key={place.artistId}
+      className={sheet ? undefined : 'mb-auto min-h-0'}
+      sheet={sheet}
+      artistId={place.artistId}
+      onClose={() => setPicked(null)}
+      onOpen={openById}
+      onAddToRoute={side => {
+        if (route.length === 0) count('route_opened')
+        setRoute(current => addStop(current, side.id))
+      }}
+      pinned={pinned}
+      onPin={setPinned}
+      onCompare={side => {
+        if (!pinned) return
+        count('stars_compared')
+        setComparing([pinned, side])
+      }}
+      onListen={playChannel}
+      onFollow={onFollow}
+      onRadio={startRadio}
+      onDossier={openDossier}
+      sounding={playing?.id ?? null}
+      listener={scrobbles !== null && (scrobbles.link !== null || scrobbles.listens > 0)}
+      fog={fog}
+    />
+  )
+
+  const compass = overview && state && (
+    <Compass
+      overview={overview}
+      view={state.view}
+      visible={state.visible}
+      region={region}
+      sounding={playing}
+      uncharted={dark}
+      fog={fog}
+      onNavigate={setTarget}
+    />
+  )
+
+  // What the expedition asks next. Calls to act rather than tools, so on a
+  // narrow screen they stay on the sky when the rest of the column goes
+  // behind the menu button.
+  const prompts = (
+    <>
+      {fog && skyLoaded && personal.opened.length === 0 && (
+        <div className={cn(panelVariants(), 'glass flex w-56 shrink-0 flex-col gap-2 p-2')}>
+          <p className="m-0 text-xs leading-relaxed text-text">{t('fog.hint')}</p>
+          {asksForHome(me) && (
+            <Button size="sm" variant="primary" className="self-start" onClick={() => setExpeditionLater(false)}>
+              {t('expedition.begin')}
+            </Button>
+          )}
+        </div>
+      )}
+      {/* The contract in hand: the expedition's way forward, above the list
+          it points into. */}
+      {fog && contract && (
+        <ContractPanel
+          contract={contract}
+          echoes={echoesOf(personal, contract.star.id)}
+          onGo={goTo}
+          onClose={() => setPutAway(current => new Set([...current, contract.id]))}
+        />
+      )}
+    </>
+  )
+
+  const progress = me?.mode && (
+    <p className="m-0 font-mono text-2xs tracking-wide text-accent">
+      {me.mode === 'explore' ? t('fog.chip', { count: personal.opened.length }) : t('fog.creative')}
+    </p>
+  )
+
+  // The left column: the observer's instruments, the nearest stars, the
+  // account and what goes with it. A column over the sky on a wide window, the
+  // content of the menu sheet on a narrow one -- the same pieces either way.
+  const stack = state && (
+    <>
+      {/* The second piece that yields, after the nearby list: with both
+          instruments open on a short window there is not room for everything,
+          and the two share the squeeze by scrolling inside themselves instead
+          of one of them vanishing and the column running off the top. In the
+          sheet nothing needs to yield: the sheet scrolls. */}
+      <Instruments className={narrow ? 'w-full shrink-0' : 'mb-auto min-h-0 overflow-y-auto'} value={instruments} onChange={setInstruments} />
+      {/* The small sky is dragged on, and a drag downward there is a flight
+          south, not the sheet being put away. */}
+      {narrow && compass && <div data-base-ui-swipe-ignore>{compass}</div>}
+      {!narrow && prompts}
+      {/* The keyboard's way into the sky, and the one piece here that is not
+          optional: without it the canvas has no reachable content at all. It
+          is also the only piece that can usefully be shorter, so it is the one
+          that shrinks -- `min-h-0` because a flex child will not shrink below
+          its content otherwise. */}
+      <NearbyStars className={narrow ? 'w-full shrink-0' : 'min-h-0'} visible={state.visible} onPick={goTo} fog={fog} />
+      <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} onCharter={openCharter} onStand={openStand} />
+      {me && (
+        <ListeningPanel
+          className="shrink-0"
+          listening={scrobbles}
+          onChange={setScrobbles}
+          onShowOnSky={showHeard}
+          onOpen={openById}
+          onHome={flyHome}
+          onYourSky={() => setYourSky(true)}
+        />
+      )}
+      <HaloPicker shape={shape} colour={colour} onShape={chooseShape} onColour={chooseColour} />
+      <Share capture={captureRef} artistId={picked?.artistId ?? null} />
+      <div className="flex items-center gap-2">
+        <p className="pointer-events-none m-0 font-mono text-xs text-dim">
+          {t('app.status', {
+            stars: state.stars.toLocaleString(resolved),
+            level: state.level,
+            version: __APP_VERSION__,
+          })}
+        </p>
+        {/* Which edition of the canon this sky is, and the way into what
+            changed in it -- the edition beside the version, because both
+            answer "which one am I looking at". */}
+        <Button
+          variant="link"
+          className="font-mono text-xs"
+          onClick={() => {
+            count('changes_opened')
+            setChangesOpen(true)
+          }}
+        >
+          {changes?.edition ? t('changes.open', { number: changes.edition.number }) : t('changes.openUnsealed')}
+        </Button>
+        <LanguagePicker />
+      </div>
+    </>
+  )
+
   return (
     <main ref={mainRef} className="relative h-full overflow-hidden">
       {me && me.mode === null && !modeLater && <ModeChoice overview={overview} onChosen={setMe} onLater={() => setModeLater(true)} />}
@@ -886,16 +1104,15 @@ export function App() {
         onOverview={onOverview}
       />
 
-      <header ref={headerRef} className="pointer-events-none absolute left-6 top-5 flex items-center gap-3">
+      <header ref={headerRef} className="pointer-events-none absolute left-4 top-4 flex items-center gap-3 md:left-6 md:top-5">
         <img className="size-9" src="/mark.svg" alt="" />
-        <div>
+        {/* The mark alone at a phone's width, where the search box needs the
+            rest of the line: the name is still read out, and the count of
+            opened stars is at the head of the menu sheet. */}
+        <div className="max-md:sr-only">
           <h1 className="m-0 text-lg font-semibold tracking-wide text-text">lyrid</h1>
           <p className="m-0 text-xs text-dim">{t('app.tagline')}</p>
-          {me?.mode && (
-            <p className="m-0 mt-0.5 font-mono text-2xs tracking-wide text-accent">
-              {me.mode === 'explore' ? t('fog.chip', { count: personal.opened.length }) : t('fog.creative')}
-            </p>
-          )}
+          {progress && <div className="mt-0.5">{progress}</div>}
         </div>
       </header>
 
@@ -905,37 +1122,19 @@ export function App() {
           the compass. One column with a ceiling, for the reason the left stack
           has one -- pieces that grow must push each other rather than land on
           each other -- and the card is the piece that yields, scrolling inside
-          itself. */}
-      <div className="pointer-events-none absolute bottom-4 right-6 top-20 flex flex-col items-end justify-end gap-2 [&>*]:pointer-events-auto">
-        {/* Keyed by the star: picking another one mounts a fresh card rather
-            than leaving the previous artist on screen while the new one loads. */}
-        {picked && (
-          <StarCard
-            key={picked.artistId}
-            className="mb-auto min-h-0"
-            artistId={picked.artistId}
-            onClose={() => setPicked(null)}
-            onOpen={openById}
-            onAddToRoute={side => {
-              if (route.length === 0) count('route_opened')
-              setRoute(current => addStop(current, side.id))
-            }}
-            pinned={pinned}
-            onPin={setPinned}
-            onCompare={side => {
-              if (!pinned) return
-              count('stars_compared')
-              setComparing([pinned, side])
-            }}
-            onListen={playChannel}
-            onFollow={onFollow}
-            onRadio={startRadio}
-            onDossier={openDossier}
-            sounding={playing?.id ?? null}
-            listener={scrobbles !== null && (scrobbles.link !== null || scrobbles.listens > 0)}
-            fog={fog}
-          />
-        )}
+          itself.
+
+          At a phone's width it is the same column, across the window and
+          hanging from the search box instead of standing on the bottom edge:
+          the player first, then what is marked and the route. The same
+          elements moved by classes rather than a second arrangement, so a
+          phone turned on its side does not get a new player -- which would
+          start its song again. */}
+      <div
+        ref={columnRef}
+        className="pointer-events-none absolute inset-x-4 top-15 flex flex-col items-end gap-2 md:inset-x-auto md:bottom-4 md:right-6 md:top-20 md:justify-end [&>*]:pointer-events-auto"
+      >
+        {picked && !narrow && card(picked, false)}
         {gathering && (
           <GatheringPanel
             className="shrink-0"
@@ -965,20 +1164,11 @@ export function App() {
             stacking them would leave the card a sliver; one above the other
             where the width is not there. The row hands pointer events back
             to its children only, so the gap above the shorter one is sky. */}
-        <div ref={dockRef} className="pointer-events-none! flex shrink-0 flex-col items-end gap-2 lg:flex-row lg:items-end [&>*]:pointer-events-auto">
-          {overview && state && (
-            <Compass
-              className="hidden md:flex"
-              overview={overview}
-              view={state.view}
-              visible={state.visible}
-              region={region}
-              sounding={playing}
-              uncharted={dark}
-              fog={fog}
-              onNavigate={setTarget}
-            />
-          )}
+        <div
+          ref={dockRef}
+          className="pointer-events-none! flex shrink-0 flex-col items-end gap-2 max-md:order-first max-md:w-full lg:flex-row lg:items-end [&>*]:pointer-events-auto"
+        >
+          {!narrow && compass}
           <Player
             listening={listening}
             here={dark ? null : (region?.radio ?? null)}
@@ -1052,7 +1242,7 @@ export function App() {
         </Suspense>
       )}
 
-      {state && (
+      {state && !narrow && (
         // One stack in the bottom-left, so nothing can land on top of
         // anything else as the pieces grow -- the defect v0.9.1 fixed, and
         // the reason the account panel joins the stack rather than claiming
@@ -1077,80 +1267,42 @@ export function App() {
         // the time machine opens it pushes rather than overlaps.
         <div
           ref={leftRef}
-          className="pointer-events-none absolute bottom-4 left-6 top-4 flex md:top-20 flex-col items-start justify-end gap-2 [&>*]:pointer-events-auto"
+          className="pointer-events-none absolute bottom-4 left-6 top-20 flex flex-col items-start justify-end gap-2 [&>*]:pointer-events-auto"
         >
-          {/* Not on a phone's width: there the card already covers the stack,
-              and two more panels would bury the sky. A narrow layout of its
-              own is a stage of its own. The second piece that yields, after
-              the nearby list: with both instruments open on a short window
-              there is not room for everything, and the two share the squeeze
-              by scrolling inside themselves instead of one of them vanishing
-              and the column running off the top. */}
-          <Instruments className="mb-auto hidden min-h-0 overflow-y-auto md:flex" value={instruments} onChange={setInstruments} />
-          {/* The keyboard's way into the sky, first in the stack because it is
-              the one piece here that is not optional: without it the canvas has
-              no reachable content at all. It is also the only piece that can
-              usefully be shorter, so it is the one that shrinks -- `min-h-0`
-              because a flex child will not shrink below its content otherwise. */}
-          {fog && skyLoaded && personal.opened.length === 0 && (
-            <div className={cn(panelVariants(), 'glass flex w-56 shrink-0 flex-col gap-2 p-2')}>
-              <p className="m-0 text-xs leading-relaxed text-text">{t('fog.hint')}</p>
-              {asksForHome(me) && (
-                <Button size="sm" variant="primary" className="self-start" onClick={() => setExpeditionLater(false)}>
-                  {t('expedition.begin')}
-                </Button>
-              )}
-            </div>
-          )}
-          {/* The contract in hand: the expedition's way forward, above the
-              list it points into. */}
-          {fog && contract && (
-            <ContractPanel
-              contract={contract}
-              echoes={echoesOf(personal, contract.star.id)}
-              onGo={goTo}
-              onClose={() => setPutAway(current => new Set([...current, contract.id]))}
-            />
-          )}
-          <NearbyStars className="min-h-0" visible={state.visible} onPick={goTo} fog={fog} />
-          <AccountPanel me={me} onSignedIn={adopt} onSignedOut={() => adopt(null)} onCharter={openCharter} onStand={openStand} />
-          {me && (
-            <ListeningPanel
-              className="shrink-0"
-              listening={scrobbles}
-              onChange={setScrobbles}
-              onShowOnSky={showHeard}
-              onOpen={openById}
-              onHome={flyHome}
-              onYourSky={() => setYourSky(true)}
-            />
-          )}
-          <HaloPicker shape={shape} colour={colour} onShape={chooseShape} onColour={chooseColour} />
-          <Share capture={captureRef} artistId={picked?.artistId ?? null} />
-          <div className="flex items-center gap-2">
-            <p className="pointer-events-none m-0 font-mono text-xs text-dim">
-              {t('app.status', {
-                stars: state.stars.toLocaleString(resolved),
-                level: state.level,
-                version: __APP_VERSION__,
-              })}
-            </p>
-            {/* Which edition of the canon this sky is, and the way into what
-                changed in it -- the edition beside the version, because both
-                answer "which one am I looking at". */}
-            <Button
-              variant="link"
-              className="font-mono text-xs"
-              onClick={() => {
-                count('changes_opened')
-                setChangesOpen(true)
-              }}
-            >
-              {changes?.edition ? t('changes.open', { number: changes.edition.number }) : t('changes.openUnsealed')}
-            </Button>
-            <LanguagePicker />
-          </div>
+          {stack}
         </div>
+      )}
+
+      {/* The narrow layout's own corner: what the expedition asks next, and
+          the one button the rest of the left column is behind. */}
+      {state && narrow && (
+        <div ref={leftRef} className="pointer-events-none absolute bottom-4 left-4 flex flex-col items-start gap-2 [&>*]:pointer-events-auto">
+          {prompts}
+          <Button className="glass" aria-expanded={tools} onClick={() => setTools(open => !open)}>
+            <span aria-hidden="true">☰</span>
+            {t('narrow.menu')}
+          </Button>
+        </div>
+      )}
+
+      {narrow && (
+        <>
+          {/* The card in a sheet. It shows the last star picked while it
+              slides away, rather than emptying the moment it is closed. */}
+          <Sheet open={picked !== null} onClose={() => setPicked(null)} label={t('narrow.card')} maxHeight={sheetHeight(room.height, room.ceiling)}>
+            {shownCard && card(shownCard, true)}
+          </Sheet>
+          <Sheet open={tools && picked === null} onClose={() => setTools(false)} label={t('narrow.menu')} maxHeight={sheetHeight(room.height, room.ceiling)}>
+            <div className="flex shrink-0 items-center gap-3 px-4 pt-1">
+              <h2 className="m-0 text-sm font-semibold text-text">{t('narrow.menu')}</h2>
+              <div className="min-w-0 flex-1">{progress}</div>
+              <Button variant="icon" size="icon-sm" onClick={() => setTools(false)} aria-label={t('narrow.close')}>
+                ×
+              </Button>
+            </div>
+            <div className="flex min-h-0 flex-col items-start gap-3 overflow-y-auto overscroll-contain p-4 pt-2">{stack}</div>
+          </Sheet>
+        </>
       )}
     </main>
   )
@@ -1161,6 +1313,9 @@ const EDGE = 24
 
 /** The width of the panel that names what the sky is marking: `w-64`. */
 const GATHERING_PANEL = 256
+
+/** The height it takes with the gap above it, where it joins a column: measured. */
+const GATHERING_ROW = 72
 
 /**
  * Stations in a row that may fail before a radio gives up on YouTube. About a

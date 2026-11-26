@@ -43,16 +43,17 @@ export function Player(props: Props) {
   const { t } = useTranslation()
   const { listening, here, note, tuning, onRadio, onSignal, onStop, className } = props
 
-  const panel = cn(panelVariants(), 'glass flex w-[min(22rem,calc(100vw-3rem))] flex-col gap-2 p-3', className)
+  // The window's width on a phone, where it sits under the search box and the
+  // sheets stop short of it (ADR 0031).
+  const panel = cn(panelVariants(), 'glass flex w-[min(22rem,calc(100vw-3rem))] flex-col gap-2 p-3 max-md:w-full max-md:p-2', className)
 
   if (!listening) {
     return (
-      // Idle, it is an offer, and on a phone's width offers are what the
-      // instruments and the compass already make way for: the narrow layout
-      // is a stage of its own. Playing, it shows everywhere -- a card's play
-      // button starts it, and music with no way to stop it would be worse.
-      <section className={cn(panel, 'hidden md:flex')} aria-labelledby="listen-heading">
-        <SectionLabel id="listen-heading" className="text-dim">
+      <section className={panel} aria-labelledby="listen-heading">
+        {/* Idle, it is two buttons that say what they are, and on a phone the
+            heading over them would cost the sky a line for nothing: read out,
+            not drawn. */}
+        <SectionLabel id="listen-heading" className="text-dim max-md:sr-only">
           {t('listen.heading')}
         </SectionLabel>
         <div className="flex flex-wrap gap-1.5">
